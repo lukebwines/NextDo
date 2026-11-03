@@ -1,6 +1,6 @@
 # NextDo — Home Assistant add-on
 
-**Versione di test: 0.1.5-test.** Dashboard rifinita sulla prima proposta grafica approvata: menu con etichette, quattro contatori cliccabili, aggiunta rapida, scadenze compatte, settimana e riepilogo etichette. Aggiunto il ripristino di archivi ZIP esportati da NextDo.
+**Versione di test: 0.1.6-test.** Dashboard rifinita sulla prima proposta grafica approvata: menu con etichette, quattro contatori cliccabili, aggiunta rapida, scadenze compatte, settimana e riepilogo etichette. Aggiunto il ripristino di archivi ZIP esportati da NextDo.
 
 Repository pubblico contenente soltanto codice sorgente. **Nessun codice o nome reale di CdS, database, nota, account o credenziale viene pubblicato.** I dati dell'installazione restano in `/data` sul dispositivo.
 
@@ -45,3 +45,17 @@ Usare il pulsante **Aggiorna** nell'app già installata dal repository GitHub, s
 La pagina HTML viene ora servita con `Cache-Control: no-store` e gli URL CSS/JavaScript includono un identificativo calcolato sul contenuto dei file. Questo risolve l'anomalia in cui Home Assistant mostrava la nuova versione dell'add-on ma la precedente dashboard nel browser, senza il pulsante **Importa backup NextDo**. Sono disponibili controlli automatici sulle risorse.
 
 Dopo aver aggiornato NextDo da Home Assistant, riaprire l'interfaccia e, al primo accesso dopo questo rilascio, forzare un refresh (`Ctrl+F5`) oppure usare una finestra privata. Il database non viene cancellato o migrato da questa modifica. In caso di persistenza del problema, verificare il Registro add-on e la versione restituita dall'endpoint `api/build` dopo l'accesso (solo utente autenticato).
+
+## Funzioni aggiunte in NextDo 0.1.6-test
+
+- **Graffetta in Aggiunta rapida:** seleziona subito uno o più documenti e apre la nuova attività con gli allegati già in attesa.
+- **Calendario in Aggiunta rapida:** apre la scheda attività e attiva il campo data/ora.
+- **Etichetta in Aggiunta rapida:** apre la scheda attività e mette a fuoco il campo etichette.
+- **Trascina e rilascia:** trascina PDF, immagini o documenti nella scheda di una nuova attività, di una nota o dell'elemento esistente. Si possono trascinare file anche nel riquadro Aggiunta rapida della dashboard.
+- **Caricamento in fase di creazione:** i file sono caricati solo dopo aver salvato l'attività, così non vengono lasciati allegati senza proprietario.
+- Formati consentiti: PDF, PNG, JPG, JPEG, WEBP, GIF, BMP, TXT, CSV, DOC, DOCX, XLS, XLSX, PPT, PPTX, RTF, ODT, ODS e ODP. Il limite di upload è 15 MB per file e l'interfaccia consente fino a 10 allegati per singolo salvataggio.
+- Se il salvataggio dell'attività riesce ma un caricamento fallisce, la scheda rimane aperta e permette di riprovare soltanto i file non caricati, senza creare un'attività duplicata.
+- Per gli allegati già presenti sono disponibili download e rimozione.
+- Le richieste di upload continuano a usare l'autenticazione e la protezione CSRF esistenti, senza pubblicare file nel repository.
+
+Questa release modifica interfaccia e lista di estensioni ammesse; non cambia lo schema SQLite né le credenziali. Conservare un backup Home Assistant di NextDo prima dell'aggiornamento. Test visivi e deploy ARM64 devono essere verificati sull'installazione effettiva.
