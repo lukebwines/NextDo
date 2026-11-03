@@ -1,7 +1,7 @@
 name: NextDo
-version: "0.1.2-test"
+version: "0.1.3-test"
 slug: nextdo
-description: "Task, note e scadenze condivise; anagrafica CdS esclusivamente locale"
+description: "Tasks, note, scadenze, CdS locali e monitor"
 arch:
   - aarch64
 startup: application
