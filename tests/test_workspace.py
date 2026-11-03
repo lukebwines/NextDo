@@ -56,6 +56,11 @@ def test_cds_assignments_private_notes_and_common_completion(tmp_path):
  private=c.post('/api/tasks',headers=h,json={'title':'Private note','scope':'personal','kind':'note'})
  assert private.status_code==200
  private_id=private.json()['id']
+ # A user cannot turn an assigned course activity into a private item.
+ original=c.get('/api/tasks/'+str(aid)).json()
+ changed={key:original[key] for key in ('title','description','kind','priority','status','due_at','assigned_to','group_id','completion_mode','display_enabled','recurrence','labels','reminders')}
+ changed['scope']='personal';changed['project_id']=None;changed['course_ids']=[]
+ assert c.put('/api/tasks/'+str(aid),headers=h,json=changed).status_code==403
  assert c.post(f'/api/tasks/{cid}/complete/{a}',headers=h).status_code==200
  assert c.post(f'/api/tasks/{cid}/complete/{b}',headers=h).status_code==403
  assert c.post(f'/api/tasks/{global_id}/toggle',headers=h).status_code==403
