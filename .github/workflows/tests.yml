@@ -12,4 +12,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r nextdo/requirements.txt pytest httpx
+      - run: python -m compileall -q nextdo/app
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check nextdo/static/app.js
       - run: PYTHONPATH=nextdo pytest -q tests
