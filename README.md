@@ -2,7 +2,7 @@
 
 NextDo è un'applicazione indipendente da ZEUS e INCA per scadenze, attività e Corsi di Studio, progettata per Home Assistant OS su Raspberry Pi 5 (ARM64).
 
-**Stato: prototipo di sviluppo. Non ancora pronto per installazione produttiva, accesso remoto Cloudflare o utilizzo con dati d'ufficio.**
+**Stato: v0.1.1-test, solo collaudo locale tramite Ingress Home Assistant. NON pronto per produzione, Cloudflare o dati d'ufficio.**
 
 ## Riservatezza dei CdS
 
@@ -39,3 +39,19 @@ Aprire `http://127.0.0.1:8095`. Per i test: `PYTHONPATH=nextdo pytest -q tests` 
 Gestione estesa degli utenti e dei gruppi dall'interfaccia, note libere strutturate, allegati, ricorrenze automatiche, notifiche, import CSV e backup/ripristino; gestione sicura dei token Display; revisione completa dell'autorizzazione alle modifiche; collaudo effettivo del build ARM64 e del funzionamento su Home Assistant OS; configurazione HTTPS / Cloudflare Tunnel e sicurezza.
 
 **Non aggiungere questo repository agli add-on di Home Assistant fino al completamento del collaudo.** Il file di configurazione dell'add-on è provvisorio, e la porta 8095 deve restare nell'ambiente di test.
+
+
+## Protezione v0.1.1-test
+
+- Ingress di Home Assistant abilitato, nessuna porta pubblicata sull'host.
+- Primo amministratore protetto da codice monouso generato nell'add-on e visibile nei suoi log di avvio; il codice NON è incluso in GitHub.
+- Se l'installazione non è stata configurata, leggere il codice nei log del container e inserirlo nella schermata iniziale di NextDo.
+- Il token di configurazione viene eliminato una volta creato il primo amministratore.
+- I dati CdS sono esclusivamente locali in `/data`.
+- Nessun Cloudflare Tunnel o accesso diretto per i colleghi deve essere configurato durante questa fase.
+
+### Importante: repository privato
+
+Home Assistant Supervisor non può normalmente clonare un repository GitHub privato utilizzando la semplice URL del repository. Per il primo collaudo utilizzare i **local add-ons**: trasferire la cartella `nextdo/` nell'area locale add-on del dispositivo tramite un metodo amministrativo autorizzato, quindi aggiornare il catalogo delle applicazioni. Non inserire credenziali o token GitHub in URL dell'add-on.
+
+Prima dell'installazione sul Raspberry sono ancora richiesti la verifica dei test CI e un collaudo della build ARM64. Non avviare su rete esterna e non inserire dati reali fino al completamento del collaudo.
