@@ -226,3 +226,58 @@ def display_data(token:str):
   if not r:fail(401,"Monitor non autorizzato")
   rows=c.execute("SELECT title,due_at,priority,status FROM tasks WHERE published=1 AND group_id=? AND status!='done' ORDER BY due_at",(r["group_id"],)).fetchall()
  return {"tasks":[dict(x) for x in rows]}
+
+
+class NewUser(Credentials):
+ role:str="user"
+
+class Member(BaseModel):
+ user_id:int
+
+class ExtractText(BaseModel):
+ text:str=Field(min_length=1,max_length=50000)
+
+@app.post("/api/users")
+def new_user(b:NewUser,req:Request):
+ admin(req);csrf(req)
+ if b.role not in ("admin","user"):fail(400,"Ruolo non valido")
+ with connect() as c:
+  if c.execute("SELECT 1 FROM users WHERE username=?",(b.username,)).fetchone():fail(409,"Utente già presente")
+  cur=c.execute("INSERT INTO users(username,password,role) VALUES(?,?,?)",(b.username,hasher.hash(b.password),b.role))
+ return {"id":cur.lastrowid}
+
+@app.get("/api/users")
+def list_users(req:Request):
+ admin(req)
+ with connect() as c:return [dict(r) for r in c.execute("SELECT id,username,role FROM users ORDER BY username")]
+
+@app.post("/api/groups/{gid}/members")
+def add_member(gid:int,b:Member,req:Request):
+ admin(req);csrf(req)
+ with connect() as c:
+  if not c.execute("SELECT 1 FROM groups WHERE id=?",(gid,)).fetchone():fail(404,"Gruppo inesistente")
+  if not c.execute("SELECT 1 FROM users WHERE id=?",(b.user_id,)).fetchone():fail(404,"Utente inesistente")
+  c.execute("INSERT OR IGNORE INTO membership(group_id,user_id) VALUES(?,?)",(gid,b.user_id))
+ return {"ok":True}
+
+@app.get("/api/groups/{gid}/members")
+def list_members(gid:int,req:Request):
+ admin(req)
+ with connect() as c:return [dict(r) for r in c.execute("SELECT u.id,u.username FROM users u JOIN membership m ON m.user_id=u.id WHERE m.group_id=? ORDER BY u.username",(gid,))]
+
+@app.post("/api/extract")
+def extract_text(b:ExtractText,req:Request):
+ identity(req);csrf(req)
+ import re
+ from datetime import date
+ s=b.text.strip()
+ found=set()
+ for m in re.finditer(r"\\b(\\d{1,2})[/.](\\d{1,2})[/.](\\d{4})\\b",s):
+  try:found.add(date(int(m.group(3)),int(m.group(2)),int(m.group(1))).isoformat())
+  except ValueError:pass
+ for m in re.finditer(r"\\b(20\\d{2})-(\\d{2})-(\\d{2})\\b",s):
+  try:found.add(date(int(m.group(1)),int(m.group(2)),int(m.group(3))).isoformat())
+  except ValueError:pass
+ low=s.lower()
+ priority="critical" if any(x in low for x in ("criticissima","priorità critica")) else "high" if any(x in low for x in ("urgente","priorità alta")) else "normal"
+ return {"title":s.splitlines()[0][:250],"detected_dates":sorted(found),"priority":priority,"needs_confirmation":True}
