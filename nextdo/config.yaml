@@ -1,5 +1,5 @@
 name: NextDo
-version: "0.1.0"
+version: "0.1.1-test"
 slug: nextdo
 description: "Task, note e scadenze condivise; anagrafica CdS esclusivamente locale"
 arch:
@@ -8,10 +8,14 @@ startup: application
 boot: auto
 init: false
 host_network: false
-ports:
-  8095/tcp: 8095
-ports_description:
-  8095/tcp: NextDo web (solo test locale)
+ingress: true
+ingress_port: 8095
+panel_icon: mdi:check-all
+panel_title: NextDo TEST
+panel_admin: true
+stage: experimental
+backup: cold
+ports: {}
 map: []
 options: {}
 schema: {}
