@@ -131,11 +131,27 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  const labels=input('labels','Es: AQ, delibere, urgente',(t?.labels||suggestion?.labels||[]).join(', '));
  const reminders=input('reminders','Es: 1440, 60 (minuti)',(t?.reminders||[]).join(', '));
  const display=el('input',{type:'checkbox',checked:t?.display_enabled});
- const courses=checkboxes('Corsi di Studio interessati (selezione multipla)',S.courses.filter(c=>c.active).map(c=>[c.id,c.code+' — '+c.name]),(t?.courses||[]).map(c=>c.id));
- form.append(field('Titolo *',title),field('Tipologia',type),el('div',{class:'full'},[field('Descrizione / nota',desc)]),field('Priorità',pr),field('Stato',st),field('Data e ora scadenza',due),field('Ricorrenza',rec),field('Gruppo di condivisione',grp),field('Responsabile',assigned),field('Completamento CdS',mode),field('Etichette (separate da virgola)',labels),field('Promemoria in minuti prima della scadenza',reminders),courses.outer,el('label',{class:'full'},[display,' Pubblica esplicitamente su NextDo Display (solo attività di gruppo)']));
+ const scope=select('scope',NextDoWorkspace.taskScopeOptions(),t?.scope||preferences.scope||'personal');
+ const project=select('project_id',[['','Seleziona un progetto'],...S.projects.map(p=>[String(p.id),p.title])],String(t?.project_id||preferences.project_id||''));
+ const courses=checkboxes('Corsi di Studio interessati (selezione multipla)',NextDoWorkspace.scopedCourses().filter(c=>c.active).map(c=>[c.id,c.code+' — '+c.name]),(t?.courses||[]).map(c=>c.id));
+ const courseWrap=el('div',{class:'full'},[courses.outer]);
+ const projectWrap=el('div',{class:'full'},[field('Progetto',project)]);
+ const groupWrap=el('div',{class:'full'},[field('Gruppo di condivisione',grp)]);
+ const displayWrap=el('label',{class:'full'},[display,' Pubblica esplicitamente su NextDo Display (solo attività di gruppo)']);
+ const modeWrap=el('div',{class:'full'},[field('Modalità di completamento',mode)]);
+ function updateScope(){
+  courseWrap.hidden=scope.value!=='cds';
+  projectWrap.hidden=scope.value!=='project';
+  groupWrap.hidden=scope.value!=='group';
+  displayWrap.hidden=scope.value!=='group';
+  modeWrap.hidden=!['cds','common','group'].includes(scope.value);
+ }
+ scope.addEventListener('change',updateScope);
+ form.append(field('Titolo *',title),field('Tipologia',type),el('div',{class:'full'},[field('Descrizione / nota',desc)]),field('Priorità',pr),field('Stato',st),field('Data e ora scadenza',due),field('Ricorrenza',rec),field('Ambito / visibilità',scope),courseWrap,projectWrap,groupWrap,field('Responsabile',assigned),modeWrap,field('Etichette (separate da virgola)',labels),field('Promemoria in minuti prima della scadenza',reminders),displayWrap);
+ updateScope();
  if(t?.completion_mode==='per_course'&&t.courses.length){
   const section=el('div',{class:'full card'},[node('h2','','Completamento per CdS')]);
-  for(const c of t.courses)section.append(el('div',{class:'rowtask'},[
+  for(const c of t.courses)if(S.me.role==='admin'||S.myCourseIds.includes(c.id))section.append(el('div',{class:'rowtask'},[
    node('div','taskmain',c.code+' — '+c.name),tag(c.done?'Completato':'Da completare',c.done?'low':'high'),
    btn(c.done?'Riapri':'Completa',async()=>{try{await api('/tasks/'+t.id+'/complete/'+c.id,{method:'POST'});back.remove();await refresh();taskForm(S.tasks.find(x=>x.id===t.id))}catch(e){msg(e.message,true)}},'small')
   ]));
@@ -175,10 +191,10 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
   const data={
    title:title.value,description:desc.value,kind:type.value,priority:pr.value,status:st.value,
    due_at:due.value?new Date(due.value).toISOString():null,recurrence:rec.value,
-   group_id:grp.value?Number(grp.value):null,assigned_to:assigned.value?Number(assigned.value):null,
-   completion_mode:mode.value,display_enabled:display.checked,
+   group_id:scope.value==='group'&&grp.value?Number(grp.value):null,assigned_to:scope.value==='personal'?null:assigned.value?Number(assigned.value):null,
+   completion_mode:modeWrap.hidden?'global':mode.value,display_enabled:scope.value==='group'&&display.checked,scope:scope.value,project_id:scope.value==='project'&&project.value?Number(project.value):null,
    labels:labels.value.split(',').map(x=>x.trim()).filter(Boolean),
-   course_ids:courses.selected(),reminders:mins
+   course_ids:scope.value==='cds'?courses.selected():[],reminders:mins
   };
   try{
    if(currentId){await api('/tasks/'+currentId,{method:'PUT',body:JSON.stringify(data)})}
