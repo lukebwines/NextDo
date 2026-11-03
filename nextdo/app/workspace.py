@@ -254,8 +254,6 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    project_participants(c,pid,p['owner_id'],b.manager_id or p['owner_id'],b)
    record(c,u['id'],'update','project',pid)
   return {'ok':True}
- class TaskStatus(BaseModel):
-  status:str
  @app.patch('/api/tasks/{tid}/status')
  def task_status(tid:int,b:TaskStatus,req:Request):
   u=user(req);csrf(req)
