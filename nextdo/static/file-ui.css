@@ -1,0 +1,26 @@
+/* NextDo 0.1.6: attachments and dedicated quick-actions */
+.quick-tool{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:39px}
+.quick-tool .ico{width:19px;height:19px}
+.quick-tool:focus-visible,.file-drop-zone:focus-visible{outline:2px solid #52aafc;outline-offset:2px}
+.file-upload-panel{display:flex;flex-direction:column;gap:11px;min-width:0}
+.file-upload-panel h3{margin:0;font-size:15px}
+.file-drop-zone{border:2px dashed #456b91;border-radius:12px;background:rgba(36,84,127,.15);padding:20px 15px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;text-align:center;color:#dcecff;cursor:pointer;min-height:142px;transition:border-color .12s,background-color .12s}
+.file-drop-zone strong{font-size:13px}.file-drop-zone span:not(.file-upload-glyph){color:#a9c1df;font-size:12px}
+.file-drop-zone .file-upload-glyph{font-size:28px}
+.file-drop-zone .btn{margin-top:6px;background:#24557f;color:#eef7ff}
+.file-drop-zone:hover,.file-drop-zone.file-dragover,.dash-quick.file-dragover,.modal.file-dragover{border-color:#40adff;background:rgba(45,129,211,.22)}
+.file-selected-list{display:flex;flex-direction:column;gap:5px;padding:0;margin:0;list-style:none}
+.file-selected-list li{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:8px;border:1px solid var(--stroke);font-size:12px}
+.file-selected-list li span{min-width:0;overflow-wrap:anywhere;flex:1}
+.file-selected-list li .btn{flex-shrink:0}
+.attachment-existing{display:flex;flex-direction:column;gap:7px;margin:0 0 12px}
+.attachment-existing .rowtask{padding:8px 10px}
+.attachment-existing .taskmain{min-width:0;overflow-wrap:anywhere}
+.attachment-existing a{color:#53acff;flex-shrink:0}
+.attachment-existing .btn{flex-shrink:0}
+.dash-quick{position:relative;border:1px solid #314d70}
+.dash-quick.file-dragover{outline:2px dashed #40adff;outline-offset:-6px}
+.light .file-drop-zone{background:#f2f8ff;color:#1b4061}
+.light .file-drop-zone span:not(.file-upload-glyph){color:#5e7593}
+.light .file-drop-zone.file-dragover,.light .dash-quick.file-dragover{background:#d9efff}
+@media(max-width:550px){.file-drop-zone{min-height:120px;padding:12px}.quick-actions .quick-tool{min-width:35px}.file-selected-list li{flex-wrap:wrap}}
