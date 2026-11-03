@@ -14,8 +14,8 @@ def app_client(tmp_path):
 def test_empty_courses_stay_local(tmp_path):
  c,h=app_client(tmp_path)
  assert c.get("/api/setup").json()["needs_setup"] is True
- assert c.post("/api/setup",headers=h,json={"username":"tester","password":"test-password-long"}).status_code==200
- assert c.post("/api/login",headers=h,json={"username":"tester","password":"test-password-long"}).status_code==200
+ assert c.post("/api/setup",headers=h,json={"username":"tester","password":"test-password-long","setup_token":(tmp_path/"setup-token").read_text()}).status_code==200
+ assert c.post("/api/login",headers=h,json={"username":"tester","password":"test-password-long","setup_token":(tmp_path/"setup-token").read_text()}).status_code==200
  assert c.get("/api/courses").json()==[]
  assert c.get("/api/tasks").json()==[]
  assert c.post("/api/tasks",headers=h,json={"title":"Local-only test activity","priority":"normal"}).status_code==200
@@ -23,9 +23,9 @@ def test_empty_courses_stay_local(tmp_path):
 
 def test_csrf_and_display_publication(tmp_path):
  c,h=app_client(tmp_path)
- assert c.post("/api/setup",json={"username":"tester","password":"test-password-long"}).status_code==403
- assert c.post("/api/setup",headers=h,json={"username":"tester","password":"test-password-long"}).status_code==200
- assert c.post("/api/login",headers=h,json={"username":"tester","password":"test-password-long"}).status_code==200
+ assert c.post("/api/setup",json={"username":"tester","password":"test-password-long","setup_token":(tmp_path/"setup-token").read_text()}).status_code==403
+ assert c.post("/api/setup",headers=h,json={"username":"tester","password":"test-password-long","setup_token":(tmp_path/"setup-token").read_text()}).status_code==200
+ assert c.post("/api/login",headers=h,json={"username":"tester","password":"test-password-long","setup_token":(tmp_path/"setup-token").read_text()}).status_code==200
  group=c.post("/api/groups",headers=h,json={"name":"Test workgroup"}).json()["id"]
  token=c.post("/api/displays",headers=h,params={"group_id":group}).json()["token"]
  assert c.get("/api/display/"+token).json()=={"tasks":[]}
@@ -38,9 +38,18 @@ def test_csrf_and_display_publication(tmp_path):
 
 def test_extraction_requires_review(tmp_path):
  c,h=app_client(tmp_path)
- c.post("/api/setup",headers=h,json={"username":"tester","password":"test-password-long"})
- c.post("/api/login",headers=h,json={"username":"tester","password":"test-password-long"})
+ c.post("/api/setup",headers=h,json={"username":"tester","password":"test-password-long","setup_token":(tmp_path/"setup-token").read_text()})
+ c.post("/api/login",headers=h,json={"username":"tester","password":"test-password-long","setup_token":(tmp_path/"setup-token").read_text()})
  data=c.post("/api/extract",headers=h,json={"text":"Urgente: completare entro 15/12/2030"}).json()
  assert data["priority"]=="high"
  assert data["detected_dates"]==["2030-12-15"]
  assert data["needs_confirmation"] is True
+
+def test_setup_rejects_wrong_token_and_reuse(tmp_path):
+ c,h=app_client(tmp_path)
+ payload={"username":"tester","password":"test-password-long","setup_token":"invalid-installation-token"}
+ assert c.post("/api/setup",headers=h,json=payload).status_code==403
+ payload["setup_token"]=(tmp_path/"setup-token").read_text()
+ assert c.post("/api/setup",headers=h,json=payload).status_code==200
+ assert not (tmp_path/"setup-token").exists()
+ assert c.post("/api/setup",headers=h,json=payload).status_code==409
