@@ -47,7 +47,7 @@ function render(){
  main.append(header);
  if(S.view==='dashboard')dashboard(main);else if(['tasks','notes','archive','mine'].includes(S.view))taskList(main,S.view);else if(S.view==='projects')NextDoWorkspace.projectView(main);else if(S.view==='calendar')calendar(main);else if(S.view==='courses')coursesView(main);else if(S.view==='groups')groupsView(main);else settings(main);
 }
-function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:'Completa attività'});cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[node('div','tasktitle',t.title),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit);return row}
+function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:'Completa attività'});if(t.can_complete===false)cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[node('div','tasktitle',t.title),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit);return row}
 function dashboard(main){
  main.classList.add('dashboard-page');
  const pending=S.tasks.filter(t=>t.kind==='task'&&t.status!=='done');
@@ -168,21 +168,23 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
     if(!confirm('Eliminare l\'allegato '+a.filename+'?'))return;
     try{await api('/attachments/'+a.id,{method:'DELETE'});row.remove();await refresh();msg('Allegato eliminato')}catch(e){msg(e.message,true)}
    },'small');
-   row.append(node('span','taskmain',a.filename),anchor,remove);
+   row.append(node('span','taskmain',a.filename),anchor);if(t?.can_edit!==false)row.append(remove);
    existing.append(row);
   }
  }
  const picker=NextDoFileUI.picker(box,preferences.files||[],message=>msg(message,true));
- attachments.append(existing,picker.element,node('p','sub','I nuovi file vengono caricati quando premi Salva. Puoi trascinarli in qualsiasi punto della scheda.'));
+ attachments.append(existing);if(!t||t.can_edit!==false)attachments.append(picker.element,node('p','sub','I nuovi file vengono caricati quando premi Salva. Puoi trascinarli in qualsiasi punto della scheda.'));
  form.append(attachments);
  const actions=el('div',{class:'actions full'});
  actions.append(btn('Annulla',()=>back.remove()));
- if(t)actions.append(btn('Elimina',async()=>{
+ if(t&&t.can_edit!==false)actions.append(btn('Elimina',async()=>{
   if(!confirm('Eliminare definitivamente questa attività?'))return;
   try{await api('/tasks/'+t.id,{method:'DELETE'});back.remove();await refresh();render()}catch(e){msg(e.message,true)}
  },'danger'));
  const save=el('button',{class:'btn primary',type:'submit',text:editing?'Salva modifiche':'Crea attività'});
+ if(t&&t.can_edit===false)save.hidden=true;
  actions.append(save);form.append(actions);
+ if(t&&t.can_edit===false)form.append(node('p','sub','Questa attività è condivisa in sola lettura. Puoi eventualmente completare gli adempimenti dei CdS che ti sono assegnati.'));
  let busy=false;
  form.addEventListener('submit',async e=>{
   e.preventDefault();if(busy)return;
