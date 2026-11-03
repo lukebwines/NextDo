@@ -149,8 +149,8 @@ def accessible(c,u,t,write=False):
 def can_edit(c,u,t):
  return workspace.can_write(c,u,t)
 
-def taskdetail(c,t):
- d=dict(t);d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];return d
+def taskdetail(c,t,u=None):
+ d=dict(t);d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];d['can_edit']=workspace.can_write(c,u,t) if u else False;d['can_complete']=(workspace.can_finish(c,u,t) or (t['completion_mode']=='per_course' and bool(c.execute('SELECT 1 FROM task_courses tc JOIN course_assignees ca ON ca.course_id=tc.course_id WHERE tc.task_id=? AND ca.user_id=? LIMIT 1',(t['id'],u['id'])).fetchone()))) if u else False;return d
 
 def check_course_code(code):
  # Historical INCA rule: M followed by 2-3 alphanumerics, including MM? and M??R.
@@ -368,7 +368,7 @@ def tasks(req:Request,course_id:Optional[int]=None,group_id:Optional[int]=None,s
   if query:sql+=' AND (t.title LIKE ? OR t.description LIKE ?)';params.extend(['%'+query[:100]+'%']*2)
   sql+=' ORDER BY CASE WHEN t.status="done" THEN 1 ELSE 0 END,t.due_at IS NULL,t.due_at,t.id DESC'
   visible=(t for t in c.execute(sql,params) if accessible(c,u,t))
-  return [taskdetail(c,t) for _,t in zip(range(500),visible)]
+  return [taskdetail(c,t,u) for _,t in zip(range(500),visible)]
 @app.post('/api/tasks')
 def task_create(b:TaskIn,req:Request):
  u=user(req);csrf(req)
@@ -386,7 +386,7 @@ def task_get(tid:int,req:Request):
   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
   if not t:err(404,'Attività non trovata')
   if not accessible(c,u,t):err()
-  return taskdetail(c,t)
+  return taskdetail(c,t,u)
 @app.put('/api/tasks/{tid}')
 def task_update(tid:int,b:TaskIn,req:Request):
  u=user(req);csrf(req)
