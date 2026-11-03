@@ -1,6 +1,6 @@
 """NextDo standalone task management application. All content is user-supplied."""
 from __future__ import annotations
-import csv, io, json, os, re, secrets, shutil, sqlite3, tempfile, unicodedata, zipfile, threading
+import csv, io, json, os, re, secrets, shutil, sqlite3, tempfile, unicodedata, zipfile, threading, hashlib
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone, date
 from pathlib import Path
@@ -24,7 +24,13 @@ SETUP_TOKEN_FILE=DATA/'setup-token'
 
 DB_LOCK=threading.RLock()
 app=FastAPI(title='NextDo',docs_url=None,redoc_url=None,openapi_url=None)
-app.mount('/assets',StaticFiles(directory=str(ROOT/'static')),name='assets')
+class FreshAssets(StaticFiles):
+ async def get_response(self,path,scope):
+  response=await super().get_response(path,scope)
+  response.headers['Cache-Control']='no-store, max-age=0'
+  return response
+
+app.mount('/assets',FreshAssets(directory=str(ROOT/'static')),name='assets')
 
 @contextmanager
 def conn():
@@ -156,8 +162,21 @@ def check_course_code(code):
  # Historical INCA rule: M followed by 2-3 alphanumerics, including MM? and M??R.
  return bool(re.fullmatch(r'M[A-Z0-9]{2,3}',code.upper()))
 
+def asset_versions():
+ return {name:hashlib.sha256((ROOT/'static'/name).read_bytes()).hexdigest()[:12]
+         for name in ('style.css','visual-v1.css','app.js')}
+
 @app.get('/',response_class=HTMLResponse)
-def home():return (ROOT/'static'/'index.html').read_text(encoding='utf-8')
+def home():
+ html=(ROOT/'static'/'index.html').read_text(encoding='utf-8')
+ for name,digest in asset_versions().items():
+  html=html.replace('assets/'+name,'assets/'+name+'?v='+digest)
+ return HTMLResponse(html,headers={'Cache-Control':'no-store, max-age=0','Pragma':'no-cache'})
+
+@app.get('/api/build')
+def build_details(req:Request):
+ user(req)
+ return {'version':'0.1.5-test','assets':asset_versions()}
 @app.get('/api/setup')
 def setup():
  with conn() as c:count=c.execute('SELECT COUNT(*) FROM users').fetchone()[0]
