@@ -366,8 +366,9 @@ def tasks(req:Request,course_id:Optional[int]=None,group_id:Optional[int]=None,s
   if group_id:sql+=' AND t.group_id=?';params.append(group_id)
   if status:sql+=' AND t.status=?';params.append(status)
   if query:sql+=' AND (t.title LIKE ? OR t.description LIKE ?)';params.extend(['%'+query[:100]+'%']*2)
-  sql+=' ORDER BY CASE WHEN t.status="done" THEN 1 ELSE 0 END,t.due_at IS NULL,t.due_at,t.id DESC LIMIT 500'
-  return [taskdetail(c,t) for t in c.execute(sql,params) if accessible(c,u,t)]
+  sql+=' ORDER BY CASE WHEN t.status="done" THEN 1 ELSE 0 END,t.due_at IS NULL,t.due_at,t.id DESC'
+  visible=(t for t in c.execute(sql,params) if accessible(c,u,t))
+  return [taskdetail(c,t) for _,t in zip(range(500),visible)]
 @app.post('/api/tasks')
 def task_create(b:TaskIn,req:Request):
  u=user(req);csrf(req)
