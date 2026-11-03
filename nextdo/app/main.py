@@ -13,6 +13,8 @@ DATA=Path(os.environ.get("NEXTDO_DATA","/data"))
 DATA.mkdir(parents=True,exist_ok=True)
 DB=DATA/"nextdo.sqlite3"
 hasher=PasswordHasher()
+# Token di prima configurazione generato sul dispositivo, mai nel repository.
+SETUP_TOKEN_FILE=DATA/"setup-token"
 app=FastAPI(title="NextDo development",docs_url=None,redoc_url=None,openapi_url=None)
 app.mount("/assets",StaticFiles(directory=str(ROOT/"static")),name="assets")
 
@@ -34,6 +36,21 @@ with connect() as c:
  CREATE TABLE IF NOT EXISTS display_tokens(hash TEXT PRIMARY KEY,group_id INTEGER REFERENCES groups(id),revoked INTEGER NOT NULL DEFAULT 0);
  """)
 
+def ensure_setup_token():
+ with connect() as c:
+  needs_setup=c.execute("SELECT COUNT(*) FROM users").fetchone()[0]==0
+ if not needs_setup:
+  SETUP_TOKEN_FILE.unlink(missing_ok=True)
+  return
+ if not SETUP_TOKEN_FILE.exists():
+  try:
+   fd=os.open(str(SETUP_TOKEN_FILE),os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+   with os.fdopen(fd,"w") as out:out.write(secrets.token_urlsafe(32))
+  except FileExistsError:pass
+ print("NEXTDO PRIMO ACCESSO: codice installazione = "+SETUP_TOKEN_FILE.read_text().strip(),flush=True)
+
+ensure_setup_token()
+
 def fail(code=403,detail="Operazione non autorizzata"):
  raise HTTPException(status_code=code,detail=detail)
 
@@ -41,10 +58,10 @@ def csrf(req):
  a=req.headers.get("x-nextdo-csrf","")
  b=req.cookies.get("nextdo_csrf","")
  if not a or not secrets.compare_digest(a,b):fail(403,"CSRF token richiesto")
- origin=req.headers.get("origin")
- if origin:
-  from urllib.parse import urlsplit
-  if urlsplit(origin).netloc!=req.headers.get("host"):fail(403,"Origine non consentita")
+ # Ingress puo modificare Host durante il reverse proxy.
+ # Richiesto token CSRF e cookie SameSite.
+ site=req.headers.get("sec-fetch-site")
+ if site and site not in ("same-origin","none"):fail(403,"Richiesta cross-site non consentita")
 
 def identity(req):
  raw=req.cookies.get("nextdo_session","")
@@ -66,6 +83,9 @@ def can_view(c,u,t):
 class Credentials(BaseModel):
  username:str=Field(min_length=3,max_length=64)
  password:str=Field(min_length=12,max_length=256)
+
+class SetupCredentials(Credentials):
+ setup_token:str=Field(min_length=16,max_length=256)
 
 class Course(BaseModel):
  code:str
@@ -101,11 +121,16 @@ def setup_info():
  with connect() as c:return {"needs_setup":c.execute("SELECT COUNT(*) FROM users").fetchone()[0]==0}
 
 @app.post("/api/setup")
-def setup(b:Credentials,req:Request):
+def setup(b:SetupCredentials,req:Request):
  csrf(req)
  with connect() as c:
+  c.execute("BEGIN IMMEDIATE")
   if c.execute("SELECT 1 FROM users").fetchone():fail(409,"Configurazione già effettuata")
+  if not SETUP_TOKEN_FILE.is_file():fail(503,"Token installazione non disponibile")
+  if not secrets.compare_digest(b.setup_token,SETUP_TOKEN_FILE.read_text().strip()):
+   fail(403,"Codice installazione non valido")
   c.execute("INSERT INTO users(username,password,role) VALUES(?,?,'admin')",(b.username,hasher.hash(b.password)))
+ SETUP_TOKEN_FILE.unlink(missing_ok=True)
  return {"ok":True}
 
 @app.post("/api/login")
