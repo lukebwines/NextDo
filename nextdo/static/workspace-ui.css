@@ -34,3 +34,11 @@
 @media(max-width:850px){.kanban-board{grid-template-columns:repeat(4,minmax(190px,220px))}}
 @media(max-width:550px){.workspace-tools{flex-wrap:wrap}.project-grid{grid-template-columns:1fr 1fr}.project-tile{padding:12px;min-height:130px}.project-board{padding:12px}.workspace-settings .rowtask{align-items:flex-start}.workspace-settings .rowtask .btn{margin-bottom:4px}}
 @media(max-width:390px){.project-grid{grid-template-columns:1fr}}
+
+/* Keep all workspace sections reachable on phones: horizontally scrolling bottom navigation. */
+@media(max-width:550px){
+ .sidebar{justify-content:flex-start;overflow-x:auto;overflow-y:hidden;gap:3px;scrollbar-width:thin;scroll-snap-type:x proximity}
+ .sidebar .nav{display:flex;flex:0 0 54px;min-width:54px;justify-content:center;scroll-snap-align:start}
+ .sidebar .nav:nth-child(n+7){display:flex}
+ .sidebar .navtext{display:none}
+}
