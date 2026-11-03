@@ -164,7 +164,7 @@ def check_course_code(code):
 
 def asset_versions():
  return {name:hashlib.sha256((ROOT/'static'/name).read_bytes()).hexdigest()[:12]
-         for name in ('style.css','visual-v1.css','app.js')}
+         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','app.js')}
 
 @app.get('/',response_class=HTMLResponse)
 def home():
@@ -436,8 +436,8 @@ async def attach(tid:int,req:Request,file:UploadFile=File(...)):
   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
   if not t:err(404,'Attività non trovata')
   if not accessible(c,u,t):err()
- allowed={'.pdf','.png','.jpg','.jpeg','.webp','.txt','.csv','.docx','.xlsx','.odt'}
- filename=Path(file.filename or '').name
+ allowed={'.pdf','.png','.jpg','.jpeg','.webp','.gif','.bmp','.txt','.csv','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.rtf','.odt','.ods','.odp'}
+ filename=re.split(r'[\\\\/]',file.filename or '')[-1].strip()
  if not filename or Path(filename).suffix.lower() not in allowed:err(400,'Formato non consentito')
  payload=await file.read(MAX_FILE+1)
  if len(payload)>MAX_FILE:err(413,'Allegato superiore a 15 MB')
