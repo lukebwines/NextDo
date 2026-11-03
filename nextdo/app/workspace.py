@@ -85,7 +85,7 @@ def can_read(c,u,t):
  if u['role']=='admin':return True
  if t['owner_id']==u['id'] or t['assigned_to']==u['id']:return True
  if scope=='common':return True
- if scope=='cds':return assigned_task_course(c,u,t['id'])
+ if scope=='cds':return assigned_task_course(c,u['id'],t['id'])
  if scope=='project' and t['project_id']:
   p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
   return bool(p and project_can_view(c,u,p))
@@ -99,7 +99,7 @@ def can_write(c,u,t):
  if u['role']=='admin' or t['owner_id']==u['id']:return True
  if scope=='common':return t['assigned_to']==u['id']
  if scope=='cds':
-  return assigned_task_course(c,u,t['id']) and t['assigned_to'] in (None,u['id'])
+  return assigned_task_course(c,u['id'],t['id']) and t['assigned_to'] in (None,u['id'])
  if scope=='project' and t['project_id']:
   p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
   return bool(p and (project_can_edit(c,u,p) or (t['assigned_to']==u['id'] and project_can_view(c,u,p))))
