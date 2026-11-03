@@ -155,6 +155,9 @@ class ProjectIn(BaseModel):
  due_at:Optional[str]=None
  status:str='doing'
 
+class TaskStatus(BaseModel):
+ status:str
+
 class PasswordChange(BaseModel):
  current_password:str
  new_password:str=Field(min_length=12,max_length=256)
