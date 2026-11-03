@@ -272,10 +272,10 @@ def extract_text(b:ExtractText,req:Request):
  from datetime import date
  s=b.text.strip()
  found=set()
- for m in re.finditer(r"\\b(\\d{1,2})[/.](\\d{1,2})[/.](\\d{4})\\b",s):
+ for m in re.finditer(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b",s):
   try:found.add(date(int(m.group(3)),int(m.group(2)),int(m.group(1))).isoformat())
   except ValueError:pass
- for m in re.finditer(r"\\b(20\\d{2})-(\\d{2})-(\\d{2})\\b",s):
+ for m in re.finditer(r"\b(20\d{2})-(\d{2})-(\d{2})\b",s):
   try:found.add(date(int(m.group(1)),int(m.group(2)),int(m.group(3))).isoformat())
   except ValueError:pass
  low=s.lower()
