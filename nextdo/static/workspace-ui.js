@@ -5,7 +5,7 @@ const NextDoWorkspace=(()=>{
  const projectScopes={independent:'Indipendente dai CdS',cds:'Uno o più CdS',common:'Tutti i CdS'};
  const set=(...nodes)=>el('div',{},nodes);
  const opt=(label,fn,kind='')=>btn(label,fn,kind);
- function taskScopeOptions(){return [...Object.entries(scopes)].filter(([k])=>k!=='common'||S.me.role==='admin')}
+ function taskScopeOptions(){return Object.entries(scopes).map(([k,v])=>[k,k==='common'&&S.me.role!=='admin'?v+' (sola lettura)':v])}
  function scopedCourses(){return S.me.role==='admin'?S.courses:S.courses.filter(x=>S.myCourseIds.includes(x.id))}
  function projectLabel(p){return projectScopes[p.scope]||p.scope}
  function projectView(main){
@@ -45,7 +45,7 @@ const NextDoWorkspace=(()=>{
    col.append(el('h3',{},[label,tag(String(cards.length))]));
    if(!cards.length)col.append(node('p','kanban-empty','Nessuna attività'));
    for(const t of cards){
-    const card=el('div',{class:'kanban-task',draggable:'true'},[
+    const card=el('div',{class:'kanban-task',draggable:t.can_edit===false?'false':'true'},[
      node('strong','',t.title),
      node('span','muted',t.due_at?fmt(t.due_at):'Senza scadenza'),
      el('div',{class:'kanban-tags'},[tag(priority[t.priority]||'Normale',t.priority),...(t.labels||[]).slice(0,2).map(x=>tag(x))])
