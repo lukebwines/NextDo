@@ -1,0 +1,96 @@
+/* Visual identity approved for NextDo: midnight navy / electric blue */
+:root{--bg:#081728;--panel:#182940;--panel2:#21334d;--stroke:#273e58;--ink:#f2f6ff;--muted:#9eb4cf;--blue:#298dff;--red:#fc697e;--amber:#ffad57;--green:#44d99b;--purple:#ae7dff}
+body{font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;letter-spacing:-.06px}
+.app{background:radial-gradient(circle at 45% -30%,#163354 0,transparent 60%),#081728}
+.sidebar{width:258px;background:linear-gradient(150deg,#10223a,#09192c 78%);border-right:1px solid #223954;padding:26px 18px}
+.logo{gap:12px;margin-bottom:35px;letter-spacing:-.65px}
+.logo .brandmark{display:flex;align-items:center;justify-content:center;width:43px;height:43px;flex-shrink:0;background:#12375e;border:1px solid #205d94;border-radius:12px;color:#2da2ff;box-shadow:0 0 0 4px #112b45}
+.logo .brandmark .ico{width:29px;height:29px;stroke-width:2.7}
+.logo .name{display:block;color:#f8fbff;font-size:25px;font-weight:800;line-height:1.05}
+.logo .brand-sub{display:block;font-size:11px;font-weight:400;color:#b4c6dd;letter-spacing:0;white-space:nowrap;margin-top:4px}
+.ico{width:18px;height:18px;flex-shrink:0}
+.sidebar .nav{display:flex;align-items:center;gap:13px;padding:12px 15px;margin:2px 0;border-radius:9px;font-weight:500;color:#b6cbe4;font-size:14px}
+.sidebar .nav:hover{background:#183a5c;color:white}
+.sidebar .nav.active{border-left:0;background:linear-gradient(95deg,#286cbe,#1d4d88);box-shadow:inset 0 0 0 1px #397db8;color:#fff;font-weight:700}
+.sidebar .nav .ico{width:20px;height:20px}
+.sidebar-labels{border-top:1px solid #29415b;margin-top:22px;padding:17px 9px}
+.sidebar-labels-heading{color:#a9bed8;font-size:13px;margin:0 0 10px}
+.sidebar-empty{color:#758ca8;font-size:12px;margin-top:4px}
+.label-link{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;color:#bccce0;text-align:left;padding:7px 5px;border-radius:8px;font-size:13px}
+.label-link:hover{background:#1d3b5b}
+.label-dot{width:11px;height:11px;border-radius:50%;background:var(--dot-color)}
+.sidebar .bottom{border-top:1px solid #2b4058;padding-top:14px}
+.main{max-width:1630px;padding:20px clamp(20px,2.8vw,44px) 48px}
+.appbar{display:flex;justify-content:flex-end;align-items:center;gap:12px;height:48px;margin-bottom:18px}
+.global-search{display:flex;align-items:center;gap:10px;width:min(290px,36vw);background:#12243a;border:1px solid #253d58;border-radius:10px;padding:7px 11px}
+.global-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:#f2f6ff;padding:3px;font-size:13px}
+.global-search .ico{color:#819bb8}
+.iconbutton{border:0;background:#142640;color:#b2c6dd;border-radius:12px;padding:10px;display:flex;align-items:center;justify-content:center;width:39px;height:39px}
+.iconbutton:hover{background:#1d4269;color:#fff}
+.top{margin-bottom:19px;gap:10px;align-items:center}
+.top h1{font-size:28px;line-height:1.08;font-weight:750;letter-spacing:-.7px}
+.top .sub{margin-top:5px;font-size:13px}
+.top-actions .btn{padding:8px 12px}
+.top-actions .btn.primary{display:none}
+.dash-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:0 0 17px}
+.metric{min-width:0;display:grid;grid-template-columns:40px 1fr;grid-template-rows:auto auto;gap:2px 12px;align-items:center;text-align:left;padding:18px 16px;border:1px solid #293d57;border-radius:14px;background:linear-gradient(120deg,#1b2b43,#202f49);color:#e9f3ff;transition:transform .12s ease,border-color .12s ease;cursor:pointer}
+.metric:hover{transform:translateY(-1px);border-color:#367fbd}
+.metric:focus-visible{outline:2px solid #58adff;outline-offset:2px}
+.metric-icon{grid-row:1/3;display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:#174a78;color:#39a1ff}
+.metric-icon .ico{width:23px;height:23px}
+.metric:nth-child(2) .metric-icon{color:#ff657d;background:#543449}
+.metric:nth-child(3) .metric-icon{color:#bc86ff;background:#45355f}
+.metric:nth-child(4) .metric-icon{color:#44df9a;background:#225444}
+.metric-label{font-size:13px;color:#d4dff0;font-weight:550}
+.metric-value{font-size:30px;line-height:1.2;font-weight:770;color:#f5f9ff;font-variant-numeric:tabular-nums}
+.dash-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);gap:16px;align-items:start}
+.dashboard-page .card{border:1px solid #263d56;border-radius:14px;background:linear-gradient(140deg,#18283f,#17263a)}
+.card-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.card-head h2{margin:0;flex:1;font-size:17px;letter-spacing:-.25px}
+.card-head .ico{color:#32a0ff}
+.btn.textlink{padding:5px 0;border:0;background:transparent;color:#48a7ff;font-size:13px}
+.dash-upcoming{min-height:255px;padding:16px 15px}
+.dash-task-row{display:flex;align-items:center;gap:12px;padding:10px;margin:0;border-bottom:1px solid #2b3e55;border-left:3px solid #329fff;border-radius:7px;background:#192d45}
+.dash-task-row+.dash-task-row{margin-top:2px}
+.dash-task-row.critical{border-left-color:#ff5e78}.dash-task-row.high{border-left-color:#ffa143}.dash-task-row.low{border-left-color:#69d0aa}
+.dash-task-row input[type=checkbox]{width:19px;height:19px;accent-color:#3ba0ff;flex-shrink:0}
+.dash-task-title{min-width:0;width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border:0;background:none;color:#f4f7fc;text-align:left;font-size:13px;padding:0}
+.dash-task-name{flex:1;min-width:140px;font-weight:570}
+.dash-task-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dash-task-meta .pill{margin:0;font-size:11px;padding:3px 8px}
+.dash-due{color:#b5c7df;font-size:11px;white-space:nowrap}
+.dash-right{display:grid;grid-template-rows:auto auto;gap:14px}
+.dash-quick{padding:17px 16px}
+.dash-compose{resize:vertical;min-height:104px;background:#16263c;border-color:#405269;font-size:13px;line-height:1.5}
+.quick-actions{margin-top:10px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.quick-actions .btn.icon-small{padding:9px 10px;background:#263b53;font-size:15px;min-height:39px}
+.quick-actions .field{flex:1;min-width:100px;min-height:39px;padding:8px 6px;font-size:12px}
+.quick-actions .btn.primary{padding:10px 12px;min-height:39px}
+.extract-action{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:15px 17px;border:1px solid #28415b;border-radius:14px;background:#182d45;color:#e6f3ff}
+.extract-action>.ico:first-child{width:32px;height:32px;color:#339eff}
+.extract-action>span{flex:1;display:grid;gap:4px;font-size:13px}
+.extract-action small{color:#abc0d9;font-size:12px;font-weight:400;line-height:1.35}
+.extract-action>.ico:last-child{color:#7393b5}
+.dash-bottom{display:grid;grid-template-columns:1.15fr 1fr;gap:16px;margin-top:16px;align-items:stretch}
+.dash-bottom .card{padding:16px}
+.dash-bottom h2{font-size:16px}
+.week-row{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.week-day{min-width:0;padding:10px 4px;border:1px solid #293d58;border-radius:8px;background:#25364f;color:#e4f1ff;display:flex;flex-direction:column;align-items:center;gap:4px}
+.week-day span:first-child{color:#c3d4e9;font-size:11px;text-transform:capitalize}
+.week-day strong{font-size:14px}.week-day.today{background:#2678d3;border-color:#319dff}.week-dots{font-size:10px;color:#ffc36a;min-height:12px}
+.breakdown-inner{display:flex;align-items:center;gap:20px}
+.donut{flex-shrink:0;width:105px;height:105px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;position:relative;z-index:0}
+.donut:before{content:'';position:absolute;inset:17px;border-radius:50%;background:#17283e;z-index:-1}
+.donut-count{font-size:25px;font-weight:780;line-height:1.2}.donut-label{font-size:10px;color:#bed0e7}
+.chart-legend{flex:1;min-width:0;display:grid;gap:4px}
+.legend-row{display:flex;align-items:center;gap:6px;color:#c8d7e9;font-size:11px;min-width:0}
+.legend-row span:nth-child(2){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legend-dot{width:9px;height:9px;border-radius:50%}
+.light .app{background:#f4f8fc}.light .sidebar{background:#eaf2fb}.light .sidebar .nav{color:#26435f}.light .sidebar .nav.active{color:#fff}
+.light .global-search,.light .iconbutton,.light .metric,.light .dashboard-page .card,.light .extract-action,.light .dash-task-row{background:#fff;border-color:#d7e2ef;color:#18334d}
+.light .global-search input,.light .dash-task-title{color:#17314b}.light .metric-label,.light .dash-due{color:#506681}.light .metric-value{color:#17314b}
+.light .dash-compose{background:#f4f8fc}.light .week-day{background:#eaf3fc;color:#18334d}.light .week-day.today{background:#cde3ff}.light .donut:before{background:#fff}
+@media(max-width:1120px){.dash-layout{grid-template-columns:minmax(0,1.4fr) minmax(270px,1fr)}.metric{padding:13px;grid-template-columns:35px 1fr;gap:6px}.metric-icon{width:35px;height:35px}.metric-value{font-size:26px}.metric-label{font-size:12px}.dash-bottom{grid-template-columns:1fr}}
+@media(max-width:900px){.sidebar{width:65px;padding:20px 6px}.sidebar .logo .brandmark{width:38px;height:38px}.sidebar .logo .brand-sub,.sidebar .navtext,.sidebar .sidebar-labels,.sidebar .bottom{display:none}.sidebar .nav{justify-content:center;padding:13px 5px}.main{padding:20px}.dash-layout{grid-template-columns:1fr}.dash-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.appbar{margin-bottom:12px}}
+@media(max-width:550px){.sidebar{width:100%;padding:3px 4px 7px;bottom:0;top:auto;display:flex;justify-content:space-around;box-shadow:0 -5px 16px #08121f77}.sidebar .nav{padding:9px 5px;min-width:0;flex:1}.sidebar .nav:nth-child(n+7){display:none}.sidebar .logo,.sidebar .sidebar-labels,.sidebar .bottom{display:none}.main{padding:13px 12px 90px}.appbar{height:40px;margin-bottom:12px}.global-search{width:100%;flex:1}.top{align-items:center}.top h1{font-size:24px}.top-actions .btn.small{font-size:11px;padding:8px}.dash-metrics{gap:8px}.metric{padding:12px 10px;grid-template-columns:34px 1fr}.metric-label{font-size:12px}.metric-value{font-size:24px}.dash-upcoming{min-height:210px}.dash-layout{gap:13px}.dash-task-meta{gap:3px}.dash-task-title{gap:4px}.dash-task-name{min-width:110px}.dash-bottom{gap:13px}.dash-bottom .card{padding:13px}.week-row{gap:3px}.week-day{padding:8px 2px}.week-day span:first-child{font-size:10px}.breakdown-inner{justify-content:space-around}}
+@media(prefers-reduced-motion:reduce){.metric{transition:none}}
