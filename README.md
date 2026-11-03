@@ -1,6 +1,6 @@
 # NextDo — Home Assistant add-on
 
-**Versione di test: 0.1.4-test.** Dashboard rifinita sulla prima proposta grafica approvata: menu con etichette, quattro contatori cliccabili, aggiunta rapida, scadenze compatte, settimana e riepilogo etichette. Aggiunto il ripristino di archivi ZIP esportati da NextDo.
+**Versione di test: 0.1.5-test.** Dashboard rifinita sulla prima proposta grafica approvata: menu con etichette, quattro contatori cliccabili, aggiunta rapida, scadenze compatte, settimana e riepilogo etichette. Aggiunto il ripristino di archivi ZIP esportati da NextDo.
 
 Repository pubblico contenente soltanto codice sorgente. **Nessun codice o nome reale di CdS, database, nota, account o credenziale viene pubblicato.** I dati dell'installazione restano in `/data` sul dispositivo.
 
@@ -39,3 +39,9 @@ I dati di esempio dell'immagine originale non sono preinstallati. Dashboard e gr
 ## Aggiornamento v0.1.4-test
 
 Usare il pulsante **Aggiorna** nell'app già installata dal repository GitHub, senza disinstallare, e conservare prima un backup. La nuova versione non esegue migrazioni ulteriori dello schema SQLite rispetto alla 0.1.3-test. È stata verificata tramite test API locali e lint JavaScript; resta da collaudare in ambiente Home Assistant OS ARM64.
+
+## Correzione risorse in cache, 0.1.5-test
+
+La pagina HTML viene ora servita con `Cache-Control: no-store` e gli URL CSS/JavaScript includono un identificativo calcolato sul contenuto dei file. Questo risolve l'anomalia in cui Home Assistant mostrava la nuova versione dell'add-on ma la precedente dashboard nel browser, senza il pulsante **Importa backup NextDo**. Sono disponibili controlli automatici sulle risorse.
+
+Dopo aver aggiornato NextDo da Home Assistant, riaprire l'interfaccia e, al primo accesso dopo questo rilascio, forzare un refresh (`Ctrl+F5`) oppure usare una finestra privata. Il database non viene cancellato o migrato da questa modifica. In caso di persistenza del problema, verificare il Registro add-on e la versione restituita dall'endpoint `api/build` dopo l'accesso (solo utente autenticato).
