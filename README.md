@@ -50,8 +50,10 @@ Gestione estesa degli utenti e dei gruppi dall'interfaccia, note libere struttur
 - I dati CdS sono esclusivamente locali in `/data`.
 - Nessun Cloudflare Tunnel o accesso diretto per i colleghi deve essere configurato durante questa fase.
 
-### Importante: repository privato
+### Repository pubblico e aggiornamenti
 
-Home Assistant Supervisor non può normalmente clonare un repository GitHub privato utilizzando la semplice URL del repository. Per il primo collaudo utilizzare i **local add-ons**: trasferire la cartella `nextdo/` nell'area locale add-on del dispositivo tramite un metodo amministrativo autorizzato, quindi aggiornare il catalogo delle applicazioni. Non inserire credenziali o token GitHub in URL dell'add-on.
+Il repository è pubblico e può essere consultato senza credenziali. Non contiene anagrafiche CdS, database, note o credenziali reali. **Non utilizzare ancora il repository per aggiornare un'installazione NextDo esistente**: la versione GitHub `0.1.1-test` non è stata allineata e verificata rispetto a eventuali versioni locali più recenti. Prima di adottare gli aggiornamenti tramite Home Assistant occorre controllare versione, slug, persistenza di `/data` e migrazioni, e verificare la compilazione ARM64. In particolare, non disinstallare l'installazione esistente e non eliminare i suoi dati.
+
+L'uso di GitHub come sorgente di installazione non pubblica automaticamente il database persistente dell'add-on.
 
 Prima dell'installazione sul Raspberry sono ancora richiesti la verifica dei test CI e un collaudo della build ARM64. Non avviare su rete esterna e non inserire dati reali fino al completamento del collaudo.
