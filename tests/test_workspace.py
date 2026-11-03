@@ -16,7 +16,7 @@ def init(tmp_path):
 
 def sign_in(client,headers,name):
  client.cookies.delete('nextdo_session')
- response=client.post('/api/login',headers=headers,json={'username':name,'password':'sample user password 123'})
+ response=client.post('/api/login',headers=headers,json={'username':name,'password':'sample admin password 123' if name=='admin' else 'sample user password 123'})
  assert response.status_code==200,response.text
 
 def create_user(client,headers,name):
