@@ -24,7 +24,7 @@ code{color:#bbd9ff}
 <div class="muted">Tasks, Notes &amp; Deadlines</div>
 <form id="authform"><label>Nome utente<input id="username" autocomplete="username" required minlength="3"></label>
 <label>Password<input id="password" type="password" autocomplete="current-password" minlength="12" required></label>
-<label id="setup-token-field" class="hide">Codice installazione (vedi log add-on)<input id="setup-token" autocomplete="off" placeholder="Codice generato sul Raspberry"></label>
+<label id="setup-token-field" class="hide">Codice installazione (vedi log add-on)<input id="setup-token" autocomplete="off" minlength="16" maxlength="256" placeholder="Incolla il codice dai log, senza spazi"></label>
 <button id="authbtn" type="submit" style="width:100%;margin-top:16px">Accedi</button></form>
 <p id="authmsg" class="muted"></p>
 </div>
@@ -59,7 +59,21 @@ const escapeHtml=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;"
 async function api(path,method="GET",body){
  const r=await fetch("api/"+path,{method,credentials:"same-origin",headers:{"Content-Type":"application/json","X-NextDo-CSRF":CSRF},body:body===undefined?undefined:JSON.stringify(body)});
  const data=await r.json().catch(()=>({}));
- if(!r.ok)throw Error(typeof data.detail==="string"?data.detail:"Errore richiesta "+r.status);
+ if(!r.ok){
+  if(r.status===422&&Array.isArray(data.detail)){
+   const fields={username:"Nome utente",password:"Password",setup_token:"Codice installazione"};
+   const msg=data.detail.map(d=>{
+    const field=Array.isArray(d.loc)?d.loc[d.loc.length-1]:null;
+    const label=fields[field]||"Dati inseriti";
+    if(d.type==="missing")return label+": campo obbligatorio";
+    if(d.type==="string_too_short")return label+": troppo corto";
+    if(d.type==="string_too_long")return label+": troppo lungo";
+    return label+": verifica il valore";
+   }).join("; ");
+   throw Error(msg||"Verifica i campi obbligatori");
+  }
+  throw Error(typeof data.detail==="string"?data.detail:"Errore richiesta "+r.status);
+ }
  return data;
 }
 function flash(t){el("message").textContent=t;setTimeout(()=>el("message").textContent="",4500)}
@@ -93,7 +107,12 @@ async function reload(){
   else await api("tasks/"+t.id+"/toggle","POST");await reload();
  }catch(e){flash(e.message)}});
 }
-el("authform").onsubmit=async e=>{e.preventDefault();try{const payload={username:el("username").value,password:el("password").value};if(setupMode){payload.setup_token=el("setup-token").value.trim();await api("setup","POST",payload);setupMode=false;el("setup-token-field").classList.add("hide")}await api("login","POST",payload);await logged(await api("me"))}catch(error){el("authmsg").textContent=error.message}};
+el("authform").onsubmit=async e=>{e.preventDefault();try{const payload={username:el("username").value,password:el("password").value};if(setupMode){
+ const token=el("setup-token").value.trim();
+ if(payload.username.trim().length<3)throw Error("Nome utente: almeno 3 caratteri");
+ if(payload.password.length<12)throw Error("Password: almeno 12 caratteri");
+ if(token.length<16)throw Error("Codice installazione: incolla il codice completo dai log dell'add-on");
+ payload.setup_token=token;await api("setup","POST",payload);setupMode=false;el("setup-token-field").classList.add("hide")}await api("login","POST",payload);await logged(await api("me"))}catch(error){el("authmsg").textContent=error.message}};
 el("courseform").onsubmit=async e=>{e.preventDefault();try{await api("courses","POST",{code:el("code").value,name:el("coursename").value});e.target.reset();await reload();flash("CdS salvato localmente")}catch(error){flash(error.message)}};
 el("taskform").onsubmit=async e=>{e.preventDefault();try{await api("tasks","POST",{title:el("title").value,description:el("description").value,priority:el("priority").value,due_at:el("due").value||null,course_ids:Array.from(el("taskcourses").selectedOptions).map(x=>Number(x.value)),completion_mode:el("completion").value});e.target.reset();await reload();flash("Attività salvata")}catch(error){flash(error.message)}};
 el("filter").onchange=reload;
