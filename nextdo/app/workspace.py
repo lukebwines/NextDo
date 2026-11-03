@@ -83,12 +83,12 @@ def can_read(c,u,t):
  scope=t['scope'] if 'scope' in t.keys() else 'group'
  if scope=='personal':return t['owner_id']==u['id']
  if u['role']=='admin':return True
- if t['owner_id']==u['id'] or t['assigned_to']==u['id']:return True
  if scope=='common':return True
  if scope=='cds':return assigned_task_course(c,u['id'],t['id'])
  if scope=='project' and t['project_id']:
   p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
   return bool(p and project_can_view(c,u,p))
+ if t['owner_id']==u['id'] or t['assigned_to']==u['id']:return True
  if t['group_id'] is not None:
   return bool(c.execute('SELECT 1 FROM memberships WHERE group_id=? AND user_id=?',(t['group_id'],u['id'])).fetchone())
  return False
@@ -96,14 +96,14 @@ def can_read(c,u,t):
 def can_write(c,u,t):
  scope=t['scope'] if 'scope' in t.keys() else 'group'
  if scope=='personal':return t['owner_id']==u['id']
- if u['role']=='admin' or t['owner_id']==u['id']:return True
- if scope=='common':return t['assigned_to']==u['id']
+ if u['role']=='admin':return True
+ if scope=='common':return t['owner_id']==u['id'] or t['assigned_to']==u['id']
  if scope=='cds':
   return assigned_task_course(c,u['id'],t['id']) and t['assigned_to'] in (None,u['id'])
  if scope=='project' and t['project_id']:
   p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
   return bool(p and (project_can_edit(c,u,p) or (t['assigned_to']==u['id'] and project_can_view(c,u,p))))
- if t['assigned_to']==u['id']:return True
+ if t['assigned_to']==u['id'] or t['owner_id']==u['id']:return True
  if t['group_id']:
   member=c.execute("SELECT role FROM memberships WHERE group_id=? AND user_id=?",(t['group_id'],u['id'])).fetchone()
   return bool(member and member['role']=='manager')
@@ -126,6 +126,8 @@ def validate_scope(c,u,b):
   if not b.course_ids or b.project_id:fail('Selezionare almeno un CdS',400)
   if u['role']!='admin' and any(not owns_course(c,u['id'],cid) for cid in b.course_ids):
    fail('CdS non assegnato a questo account')
+  if b.assigned_to and not any(owns_course(c,b.assigned_to,cid) for cid in b.course_ids):
+   fail('Assegnare prima il CdS al collega prescelto',400)
  if scope=='common':
   if u['role']!='admin':fail('Solo l’amministratore può creare una scadenza comune')
   if b.project_id or b.course_ids:fail('Le scadenze comuni si applicano a tutti i CdS automaticamente',400)
