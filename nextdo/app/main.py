@@ -1,6 +1,6 @@
 """NextDo standalone task management application. All content is user-supplied."""
 from __future__ import annotations
-import csv, io, json, os, re, secrets, shutil, sqlite3, tempfile, unicodedata, zipfile
+import csv, io, json, os, re, secrets, shutil, sqlite3, tempfile, unicodedata, zipfile, threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone, date
 from pathlib import Path
@@ -22,15 +22,17 @@ TZ=ZoneInfo(os.environ.get('NEXTDO_TZ','Europe/Rome'))
 PH=PasswordHasher()
 SETUP_TOKEN_FILE=DATA/'setup-token'
 
+DB_LOCK=threading.RLock()
 app=FastAPI(title='NextDo',docs_url=None,redoc_url=None,openapi_url=None)
 app.mount('/assets',StaticFiles(directory=str(ROOT/'static')),name='assets')
 
 @contextmanager
 def conn():
- c=sqlite3.connect(DB,timeout=20);c.row_factory=sqlite3.Row;c.execute('PRAGMA foreign_keys=ON');c.execute('PRAGMA busy_timeout=10000')
- try: yield c;c.commit()
- except: c.rollback();raise
- finally:c.close()
+ with DB_LOCK:
+  c=sqlite3.connect(DB,timeout=20);c.row_factory=sqlite3.Row;c.execute('PRAGMA foreign_keys=ON');c.execute('PRAGMA busy_timeout=10000')
+  try: yield c;c.commit()
+  except: c.rollback();raise
+  finally:c.close()
 
 def init():
  with conn() as c:
@@ -573,3 +575,7 @@ def backup(req:Request):
    for f in FILES.iterdir():
     if f.is_file():z.write(f,'attachments/'+f.name)
  return Response(output.getvalue(),media_type='application/zip',headers={'Content-Disposition':'attachment; filename="nextdo-backup.zip"','Cache-Control':'no-store'})
+
+# Importa archivi ZIP creati da NextDo; i backup del Supervisor Home Assistant sono distinti.
+from .backup_restore import register_restore_routes
+register_restore_routes(app,user=user,csrf=csrf,db_path=DB,attachments_path=FILES,data_path=DATA,db_lock=DB_LOCK)
