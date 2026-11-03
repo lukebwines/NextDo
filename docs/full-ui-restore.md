@@ -27,3 +27,11 @@ La versione attualmente sul ramo main usa un diverso schema SQLite:
 - Dopo validazione, rilasciare una versione superiore a quella installata, anziché riusare `0.1.1-test`.
 
 Il repository pubblico deve contenere esclusivamente codice e dati fittizi nei test.
+
+## Collaudo del pacchetto completo 0.1.3-test
+
+L'archivio aggiornato dalla versione locale comprende i moduli originali, interfaccia CSS/JS, backend FastAPI, Ingress e una migrazione dello schema semplificato del repository.
+
+Verifiche locali superate: creazione amministratore con codice monouso, login, creazione task, estrazione testo, migrazione da schema precedente, conservazione task e gruppi, accesso successivo alla migrazione, controllo sintattico Python e JavaScript.
+
+Il pacchetto completo risiede nell'allegato della conversazione e **non è ancora stato importato in questo ramo GitHub**. Sono ancora da verificare build ARM64 sul Raspberry e corretta installazione nel Supervisor.
