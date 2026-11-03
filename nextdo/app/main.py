@@ -286,7 +286,7 @@ def course_create(b:CourseIn,req:Request):
   try:r=c.execute('INSERT INTO courses(code,name,active) VALUES(?,?,?)',(code,b.name.strip(),int(b.active)))
   except sqlite3.IntegrityError:err(409,'Codice CdS già presente')
   if b.active:
-    c.execute("INSERT OR IGNORE INTO task_courses(task_id,course_id,done) SELECT id,?,0 FROM tasks WHERE scope='common' AND completion_mode='per_course'",(r.lastrowid,))
+   c.execute("INSERT OR IGNORE INTO task_courses(task_id,course_id,done) SELECT id,?,0 FROM tasks WHERE scope='common' AND completion_mode='per_course'",(r.lastrowid,))
    record(c,u['id'],'create','course',r.lastrowid)
  return {'id':r.lastrowid}
 @app.put('/api/courses/{cid}')
@@ -300,7 +300,7 @@ def course_update(cid:int,b:CourseIn,req:Request):
   except sqlite3.IntegrityError:err(409,'Codice già presente')
   if not r.rowcount:err(404,'CdS non trovato')
   if b.active:
-    c.execute("INSERT OR IGNORE INTO task_courses(task_id,course_id,done) SELECT id,?,0 FROM tasks WHERE scope='common' AND completion_mode='per_course'",(cid,))
+   c.execute("INSERT OR IGNORE INTO task_courses(task_id,course_id,done) SELECT id,?,0 FROM tasks WHERE scope='common' AND completion_mode='per_course'",(cid,))
    record(c,u['id'],'update','course',cid)
  return {'ok':True}
 @app.post('/api/courses/import')
@@ -320,7 +320,7 @@ async def course_import(req:Request,file:UploadFile=File(...)):
   else:valid.append((code,name))
  with conn() as c:
   for code,name in valid:
-    c.execute('INSERT INTO courses(code,name) VALUES(?,?) ON CONFLICT(code) DO UPDATE SET name=excluded.name',(code,name))
+   c.execute('INSERT INTO courses(code,name) VALUES(?,?) ON CONFLICT(code) DO UPDATE SET name=excluded.name',(code,name))
    c.execute("INSERT OR IGNORE INTO task_courses(task_id,course_id,done) SELECT t.id,c.id,0 FROM tasks t CROSS JOIN courses c WHERE t.scope='common' AND t.completion_mode='per_course' AND c.active=1")
   record(c,u['id'],'import','course',None)
  return {'imported':len(valid),'rejected_lines':rejected}
