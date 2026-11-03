@@ -102,7 +102,7 @@ def can_write(c,u,t):
   return assigned_task_course(c,u,t['id']) and t['assigned_to'] in (None,u['id'])
  if scope=='project' and t['project_id']:
   p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
-  return bool(p and project_can_edit(c,u,p))
+  return bool(p and (project_can_edit(c,u,p) or (t['assigned_to']==u['id'] and project_can_view(c,u,p))))
  if t['assigned_to']==u['id']:return True
  if t['group_id']:
   member=c.execute("SELECT role FROM memberships WHERE group_id=? AND user_id=?",(t['group_id'],u['id'])).fetchone()
@@ -176,6 +176,13 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   needadmin(req)
   with conn() as c:
    return [dict(r) for r in c.execute('SELECT ca.course_id,ca.user_id,u.display_name FROM course_assignees ca JOIN users u ON u.id=ca.user_id ORDER BY ca.course_id,u.display_name')]
+ @app.get('/api/my-courses')
+ def my_course_ids(req:Request):
+  u=user(req)
+  with conn() as c:
+   if u['role']=='admin':return [r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')]
+   return [r[0] for r in c.execute('SELECT ca.course_id FROM course_assignees ca JOIN courses c ON c.id=ca.course_id WHERE ca.user_id=? AND c.active=1',(u['id'],))]
+
  @app.put('/api/courses/{cid}/assignees')
  def assign_course(cid:int,b:Assignment,req:Request):
   u=needadmin(req);csrf(req)
@@ -243,6 +250,22 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,p['owner_id'],b.manager_id or p['owner_id'],b)
    record(c,u['id'],'update','project',pid)
+  return {'ok':True}
+ class TaskStatus(BaseModel):
+  status:str
+ @app.patch('/api/tasks/{tid}/status')
+ def task_status(tid:int,b:TaskStatus,req:Request):
+  u=user(req);csrf(req)
+  if b.status not in ('todo','doing','waiting','done'):fail('Stato non valido',400)
+  with conn() as c:
+   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
+   if not t:fail('Attività inesistente',404)
+   allowed=can_finish(c,u,t) if b.status=='done' else can_write(c,u,t)
+   if not allowed:fail()
+   if b.status=='done' and t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
+    fail('Completare separatamente i CdS',400)
+   c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(b.status,datetime.now(timezone.utc).isoformat(),tid))
+   record(c,u['id'],'status','task',tid)
   return {'ok':True}
  @app.get('/api/profile')
  def profile(req:Request):
