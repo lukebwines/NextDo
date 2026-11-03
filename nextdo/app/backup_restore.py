@@ -86,6 +86,9 @@ def register_restore_routes(app,*,user,csrf,db_path,attachments_path,data_path,d
      attachments_path.rename(old_files);moved=True
      shutil.copytree(new_files,attachments_path)
      db_copy(new_db,db_path)
+     # Imported archives from older NextDo versions must be upgraded before use.
+     from . import workspace
+     workspace.upgrade(db_path,data_path)
      with sqlite3.connect(db_path) as conn:conn.execute('DELETE FROM sessions')
     except Exception:
      db_copy(old_db,db_path)

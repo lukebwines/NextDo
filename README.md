@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione di test: 0.1.6-test.** Dashboard rifinita sulla prima proposta grafica approvata: menu con etichette, quattro contatori cliccabili, aggiunta rapida, scadenze compatte, settimana e riepilogo etichette. Aggiunto il ripristino di archivi ZIP esportati da NextDo.
+**Versione candidato: 0.1.7-test.** Aggiunge spazi personali, assegnazione CdS ai colleghi, scadenze comuni e Project Manager Kanban mantenendo tutte le funzioni della 0.1.6-test.
+
+**Versione precedente: 0.1.6-test.** Dashboard rifinita sulla prima proposta grafica approvata: menu con etichette, quattro contatori cliccabili, aggiunta rapida, scadenze compatte, settimana e riepilogo etichette. Aggiunto il ripristino di archivi ZIP esportati da NextDo.
 
 Repository pubblico contenente soltanto codice sorgente. **Nessun codice o nome reale di CdS, database, nota, account o credenziale viene pubblicato.** I dati dell'installazione restano in `/data` sul dispositivo.
 
@@ -59,3 +61,28 @@ Dopo aver aggiornato NextDo da Home Assistant, riaprire l'interfaccia e, al prim
 - Le richieste di upload continuano a usare l'autenticazione e la protezione CSRF esistenti, senza pubblicare file nel repository.
 
 Questa release modifica interfaccia e lista di estensioni ammesse; non cambia lo schema SQLite né le credenziali. Conservare un backup Home Assistant di NextDo prima dell'aggiornamento. Test visivi e deploy ARM64 devono essere verificati sull'installazione effettiva.
+
+## Progetti, scadenze comuni, CdS e spazio personale (0.1.7-test)
+
+### Configurazione organizzativa
+
+1. Aprire **Impostazioni → + Utente** e creare un account per ogni collega, senza mai caricare account reali nel repository GitHub.
+2. Aprire **Corsi di Studio** e inserire/importare l'anagrafica solo nell'installazione locale.
+3. Premere **Assegna colleghi** su ciascun CdS e selezionare uno o più utenti. La selezione è modificabile, senza cancellare attività o progetti.
+4. I colleghi accedono con credenziali NextDo personali e vedono scadenze dei CdS assegnati, scadenze comuni, progetti a cui hanno accesso e note personali.
+5. Per creare **scadenze comuni**, scegliere Ambito: "Comune a tutti i CdS", poi "Completamento globale" o "Separato per CdS". Nel secondo caso ogni collega completa solo i CdS a lui assegnati.
+6. Per progetti non collegati ai CdS usare **Progetti → Nuovo progetto → Indipendente dai CdS** e scegliere partecipanti e responsabile. Per quelli CdS usare l'ambito "Uno o più CdS".
+7. Il progetto include una **bacheca Kanban** (Da fare, In corso, In attesa, Completato) con spostamento drag-and-drop o modifica dello stato aprendo la scheda.
+8. **Il mio spazio** conserva scadenze personali, note/appunti e allegati senza CdS o progetto. Le note personali non sono mostrate ai colleghi né agli amministratori diversi dal proprietario.
+
+### Gestione account
+
+Da Impostazioni ogni utente può modificare la propria password inserendo quella attuale. Un amministratore può reimpostare password altrui, modificare ruoli e disattivare/riattivare utenti. Una variazione di password/ruolo/stato revoca le sessioni dell'account; l'ultimo amministratore non può essere disattivato. La password non viene mostrata in chiaro.
+
+### Sicurezza e migrazione
+
+Prima di modificare il database, la nuova versione crea un backup in `/data/nextdo-before-workspaces-migration.sqlite3` (se non già presente). Nessun database o dato reale deve essere committato su GitHub. Preservare anche un backup esterno dell'add-on Home Assistant prima dell'aggiornamento. Eventuali ZIP importati da una versione precedente di NextDo vengono migrati nel nuovo schema.
+
+Le autorizzazioni sono applicate lato API: un collega non accede alle scadenze di CdS non assegnati, e chi non è autorizzato non può modificare/completare quelle condivise. Una nuova assegnazione CdS aggiorna dinamicamente le autorizzazioni.
+
+**Limiti:** release ancora sperimentale; collaudo su Home Assistant OS ARM64 e prova d'uso multiutente su dispositivo reale necessari prima di impiegare dati lavorativi o consentire accessi esterni. Cloudflare Access con politiche restrittive resta requisito per accesso remoto dedicato.

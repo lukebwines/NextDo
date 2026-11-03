@@ -103,6 +103,8 @@ def migrate_legacy_database():
 
 migrate_legacy_database()
 init()
+from . import workspace
+workspace.upgrade(DB,DATA)
 def ensure_setup_token():
  with conn() as c:
   initial=c.execute('SELECT 1 FROM users LIMIT 1').fetchone() is None
@@ -142,21 +144,13 @@ def csrf(req):
 def mutation(req):user(req);csrf(req)
 def is_admin(u):return u['role']=='admin'
 def accessible(c,u,t,write=False):
- if is_admin(u) or t['owner_id']==u['id'] or (t['assigned_to']==u['id']):return True
- if t['group_id'] is not None:
-  m=c.execute('SELECT role FROM memberships WHERE group_id=? AND user_id=?',(t['group_id'],u['id'])).fetchone()
-  if m:return True
- return False
+ return workspace.can_read(c,u,t)
 
 def can_edit(c,u,t):
- if is_admin(u) or t['owner_id']==u['id']:return True
- if t['group_id']:
-  m=c.execute('SELECT role FROM memberships WHERE group_id=? AND user_id=?',(t['group_id'],u['id'])).fetchone()
-  return bool(m and m['role']=='manager')
- return False
+ return workspace.can_write(c,u,t)
 
-def taskdetail(c,t):
- d=dict(t);d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];return d
+def taskdetail(c,t,u=None):
+ d=dict(t);d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];d['can_edit']=workspace.can_write(c,u,t) if u else False;d['can_complete']=(workspace.can_finish(c,u,t) or (t['completion_mode']=='per_course' and bool(c.execute('SELECT 1 FROM task_courses tc JOIN course_assignees ca ON ca.course_id=tc.course_id WHERE tc.task_id=? AND ca.user_id=? LIMIT 1',(t['id'],u['id'])).fetchone()))) if u else False;return d
 
 def check_course_code(code):
  # Historical INCA rule: M followed by 2-3 alphanumerics, including MM? and M??R.
@@ -164,7 +158,7 @@ def check_course_code(code):
 
 def asset_versions():
  return {name:hashlib.sha256((ROOT/'static'/name).read_bytes()).hexdigest()[:12]
-         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','app.js')}
+         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','workspace-ui.css','workspace-ui.js','app.js')}
 
 @app.get('/',response_class=HTMLResponse)
 def home():
@@ -176,7 +170,7 @@ def home():
 @app.get('/api/build')
 def build_details(req:Request):
  user(req)
- return {'version':'0.1.5-test','assets':asset_versions()}
+ return {'version':'0.1.7-test','assets':asset_versions()}
 @app.get('/api/setup')
 def setup():
  with conn() as c:count=c.execute('SELECT COUNT(*) FROM users').fetchone()[0]
@@ -291,7 +285,9 @@ def course_create(b:CourseIn,req:Request):
  with conn() as c:
   try:r=c.execute('INSERT INTO courses(code,name,active) VALUES(?,?,?)',(code,b.name.strip(),int(b.active)))
   except sqlite3.IntegrityError:err(409,'Codice CdS già presente')
-  record(c,u['id'],'create','course',r.lastrowid)
+  if b.active:
+   c.execute("INSERT OR IGNORE INTO task_courses(task_id,course_id,done) SELECT id,?,0 FROM tasks WHERE scope='common' AND completion_mode='per_course'",(r.lastrowid,))
+   record(c,u['id'],'create','course',r.lastrowid)
  return {'id':r.lastrowid}
 @app.put('/api/courses/{cid}')
 def course_update(cid:int,b:CourseIn,req:Request):
@@ -303,7 +299,9 @@ def course_update(cid:int,b:CourseIn,req:Request):
   try:r=c.execute('UPDATE courses SET code=?,name=?,active=? WHERE id=?',(code,b.name.strip(),int(b.active),cid))
   except sqlite3.IntegrityError:err(409,'Codice già presente')
   if not r.rowcount:err(404,'CdS non trovato')
-  record(c,u['id'],'update','course',cid)
+  if b.active:
+   c.execute("INSERT OR IGNORE INTO task_courses(task_id,course_id,done) SELECT id,?,0 FROM tasks WHERE scope='common' AND completion_mode='per_course'",(cid,))
+   record(c,u['id'],'update','course',cid)
  return {'ok':True}
 @app.post('/api/courses/import')
 async def course_import(req:Request,file:UploadFile=File(...)):
@@ -321,7 +319,9 @@ async def course_import(req:Request,file:UploadFile=File(...)):
   if not check_course_code(code) or not name:rejected.append(i)
   else:valid.append((code,name))
  with conn() as c:
-  for code,name in valid:c.execute('INSERT INTO courses(code,name) VALUES(?,?) ON CONFLICT(code) DO UPDATE SET name=excluded.name',(code,name))
+  for code,name in valid:
+   c.execute('INSERT INTO courses(code,name) VALUES(?,?) ON CONFLICT(code) DO UPDATE SET name=excluded.name',(code,name))
+   c.execute("INSERT OR IGNORE INTO task_courses(task_id,course_id,done) SELECT t.id,c.id,0 FROM tasks t CROSS JOIN courses c WHERE t.scope='common' AND t.completion_mode='per_course' AND c.active=1")
   record(c,u['id'],'import','course',None)
  return {'imported':len(valid),'rejected_lines':rejected}
 
@@ -331,10 +331,12 @@ class TaskIn(BaseModel):
  kind:str='task';priority:str='normal';status:str='todo';due_at:Optional[str]=None
  assigned_to:Optional[int]=None;group_id:Optional[int]=None
  completion_mode:str='global';display_enabled:bool=False;recurrence:str='none'
+ scope:str='personal';project_id:Optional[int]=None
  labels:list[str]=Field(default_factory=list);course_ids:list[int]=Field(default_factory=list);reminders:list[int]=Field(default_factory=list)
 def validate_task(c,u,b):
  if b.priority not in ('low','normal','high','critical') or b.status not in ('todo','doing','waiting','done') or b.kind not in ('task','note') or b.completion_mode not in ('global','per_course'):err(400,'Valore non valido')
  if b.recurrence not in ('none','daily','weekly','monthly','yearly'):err(400,'Ricorrenza non valida')
+ workspace.validate_scope(c,u,b)
  if b.due_at:
   try:datetime.fromisoformat(b.due_at.replace('Z','+00:00'))
   except ValueError:err(400,'Data non valida')
@@ -342,7 +344,7 @@ def validate_task(c,u,b):
  if b.group_id:
   if not is_admin(u) and not c.execute('SELECT 1 FROM memberships WHERE group_id=? AND user_id=?',(b.group_id,u['id'])).fetchone():err()
   if b.assigned_to and not is_admin(u) and not c.execute('SELECT 1 FROM memberships WHERE group_id=? AND user_id=?',(b.group_id,b.assigned_to)).fetchone():err(400,'Assegnatario non nel gruppo')
- if b.assigned_to and not b.group_id and b.assigned_to!=u['id']:err(400,'Per assegnare a un collega selezionare un gruppo')
+ if b.assigned_to and not b.group_id and b.assigned_to!=u['id'] and not is_admin(u) and b.scope!='project':err(400,'Per assegnare a un collega selezionare un gruppo o progetto')
  if b.display_enabled and not b.group_id:err(400,'Per pubblicare sul monitor selezionare un gruppo')
  if b.course_ids:
   cnt=c.execute('SELECT COUNT(*) FROM courses WHERE id IN ('+','.join('?'*len(set(b.course_ids)))+')',tuple(set(b.course_ids))).fetchone()[0]
@@ -358,21 +360,26 @@ def put_reminders(c,tid,mins):
 def tasks(req:Request,course_id:Optional[int]=None,group_id:Optional[int]=None,status:Optional[str]=None,query:Optional[str]=None):
  u=user(req)
  with conn() as c:
-  sql='SELECT t.* FROM tasks t WHERE (t.owner_id=? OR t.assigned_to=? OR EXISTS (SELECT 1 FROM memberships m WHERE m.group_id=t.group_id AND m.user_id=?))' if not is_admin(u) else 'SELECT t.* FROM tasks t WHERE 1=1'
-  params=[] if is_admin(u) else [u['id']]*3
+  sql='SELECT t.* FROM tasks t WHERE 1=1'
+  params=[]
   if course_id:sql+=' AND EXISTS (SELECT 1 FROM task_courses tc WHERE tc.task_id=t.id AND tc.course_id=?)';params.append(course_id)
   if group_id:sql+=' AND t.group_id=?';params.append(group_id)
   if status:sql+=' AND t.status=?';params.append(status)
   if query:sql+=' AND (t.title LIKE ? OR t.description LIKE ?)';params.extend(['%'+query[:100]+'%']*2)
-  sql+=' ORDER BY CASE WHEN t.status="done" THEN 1 ELSE 0 END,t.due_at IS NULL,t.due_at,t.id DESC LIMIT 500'
-  return [taskdetail(c,t) for t in c.execute(sql,params)]
+  sql+=' ORDER BY CASE WHEN t.status="done" THEN 1 ELSE 0 END,t.due_at IS NULL,t.due_at,t.id DESC'
+  visible=(t for t in c.execute(sql,params) if accessible(c,u,t))
+  return [taskdetail(c,t,u) for _,t in zip(range(500),visible)]
 @app.post('/api/tasks')
 def task_create(b:TaskIn,req:Request):
  u=user(req);csrf(req)
  with conn() as c:
   validate_task(c,u,b)
-  r=c.execute('INSERT INTO tasks(title,description,kind,priority,status,due_at,owner_id,assigned_to,group_id,completion_mode,display_enabled,recurrence,labels) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,u['id'],b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False)))
-  tid=r.lastrowid;put_task_courses(c,tid,b.course_ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'create','task',tid)
+  if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common'):
+   err(400,'Completare i singoli CdS prima di chiudere la scadenza')
+  r=c.execute('INSERT INTO tasks(title,description,kind,priority,status,due_at,owner_id,assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,u['id'],b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id))
+  tid=r.lastrowid
+  ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
+  put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'create','task',tid)
  return {'id':tid}
 @app.get('/api/tasks/{tid}')
 def task_get(tid:int,req:Request):
@@ -381,7 +388,7 @@ def task_get(tid:int,req:Request):
   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
   if not t:err(404,'Attività non trovata')
   if not accessible(c,u,t):err()
-  return taskdetail(c,t)
+  return taskdetail(c,t,u)
 @app.put('/api/tasks/{tid}')
 def task_update(tid:int,b:TaskIn,req:Request):
  u=user(req);csrf(req)
@@ -389,9 +396,17 @@ def task_update(tid:int,b:TaskIn,req:Request):
   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
   if not t:err(404,'Attività non trovata')
   if not can_edit(c,u,t):err()
+  if not is_admin(u) and t['owner_id']!=u['id']:
+   original={r[0] for r in c.execute('SELECT course_id FROM task_courses WHERE task_id=?',(tid,))}
+   if b.scope!=t['scope'] or b.project_id!=t['project_id'] or b.assigned_to!=t['assigned_to'] or (t['scope']=='cds' and set(b.course_ids)!=original):
+    err(403,'Solo il proprietario o l’amministratore può cambiare ambito, CdS e responsabili')
   validate_task(c,u,b)
-  c.execute('UPDATE tasks SET title=?,description=?,kind=?,priority=?,status=?,due_at=?,assigned_to=?,group_id=?,completion_mode=?,display_enabled=?,recurrence=?,labels=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),iso(),tid))
-  put_task_courses(c,tid,b.course_ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'update','task',tid)
+  if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common'):
+   progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
+   if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
+  c.execute('UPDATE tasks SET title=?,description=?,kind=?,priority=?,status=?,due_at=?,assigned_to=?,group_id=?,completion_mode=?,display_enabled=?,recurrence=?,labels=?,scope=?,project_id=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id,iso(),tid))
+  ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
+  put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'update','task',tid)
  return {'ok':True}
 @app.delete('/api/tasks/{tid}')
 def task_delete(tid:int,req:Request):
@@ -411,6 +426,8 @@ def complete_course(tid:int,cid:int,req:Request):
   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
   if not t:err(404,'Attività non trovata')
   if not accessible(c,u,t):err()
+  if t['scope'] not in ('cds','common','group','project'):err()
+  if not is_admin(u) and not workspace.owns_course(c,u['id'],cid):err(403,'CdS non assegnato')
   if t['completion_mode']!='per_course':err(400,'Attività a completamento globale')
   r=c.execute('UPDATE task_courses SET done=1-done WHERE task_id=? AND course_id=?',(tid,cid))
   if not r.rowcount:err(404,'CdS non associato')
@@ -423,7 +440,7 @@ def toggle(tid:int,req:Request):
  with conn() as c:
   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
   if not t:err(404,'Attività non trovata')
-  if not accessible(c,u,t):err()
+  if not workspace.can_finish(c,u,t):err()
   if t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():err(400,'Completare separatamente i CdS')
   c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',('todo' if t['status']=='done' else 'done',iso(),tid));record(c,u['id'],'toggle','task',tid)
  return {'ok':True}
@@ -435,7 +452,7 @@ async def attach(tid:int,req:Request,file:UploadFile=File(...)):
  with conn() as c:
   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
   if not t:err(404,'Attività non trovata')
-  if not accessible(c,u,t):err()
+  if not can_edit(c,u,t):err()
  allowed={'.pdf','.png','.jpg','.jpeg','.webp','.gif','.bmp','.txt','.csv','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.rtf','.odt','.ods','.odp'}
  filename=re.split(r'[\\\\/]',file.filename or '')[-1].strip()
  if not filename or Path(filename).suffix.lower() not in allowed:err(400,'Formato non consentito')
@@ -450,17 +467,19 @@ async def attach(tid:int,req:Request,file:UploadFile=File(...)):
 def download(aid:int,req:Request):
  u=user(req)
  with conn() as c:
-  r=c.execute('SELECT a.*,t.owner_id,t.assigned_to,t.group_id FROM attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=?',(aid,)).fetchone()
+  r=c.execute('SELECT * FROM attachments WHERE id=?',(aid,)).fetchone()
   if not r:err(404,'Allegato non trovato')
-  if not accessible(c,u,r):err()
+  t=c.execute('SELECT * FROM tasks WHERE id=?',(r['task_id'],)).fetchone()
+  if not t or not accessible(c,u,t):err()
  return FileResponse(FILES/r['stored'],filename=r['filename'],media_type='application/octet-stream',headers={'X-Content-Type-Options':'nosniff','Content-Security-Policy':'sandbox'})
 @app.delete('/api/attachments/{aid}')
 def remove_attachment(aid:int,req:Request):
  u=user(req);csrf(req)
  with conn() as c:
-  r=c.execute('SELECT a.*,t.owner_id,t.assigned_to,t.group_id FROM attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=?',(aid,)).fetchone()
+  r=c.execute('SELECT * FROM attachments WHERE id=?',(aid,)).fetchone()
   if not r:err(404,'Allegato non trovato')
-  if not can_edit(c,u,r):err()
+  t=c.execute('SELECT * FROM tasks WHERE id=?',(r['task_id'],)).fetchone()
+  if not t or not can_edit(c,u,t):err()
   c.execute('DELETE FROM attachments WHERE id=?',(aid,));record(c,u['id'],'delete_attachment','task',r['task_id'])
  (FILES/r['stored']).unlink(missing_ok=True)
  return {'ok':True}
@@ -598,3 +617,6 @@ def backup(req:Request):
 # Importa archivi ZIP creati da NextDo; i backup del Supervisor Home Assistant sono distinti.
 from .backup_restore import register_restore_routes
 register_restore_routes(app,user=user,csrf=csrf,db_path=DB,attachments_path=FILES,data_path=DATA,db_lock=DB_LOCK)
+
+# Workspaces, course ownership, Kanban projects and user account management.
+workspace.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record)
