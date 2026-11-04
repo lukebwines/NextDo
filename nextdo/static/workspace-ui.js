@@ -59,31 +59,53 @@ const NextDoWorkspace=(()=>{
    col.append(el('h3',{},[label,tag(String(cards.length))]));
    if(!cards.length)col.append(node('p','kanban-empty','Nessuna attività'));
    for(const t of cards){
-    const card=el('div',{class:'kanban-task',draggable:t.can_edit===false?'false':'true'},[
+    const movable=t.can_move===true;
+    const card=el('div',{class:'kanban-task'+(movable?'':' kanban-task-readonly'),draggable:movable?'true':'false',
+      title:movable?'Trascina la scheda in un’altra colonna':'Sola lettura: attività non assegnata a te o non modificabile'},[
+     ...(movable?[node('span','kanban-drag-label','⋮⋮ Trascina')]:[]),
      node('strong','',t.title),
      node('span','muted',t.due_at?fmt(t.due_at):'Senza scadenza'),
      el('div',{class:'kanban-tags'},[tag(priority[t.priority]||'Normale',t.priority),...(t.labels||[]).slice(0,2).map(x=>tag(x))])
     ]);
-    if(t.can_edit!==false)card.append(el('div',{class:'kanban-card-tools'},[
-     opt('Aggiorna stato',e=>{e.stopPropagation();NextDoProgress.open(t)},'small')
+    if(movable)card.append(el('div',{class:'kanban-card-tools'},[
+     opt('Aggiorna stato',()=>NextDoProgress.open(t),'small')
     ]));
-    card.addEventListener('click',()=>taskForm(t));
-    card.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',String(t.id));e.dataTransfer.effectAllowed='move'});
+    else card.append(node('span','kanban-readonly-hint','Sola lettura · chiedi al responsabile di assegnarti l’attività'));
+    card.addEventListener('click',e=>{if(e.target.closest('button'))return;taskForm(t)});
+    card.addEventListener('dragstart',e=>{
+     if(!movable){e.preventDefault();return}
+     e.dataTransfer.setData('application/x-nextdo-task',String(t.id));
+     e.dataTransfer.setData('text/plain',String(t.id));
+     e.dataTransfer.effectAllowed='move';
+     card.classList.add('kanban-dragging');
+    });
+    card.addEventListener('dragend',()=>{
+     card.classList.remove('kanban-dragging');
+     kanban.querySelectorAll('.kanban-over').forEach(x=>x.classList.remove('kanban-over'));
+    });
     col.append(card);
    }
-   col.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('text/plain')){e.preventDefault();col.classList.add('kanban-over')}});
-   col.addEventListener('dragleave',()=>col.classList.remove('kanban-over'));
+   col.addEventListener('dragover',e=>{
+    const types=[...(e.dataTransfer?.types||[])];
+    if(types.includes('application/x-nextdo-task')||types.includes('text/plain')){
+     e.preventDefault();e.dataTransfer.dropEffect='move';col.classList.add('kanban-over');
+    }
+   });
+   col.addEventListener('dragleave',e=>{if(!col.contains(e.relatedTarget))col.classList.remove('kanban-over')});
    col.addEventListener('drop',async e=>{
     e.preventDefault();col.classList.remove('kanban-over');
-    const id=Number(e.dataTransfer.getData('text/plain'));
-    if(!S.tasks.some(t=>t.id===id&&t.project_id===current.id))return;
-    try{await api('/tasks/'+id+'/status',{method:'PATCH',body:JSON.stringify({status})});await refresh();render()}
-    catch(err){msg(err.message,true)}
+    const id=Number(e.dataTransfer.getData('application/x-nextdo-task')||e.dataTransfer.getData('text/plain'));
+    const moved=S.tasks.find(t=>t.id===id&&t.project_id===current.id);
+    if(!moved||moved.can_move!==true||moved.status===status)return;
+    try{
+     await api('/tasks/'+id+'/status',{method:'PATCH',body:JSON.stringify({status})});
+     await refresh();render();
+    }catch(err){msg(err.message,true)}
    });
    kanban.append(col);
   }
   panel.append(kanban);
-  const hint=node('p','sub','Trascina una scheda tra le colonne oppure aprila e cambia lo stato. Le attività con completamento per CdS richiedono la conferma del singolo corso.');
+  const hint=node('p','sub','Trascina le schede con «⋮⋮ Trascina» oppure usa «Aggiorna stato». Le schede in sola lettura non possono essere spostate. Il completamento separato per CdS richiede la conferma di ogni corso.');
   panel.append(hint);main.append(panel);
  }
  function projectForm(p=null){
