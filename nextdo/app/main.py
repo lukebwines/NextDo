@@ -413,7 +413,10 @@ def task_update(tid:int,b:TaskIn,req:Request):
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
   c.execute('UPDATE tasks SET title=?,description=?,kind=?,priority=?,status=?,due_at=?,start_at=?,assigned_to=?,group_id=?,completion_mode=?,display_enabled=?,recurrence=?,labels=?,scope=?,project_id=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.start_at,b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id,iso(),tid))
   ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
-  put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'update','task',tid)
+  put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders)
+  if t['status']!=b.status:
+   c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],b.status,''))
+  record(c,u['id'],'update','task',tid)
  return {'ok':True}
 @app.delete('/api/tasks/{tid}')
 def task_delete(tid:int,req:Request):
@@ -436,10 +439,15 @@ def complete_course(tid:int,cid:int,req:Request):
   if t['scope'] not in ('cds','common','group','project'):err()
   if not is_admin(u) and not workspace.owns_course(c,u['id'],cid):err(403,'CdS non assegnato')
   if t['completion_mode']!='per_course':err(400,'Attività a completamento globale')
-  r=c.execute('UPDATE task_courses SET done=1-done WHERE task_id=? AND course_id=?',(tid,cid))
-  if not r.rowcount:err(404,'CdS non associato')
+  course=c.execute('SELECT c.code,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? AND tc.course_id=?',(tid,cid)).fetchone()
+  if not course:err(404,'CdS non associato')
+  c.execute('UPDATE task_courses SET done=1-done WHERE task_id=? AND course_id=?',(tid,cid))
   total=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
-  c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',('done' if total[0] and total[0]==total[1] else 'doing',iso(),tid));record(c,u['id'],'complete_course','task',tid)
+  next_status='done' if total[0] and total[0]==total[1] else 'doing'
+  c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(next_status,iso(),tid))
+  note=('Riapertura CdS: ' if course['done'] else 'Completamento CdS: ')+course['code']
+  c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],next_status,note))
+  record(c,u['id'],'complete_course','task',tid)
  return {'ok':True}
 @app.post('/api/tasks/{tid}/toggle')
 def toggle(tid:int,req:Request):
@@ -449,7 +457,10 @@ def toggle(tid:int,req:Request):
   if not t:err(404,'Attività non trovata')
   if not workspace.can_finish(c,u,t):err()
   if t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():err(400,'Completare separatamente i CdS')
-  c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',('todo' if t['status']=='done' else 'done',iso(),tid));record(c,u['id'],'toggle','task',tid)
+  next_status='todo' if t['status']=='done' else 'done'
+  c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(next_status,iso(),tid))
+  c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],next_status,''))
+  record(c,u['id'],'toggle','task',tid)
  return {'ok':True}
 
 MAX_FILE=15*1024*1024
