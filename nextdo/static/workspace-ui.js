@@ -18,7 +18,8 @@ const NextDoWorkspace=(()=>{
   for(const p of S.projects){
    const n=Object.values(p.counts||{}).reduce((a,b)=>a+b,0);
    const done=p.counts?.done||0;
-   const courseNames=(p.course_ids||[]).map(id=>S.courses.find(c=>c.id===id)?.code).filter(Boolean).join(', ');
+   const linkedIds=(p.responsibilities||[]).length?Array.from(new Set(p.responsibilities.map(a=>a.course_id))):(p.course_ids||[]);
+    const courseNames=linkedIds.map(id=>S.courses.find(c=>c.id===id)?.code).filter(Boolean).join(', ');
    projects.append(el('button',{type:'button',class:'project-tile '+(S.selectedProject===p.id?'selected':''),onclick:()=>{S.selectedProject=p.id;render()}},[
     node('strong','',p.title),tag(projectLabel(p.scope)),node('span','muted',courseNames||'Nessun CdS associato'),
     node('span','project-progress',n?done+' / '+n+' attività completate':'Nessuna attività'),
@@ -44,8 +45,25 @@ const NextDoWorkspace=(()=>{
    opt('+ Attività',()=>taskForm(null,'task',null,{scope:'project',project_id:current.id}),'primary')
   ]);
   panel.append(heading);
-  if(current.can_edit)panel.append(node('p','sub','Esporta JSON per Lists scarica soltanto gli ID, i titoli, gli stati e le scadenze delle attività del progetto. Carica il file nella cartella SharePoint NextDo_Sync. Nessun documento, descrizione o dato dei colleghi viene esportato. Gli stati eventualmente già modificati su Lists non vengono aggiornati dal flusso attuale.'));
+  if(current.can_edit)panel.append(node('p','sub','Assegna i colleghi ai CdS nelle impostazioni del progetto. Esporta JSON per Lists genera automaticamente una riga per attività e per CdS, preservando gli avanzamenti già modificati in Microsoft Lists. Prima di caricare file con assegnazioni reali occorre adeguare le colonne e il flusso Power Automate.'));
   if(current.description)panel.append(node('p','sub',current.description));
+  if((current.responsibilities||[]).length){
+   const overview=el('div',{class:'card project-responsibilities-overview'},[node('h3','','Responsabili e CdS assegnati')]);
+   const byUser=new Map();
+   for(const r of current.responsibilities){
+    if(!byUser.has(r.user_id))byUser.set(r.user_id,[]);
+    const course=S.courses.find(c=>c.id===r.course_id);
+    byUser.get(r.user_id).push(course?.code||String(r.course_id));
+   }
+   for(const [uid,courseCodes] of byUser){
+    const colleague=S.users.find(u=>u.id===uid);
+    overview.append(el('div',{class:'rowtask'},[
+     node('strong','taskmain',colleague?.display_name||'Utente non disponibile'),
+     node('span','muted',courseCodes.join(', '))
+    ]));
+   }
+   panel.append(overview);
+  }
   const viewbar=el('div',{class:'project-view-toolbar','aria-label':'Visualizzazione progetto'});
   for(const [mode,label] of [['kanban','Kanban'],['gantt','Gantt']]){
    const view=opt(label,()=>{
@@ -158,20 +176,47 @@ const NextDoWorkspace=(()=>{
   const due=input('due','',dtLocal(p?.due_at),'datetime-local');
   const featured=el('input',{type:'checkbox',checked:p?p.featured!==0:true});
   const courseBox=checkboxes('CdS coinvolti',scopedCourses().map(c=>[c.id,c.code+' — '+c.name]),p?.course_ids||[]);
-  const memberBox=checkboxes('Colleghi partecipanti',S.users.filter(u=>u.active&&u.id!==S.me.id).map(u=>[u.id,u.display_name]),p?.member_ids||[]);
+  const memberBox=checkboxes('Altri partecipanti con accesso al progetto',S.users.filter(u=>u.active&&u.id!==S.me.id).map(u=>[u.id,u.display_name]),p?.member_ids||[]);
+  const responsibilities=el('div',{class:'full project-responsibilities'});
+  responsibilities.append(
+   node('h3','','Responsabili dei singoli CdS'),
+   node('p','sub','Assegna uno o più CdS a ciascun collega. Ogni attività del progetto sarà disponibile per tutti i CdS qui indicati, senza selezionare nuovamente i destinatari nelle attività.')
+  );
+  const responsibilityRows=el('div',{class:'project-responsibility-rows'});
+  const courseOptions=[['','Seleziona CdS'],...S.courses.filter(c=>c.active).map(c=>[String(c.id),c.code+' — '+c.name])];
+  const colleagueOptions=[['','Seleziona collega'],...S.users.filter(u=>u.active).map(u=>[String(u.id),u.display_name])];
+  function addResponsibility(courseId='',userId=''){
+   const row=el('div',{class:'rowtask'});
+   const courseSelect=select('responsibility_course',courseOptions,String(courseId||''));
+   const userSelect=select('responsibility_user',colleagueOptions,String(userId||''));
+   row.append(field('CdS',courseSelect),field('Collega responsabile',userSelect),
+    opt('Rimuovi',()=>row.remove(),'small'));
+   responsibilityRows.append(row);
+  }
+  for(const r of p?.responsibilities||[])addResponsibility(r.course_id,r.user_id);
+  responsibilities.append(responsibilityRows,opt('+ Assegna collega a CdS',()=>addResponsibility(),'small'));
   const courseWrap=el('div',{class:'full'},[courseBox.outer]);
   const update=()=>{courseWrap.style.display=scope.value==='cds'?'':'none'};
   scope.addEventListener('change',update);
-  f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,memberBox.outer,
+  f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,responsibilities,memberBox.outer,
    el('label',{class:'full project-featured-option'},[featured,' Mostra Gantt nella Dashboard dei partecipanti']));
   update();
   const actions=el('div',{class:'actions full'},[opt('Annulla',()=>back.remove()),el('button',{type:'submit',class:'btn primary',text:p?'Salva progetto':'Crea progetto'})]);
   f.append(actions);
   f.addEventListener('submit',async e=>{
    e.preventDefault();
+   const assignments=[];
+   for(const row of responsibilityRows.children){
+    const courseId=Number(row.querySelector('select[name="responsibility_course"]').value);
+    const userId=Number(row.querySelector('select[name="responsibility_user"]').value);
+    if(!courseId||!userId)return msg('Per ogni assegnazione scegli sia il CdS sia il collega.',true);
+    assignments.push({course_id:courseId,user_id:userId});
+   }
+   const distinct=new Set(assignments.map(a=>a.course_id+':'+a.user_id));
+   if(distinct.size!==assignments.length)return msg('La stessa coppia collega–CdS è stata inserita due volte.',true);
    const data={title:title.value.trim(),description:desc.value,scope:scope.value,status:status.value,featured:featured.checked,
     manager_id:manager.value?Number(manager.value):null,due_at:due.value?new Date(due.value).toISOString():null,
-    course_ids:scope.value==='cds'?courseBox.selected():[],member_ids:memberBox.selected()};
+    course_ids:scope.value==='cds'?courseBox.selected():[],member_ids:memberBox.selected(),responsibilities:assignments};
    if(!data.title)return msg('Titolo obbligatorio',true);
    try{
     const r=await api('/projects'+(p?'/'+p.id:''),{method:p?'PUT':'POST',body:JSON.stringify(data)});
