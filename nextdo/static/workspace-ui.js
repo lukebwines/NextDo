@@ -44,7 +44,7 @@ const NextDoWorkspace=(()=>{
    opt('+ Attività',()=>taskForm(null,'task',null,{scope:'project',project_id:current.id}),'primary')
   ]);
   panel.append(heading);
-  if(current.can_edit)panel.append(node('p','sub','Esporta JSON per Lists scarica soltanto gli ID, i titoli, gli stati e le scadenze delle attività del progetto. Carica il file nella cartella SharePoint NextDo_Sync. Nessun documento, descrizione o dato dei colleghi viene esportato. Gli stati eventualmente già modificati su Lists non vengono aggiornati dal flusso attuale.'));
+  if(current.can_edit)panel.append(node('p','sub','Seleziona i CdS destinatari nelle attività: l’esportazione JSON crea una riga per ogni coppia attività–CdS, con identificativo stabile. Carica il file nella cartella SharePoint NextDo_Sync. Non esporta allegati, descrizioni, note o nomi dei colleghi e non sovrascrive gli avanzamenti già presenti in Lists. Prima del primo utilizzo con più CdS, configura la colonna CdS in Lists e il flusso Power Automate.'));
   if(current.description)panel.append(node('p','sub',current.description));
   const viewbar=el('div',{class:'project-view-toolbar','aria-label':'Visualizzazione progetto'});
   for(const [mode,label] of [['kanban','Kanban'],['gantt','Gantt']]){
@@ -83,7 +83,7 @@ const NextDoWorkspace=(()=>{
     card.append(
      node('strong','',t.title),
      node('span','muted',t.due_at?fmt(t.due_at):'Senza scadenza'),
-     el('div',{class:'kanban-tags'},[tag(priority[t.priority]||'Normale',t.priority),...(t.labels||[]).slice(0,2).map(x=>tag(x))])
+     el('div',{class:'kanban-tags'},[tag(priority[t.priority]||'Normale',t.priority),...(t.courses||[]).slice(0,3).map(c=>tag(c.code)),...((t.courses||[]).length>3?[tag('+'+((t.courses||[]).length-3)+' CdS')]:[]),...(t.labels||[]).slice(0,2).map(x=>tag(x))])
     );
     if(movable){
      const controls=el('div',{class:'kanban-card-tools'});
