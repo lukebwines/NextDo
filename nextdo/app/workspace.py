@@ -30,6 +30,13 @@ def upgrade(db_path:Path,data_path:Path):
     dest=sqlite3.connect(backup)
     try:db.backup(dest)
     finally:dest.close()
+  project_columns={r[1] for r in db.execute('PRAGMA table_info(projects)')}
+  if 'featured' not in project_columns:
+   backup=data_path/'nextdo-before-featured-projects-migration.sqlite3'
+   if not backup.exists():
+    target=sqlite3.connect(backup)
+    try:db.backup(target)
+    finally:target.close()
   with db:
    db.execute('PRAGMA foreign_keys=ON')
    db.executescript("""
@@ -53,7 +60,18 @@ def upgrade(db_path:Path,data_path:Path):
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member','manager')),
       PRIMARY KEY(project_id,user_id));
+    CREATE TABLE IF NOT EXISTS task_progress (
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      actor_id INTEGER NOT NULL REFERENCES users(id),
+      old_status TEXT NOT NULL,
+      new_status TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE INDEX IF NOT EXISTS idx_task_progress_task ON task_progress(task_id,id);
    """)
+   if 'featured' not in project_columns:
+    db.execute('ALTER TABLE projects ADD COLUMN featured INTEGER NOT NULL DEFAULT 1')
    if 'scope' not in cols:
     db.execute("ALTER TABLE tasks ADD COLUMN scope TEXT NOT NULL DEFAULT 'personal'")
     db.execute("UPDATE tasks SET scope='cds' WHERE EXISTS (SELECT 1 FROM task_courses tc WHERE tc.task_id=tasks.id)")
@@ -164,9 +182,14 @@ class ProjectIn(BaseModel):
  member_ids:list[int]=Field(default_factory=list,max_length=100)
  due_at:Optional[str]=None
  status:str='doing'
+ featured:bool=True
 
 class TaskStatus(BaseModel):
  status:str
+
+class ProgressUpdate(BaseModel):
+ status:str
+ note:str=Field(default='',max_length=1500)
 
 class PasswordChange(BaseModel):
  current_password:str
