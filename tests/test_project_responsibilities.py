@@ -99,9 +99,15 @@ def test_invalid_assignments_rejected_and_new_table_survives_restart(tmp_path):
  pid=r.json()['id']
  assert (tmp_path/'nextdo-before-project-responsibilities-migration.sqlite3').exists()
  client.close()
- # Init must keep the same project responsibilities and database.
- from test_workspace import init as fresh
- other,h=fresh(tmp_path)
+ # Restart the application module without recreating the first administrator.
+ import importlib,sys
+ from fastapi.testclient import TestClient
+ sys.modules.pop('app.main',None)
+ mod=importlib.import_module('app.main')
+ other=TestClient(mod.app)
+ h={'X-NextDo-CSRF':other.get('/api/csrf').json()['csrf']}
+ assert other.post('/api/login',headers=h,json={
+  'username':'admin','password':'sample admin password 123'}).status_code==200
  assert any(p['id']==pid and p['responsibilities']==[
   {'course_id':a,'user_id':person}] for p in other.get('/api/projects').json())
  other.close()
