@@ -211,3 +211,12 @@ In **Progetti → Nuovo progetto / Modifica progetto → Responsabili dei singol
 **Accesso ai suggerimenti:** amministratori possono vedere tutte le associazioni attive; altri utenti vedono i suggerimenti delle associazioni relative soltanto ai propri CdS. Le assegnazioni degli altri CdS non vengono pubblicate a tutti gli utenti. Il pulsante **+ Aggiungi collega** non modifica l'anagrafica generale.
 
 **Invariato il flusso Microsoft Lists:** tutte le attività di un progetto continuano a essere esportate con righe indipendenti per CdS. L'importazione SharePoint di prova va adattata per CdS, Progetto e responsabili prima di usare dati reali. Non è stata implementata la sincronizzazione degli stati da Lists a NextDo.
+
+
+## NextDo 0.1.16-test — selezione CdS con spunte e colleghi automatici
+
+In **Progetti → Nuovo progetto** scegliere l'ambito **Uno o più CdS** e selezionare i corsi interessati tramite le spunte **CdS coinvolti**. Per ogni corso appena selezionato NextDo propone automaticamente i colleghi già configurati in **Corsi di Studio → Assegna colleghi**. Nel riepilogo **Colleghi coinvolti** sono mostrati i nomi proposti e i relativi CdS. Se un corso non ha ancora un collega associato, NextDo lo segnala senza inventare un responsabile.
+
+La sezione **Modifica assegnazioni per questo progetto (facoltativo)** permette eccezioni specifiche: aggiungere o togliere colleghi e CdS senza modificare l'anagrafica generale. Deselezionando un CdS vengono rimosse dalle assegnazioni del progetto le spunte relative a quel corso, senza cancellare i dati dell'anagrafica. Riattivando un CdS vengono riproposti i suoi responsabili generali.
+
+**Tutela dei progetti esistenti:** aprendo un progetto NextDo visualizza la sua fotografia salvata, senza riscriverla quando cambiano le associazioni generali. Le proposte automatiche intervengono soltanto quando un CdS viene aggiunto alla selezione del progetto. Non sono state modificate le tabelle del database né la sincronizzazione Microsoft Lists: rimane l'esportazione manuale in JSON.

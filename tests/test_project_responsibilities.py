@@ -200,7 +200,11 @@ def test_project_form_defaults_and_checkbox_contract(tmp_path):
  for expected in (
   'defaultCoursesFor=uid=>S.courseAssignees',
   "colleague.addEventListener('change'",
-  'savedCourses===null?defaultCoursesFor(userId):savedCourses',
+  'savedCourses===null?scopedDefaultsFor(userId):savedCourses',
+  'courseBox.outer.addEventListener(\'change\',syncSelectedCourses)',
+  'previousSelected.has(cid)',
+  'Colleghi coinvolti',
+  'Modifica assegnazioni per questo progetto (facoltativo)',
   'responsibility_course',
   'project-colleague-group',
   'seenColleagues',
