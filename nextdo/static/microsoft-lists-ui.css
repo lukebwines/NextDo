@@ -1,0 +1,12 @@
+/* Microsoft Lists pilot: admin-only configuration and diagnostic controls. */
+.microsoft-panel{margin-top:18px}
+.microsoft-panel h2{margin:0 0 8px}
+.microsoft-panel h3{font-size:15px;margin:10px 0 6px}
+.microsoft-settings{display:grid;gap:12px;max-width:760px}
+.microsoft-settings>.microsoft-actions,.microsoft-auth,.microsoft-discovery,.microsoft-inspection{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+.microsoft-settings .field{width:100%;max-width:740px}
+.microsoft-settings>div:not(.microsoft-actions):not(.microsoft-auth):not(.microsoft-discovery):not(.microsoft-inspection){width:100%}
+.microsoft-actions{display:flex!important;flex-direction:row!important;flex-wrap:wrap;gap:8px}
+.microsoft-auth,.microsoft-discovery,.microsoft-inspection{width:100%;padding:12px;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2)}
+.microsoft-code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:24px;letter-spacing:.09em;user-select:all}
+.microsoft-auth a{color:var(--blue);text-decoration:underline;overflow-wrap:anywhere}

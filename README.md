@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.11-test.** Password da almeno 8 caratteri per gli utenti ordinari, minimo 12 per gli amministratori. Requisiti uniformi su creazione account, modifica, reimpostazione e promozione a amministratore. Mantiene le funzioni della 0.1.10-test.
+**Versione candidata: 0.1.12-test.** Avvia un collegamento Microsoft Lists di prova in sola lettura, con autorizzazione delegata temporanea e identificazione degli elenchi SharePoint. Non modifica né pubblica alcun dato sul tenant Microsoft 365.
+
+**Versione precedente: 0.1.11-test.** Password da almeno 8 caratteri per gli utenti ordinari, minimo 12 per gli amministratori.
 
 **Versione precedente: 0.1.10-test.** Corregge il trascinamento delle schede Kanban e introduce un selettore dello stato alternativo.
 
@@ -144,3 +146,23 @@ Le scadenze a **completamento separato per CdS** non possono essere chiuse o ria
 - La promozione di un normale utente ad amministratore richiede l'impostazione contestuale di una nuova password da almeno 12 caratteri; le vecchie sessioni vengono revocate.
 - Il login continua ad accettare la lunghezza delle password precedentemente create (nessuna interruzione di compatibilità).
 - Usare passphrase non riutilizzate, protezione Cloudflare Access con verifica d'identità e limitazione degli accessi; il minimo di 8 caratteri non sostituisce questi controlli.
+
+
+## Microsoft Lists — primo collegamento di prova (0.1.12-test)
+
+La sezione **Impostazioni → Microsoft Lists — collegamento di prova** è visibile soltanto agli amministratori NextDo. Per questa versione l'integrazione è **rigorosamente in sola lettura** e non crea liste, colonne, attività o sincronizzazioni automatiche.
+
+### Prerequisiti Microsoft 365
+
+Occorre un'applicazione Microsoft Entra registrata/autorizzata dall'organizzazione, configurata come **client pubblico con flusso codice dispositivo abilitato**, e il permesso delegato Microsoft Graph **Sites.Read.All** (l'organizzazione può richiedere il consenso dell'amministratore). Recuperare l'**ID tenant** e l'**ID applicazione (client)**, entrambi GUID. Non servono password, segreti client o credenziali Microsoft dentro NextDo.
+
+Istruzioni: inserire gli identificativi e l'indirizzo del sito SharePoint (è accettato anche il link alla lista condivisa del sito), salvare la configurazione, scegliere **Connetti Microsoft 365**, aprire il sito Microsoft indicato e inserire il codice temporaneo. Tornare su NextDo e scegliere **Verifica autorizzazione**, poi **Elenca liste** e selezionare la lista di prova già creata. **Verifica colonne** effettua esclusivamente richieste GET.
+
+### Misure di sicurezza e limitazioni
+
+- Soltanto gli amministratori NextDo possono configurare e collegare l'integrazione.
+- I token Microsoft sono conservati **solo in memoria del processo** e scadono; non vengono salvati in SQLite, nel repository o nei backup. Dopo un riavvio è necessario autorizzare nuovamente il collegamento.
+- Il file locale di configurazione (senza token) è creato in `/data/microsoft-lists-pilot.json` con permessi 0600.
+- Il collegamento usa soltanto endpoint Microsoft predefiniti, valida le URL SharePoint e non segue reindirizzamenti che potrebbero esporre i token.
+- Non si deve utilizzare l'app con dati di lavoro reali senza validazione da parte dei servizi informatici dell'Ateneo.
+- **Passaggi successivi non ancora disponibili:** creazione automatica delle colonne, pubblicazione delle attività, vista bacheca e importazione degli stati. Per creare colonne Graph richiede almeno il permesso delegato `Sites.Manage.All`; per aggiungere o aggiornare le righe `Sites.ReadWrite.All`. Sono permessi ampi, da approvare espressamente prima di implementarli e richiederli. La successiva sincronizzazione dovrà scrivere solo i campi di pianificazione di NextDo e mai sostituire lo stato o le note dei colleghi.
