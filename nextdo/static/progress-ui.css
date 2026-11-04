@@ -1,0 +1,43 @@
+/* The team dashboard: attended Gantts and quick progress updates. */
+.dashboard-work{margin:18px 0 22px;display:flex;flex-direction:column;gap:17px;min-width:0}
+.dashboard-work-title{flex-wrap:wrap;gap:10px}
+.dashboard-work-title h2{flex:1;min-width:180px}
+.dashboard-assigned{display:flex;flex-direction:column;gap:9px}
+.dashboard-assigned h3,.dashboard-gantt-heading h3{font-size:15px;font-weight:750;margin:0}
+.dashboard-assigned-row{display:flex;align-items:center;gap:12px;min-width:0;background:var(--panel2);border:1px solid var(--stroke);border-radius:10px;padding:10px 12px}
+.dashboard-assigned-name{display:flex;flex:1;flex-direction:column;gap:5px;min-width:80px;overflow-wrap:anywhere;text-align:left;background:transparent;border:0;color:var(--ink);cursor:pointer}
+.dashboard-assigned-name strong{font-size:13px;line-height:1.4}
+.dashboard-assigned-name .muted{font-size:11px}
+.dashboard-assigned-name:hover strong{text-decoration:underline}
+.dashboard-assigned-row>.pill{font-size:11px}
+.dashboard-assigned-row .btn{white-space:nowrap}
+.dashboard-gantt-heading{display:flex;flex-direction:column;gap:5px;margin-top:4px}
+.dashboard-gantt-heading .sub{margin:0}
+.dashboard-project-gantt{min-width:0;padding:14px 12px;border:1px solid var(--stroke);background:var(--panel2);border-radius:12px}
+.dashboard-project-header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.dashboard-project-header h4{flex:1;min-width:160px;margin:0;font-size:14px}
+.dashboard-project-header .muted{font-size:11px}
+.dashboard-project-gantt .gantt-section{gap:8px}
+.dashboard-project-gantt .gantt-scroll{max-height:360px}
+.dashboard-project-gantt .gantt-grid{background:var(--panel2)}
+.kanban-card-tools{display:flex;justify-content:flex-end;margin-top:6px}
+.kanban-card-tools .btn{font-size:10px}
+.project-featured-option{display:flex;gap:10px;align-items:center;padding:6px 0;font-size:13px}
+.project-featured-option input{width:16px;height:16px;accent-color:#298cf9}
+.progress-dialog{max-width:min(680px,96vw)}
+.progress-dialog .actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}
+.progress-history{display:flex;flex-direction:column;gap:8px;margin:7px 0}
+.progress-history h3{font-size:14px;margin:0}
+.progress-history-list{display:flex;flex-direction:column;gap:8px;max-height:250px;overflow-y:auto}
+.progress-history-event{display:grid;grid-template-columns:1fr auto;gap:5px 10px;padding:9px 11px;border:1px solid var(--stroke);background:var(--panel2);border-radius:9px;font-size:12px}
+.progress-history-event>.muted{font-size:10px}
+.progress-history-event>span:not(.muted),.progress-history-event>p{grid-column:1/-1}
+.progress-history-event>p{margin:2px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.light .dashboard-assigned-row,.light .dashboard-project-gantt,.light .progress-history-event{background:#f1f6fc}
+@media(max-width:600px){
+ .dashboard-project-gantt{padding:9px 6px}
+ .dashboard-assigned-row{flex-wrap:wrap}
+ .dashboard-assigned-name{flex-basis:100%}
+ .dashboard-project-header{gap:8px}
+ .dashboard-project-header h4{flex-basis:100%}
+}

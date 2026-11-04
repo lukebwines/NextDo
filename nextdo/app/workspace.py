@@ -30,6 +30,13 @@ def upgrade(db_path:Path,data_path:Path):
     dest=sqlite3.connect(backup)
     try:db.backup(dest)
     finally:dest.close()
+  project_columns={r[1] for r in db.execute('PRAGMA table_info(projects)')}
+  if 'featured' not in project_columns:
+   backup=data_path/'nextdo-before-featured-projects-migration.sqlite3'
+   if not backup.exists():
+    target=sqlite3.connect(backup)
+    try:db.backup(target)
+    finally:target.close()
   with db:
    db.execute('PRAGMA foreign_keys=ON')
    db.executescript("""
@@ -53,7 +60,18 @@ def upgrade(db_path:Path,data_path:Path):
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member','manager')),
       PRIMARY KEY(project_id,user_id));
+    CREATE TABLE IF NOT EXISTS task_progress (
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      actor_id INTEGER NOT NULL REFERENCES users(id),
+      old_status TEXT NOT NULL,
+      new_status TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE INDEX IF NOT EXISTS idx_task_progress_task ON task_progress(task_id,id);
    """)
+   if 'featured' not in project_columns:
+    db.execute('ALTER TABLE projects ADD COLUMN featured INTEGER NOT NULL DEFAULT 1')
    if 'scope' not in cols:
     db.execute("ALTER TABLE tasks ADD COLUMN scope TEXT NOT NULL DEFAULT 'personal'")
     db.execute("UPDATE tasks SET scope='cds' WHERE EXISTS (SELECT 1 FROM task_courses tc WHERE tc.task_id=tasks.id)")
@@ -164,6 +182,7 @@ class ProjectIn(BaseModel):
  member_ids:list[int]=Field(default_factory=list,max_length=100)
  due_at:Optional[str]=None
  status:str='doing'
+ featured:bool=True
 
 class TaskStatus(BaseModel):
  status:str
@@ -208,11 +227,12 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    c.executemany('INSERT INTO course_assignees(course_id,user_id) VALUES(?,?)',[(cid,uid) for uid in ids])
    record(c,u['id'],'assign','course',cid)
   return {'ok':True,'user_ids':ids}
- def project_data(c,p):
+ def project_data(c,p,current_user=None):
   d=dict(p)
   d['course_ids']=[r[0] for r in c.execute('SELECT course_id FROM project_courses WHERE project_id=?',(p['id'],))]
   d['member_ids']=[r[0] for r in c.execute('SELECT user_id FROM project_members WHERE project_id=?',(p['id'],))]
   d['counts']={r['status']:r['n'] for r in c.execute("SELECT status,COUNT(*) AS n FROM tasks WHERE project_id=? GROUP BY status",(p['id'],))}
+  d['can_edit']=project_can_edit(c,current_user,p) if current_user else False
   return d
  def validate_project(c,u,b):
   if b.scope not in ('independent','cds','common'):fail('Ambito progetto non valido',400)
@@ -238,13 +258,13 @@ def register_routes(app,*,conn,user,csrf,ph,record):
  def projects(req:Request):
   u=user(req)
   with conn() as c:
-   return [project_data(c,p) for p in c.execute('SELECT * FROM projects ORDER BY updated_at DESC,id DESC') if project_can_view(c,u,p)]
+   return [project_data(c,p,u) for p in c.execute('SELECT * FROM projects ORDER BY updated_at DESC,id DESC') if project_can_view(c,u,p)]
  @app.post('/api/projects')
  def create_project(b:ProjectIn,req:Request):
   u=user(req);csrf(req)
   with conn() as c:
    validate_project(c,u,b)
-   p=c.execute('INSERT INTO projects(title,description,scope,owner_id,manager_id,status,due_at) VALUES(?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.scope,u['id'],b.manager_id or u['id'],b.status,b.due_at))
+   p=c.execute('INSERT INTO projects(title,description,scope,owner_id,manager_id,status,due_at,featured) VALUES(?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.scope,u['id'],b.manager_id or u['id'],b.status,b.due_at,int(b.featured)))
    pid=p.lastrowid
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,u['id'],b.manager_id or u['id'],b)
@@ -258,7 +278,7 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    if not p:fail('Progetto inesistente',404)
    if not project_can_edit(c,u,p):fail()
    validate_project(c,u,b)
-   c.execute('UPDATE projects SET title=?,description=?,scope=?,manager_id=?,status=?,due_at=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.scope,b.manager_id or p['owner_id'],b.status,b.due_at,datetime.now(timezone.utc).isoformat(),pid))
+   c.execute('UPDATE projects SET title=?,description=?,scope=?,manager_id=?,status=?,due_at=?,featured=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.scope,b.manager_id or p['owner_id'],b.status,b.due_at,int(b.featured),datetime.now(timezone.utc).isoformat(),pid))
    c.execute('DELETE FROM project_courses WHERE project_id=?',(pid,))
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,p['owner_id'],b.manager_id or p['owner_id'],b)
@@ -275,8 +295,10 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    if not allowed:fail()
    if b.status=='done' and t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
     fail('Completare separatamente i CdS',400)
-   c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(b.status,datetime.now(timezone.utc).isoformat(),tid))
-   record(c,u['id'],'status','task',tid)
+   if b.status!=t['status']:
+    c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(b.status,datetime.now(timezone.utc).isoformat(),tid))
+    c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],b.status,''))
+    record(c,u['id'],'status','task',tid)
   return {'ok':True}
  @app.get('/api/profile')
  def profile(req:Request):

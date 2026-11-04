@@ -58,6 +58,7 @@ function dashboard(main){
  const summary=el('div',{class:'dash-metrics'});
  metrics.forEach(([name,n,icon,preset],index)=>summary.append(el('button',{type:'button',class:'metric metric-'+index,onclick:()=>changeView(preset==='done'?'archive':'tasks',preset),'aria-label':name+': '+n+' attività, apri elenco filtrato'},[el('span',{class:'metric-icon'},[ico(icon)]),node('span','metric-label',name),node('strong','metric-value',String(n))])));
  main.append(summary);
+ NextDoProgress.dashboard(main);
  const board=el('div',{class:'dash-layout'});const left=el('section',{class:'card dash-upcoming'});
  left.append(el('div',{class:'card-head'},[node('h2','','Prossime scadenze'),btn('Vedi tutte ›',()=>changeView('tasks'),'textlink')]));
  for(const t of [...pending].sort((a,b)=>(a.due_at||'9999').localeCompare(b.due_at||'9999')).slice(0,6)){

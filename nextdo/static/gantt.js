@@ -132,6 +132,6 @@ const NextDoGantt=(()=>{
    section.append(summary);
   }
  }
- function renderProjectAgain(){if(S.view==='projects')render()}
+ function renderProjectAgain(){if(S.view==='projects'||S.view==='dashboard')render()}
  return {render:draw};
 })();
