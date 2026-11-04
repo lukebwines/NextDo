@@ -125,6 +125,15 @@ const NextDoWorkspace=(()=>{
      const link=el('a',{href:'api/projects/'+current.id+'/sharepoint-export',download:''});
      document.body.append(link);link.click();link.remove();
     },'small'),
+    ...(S.me.role==='admin'?[opt('Sincronizza stati da Lists',async()=>{
+     if(!confirm('Importare gli stati delle attività da Microsoft Lists nel Gantt? Verranno letti solo i record NextDo riconosciuti, senza scrivere su SharePoint.'))return;
+     try{
+      const result=await api('/projects/'+current.id+'/sync-lists',{method:'POST'});
+      await refresh();render();
+      msg('Sincronizzati '+result.updated_course_rows+' avanzamenti CdS da Microsoft Lists'+
+       (result.unrecognized_statuses?' · '+result.unrecognized_statuses+' stati non riconosciuti':''));
+     }catch(e){msg(e.message,true)}
+    },'small')]:[]),
     opt('Modifica progetto',()=>projectForm(current),'small'),
     opt(current.archived_at?'Ripristina':'Archivia',async()=>{
      if(!confirm((current.archived_at?'Ripristinare':'Archiviare')+' il progetto «'+current.title+'»?'))return;
@@ -141,6 +150,7 @@ const NextDoWorkspace=(()=>{
    opt('+ Attività',()=>taskForm(null,'task',null,{scope:'project',project_id:current.id}),'primary')
   ]);
   panel.append(heading);
+  if(S.me.role==='admin')panel.append(node('p','sub','Sincronizzazione Lists: usa il collegamento Microsoft 365 temporaneo configurato in Impostazioni, poi premi «Sincronizza stati da Lists». Gli aggiornamenti sono manuali finché il flusso automatico non sarà configurato e autorizzato dall’Ateneo. Le attività senza dati ricevuti risultano «Non sincronizzato».'));
   if(current.can_edit)panel.append(node('p','sub','Assegna i colleghi ai CdS nelle impostazioni del progetto. Esporta JSON per Lists genera automaticamente una riga per attività e per CdS, preservando gli avanzamenti già modificati in Microsoft Lists. Prima di caricare file con assegnazioni reali occorre adeguare le colonne e il flusso Power Automate.'));
   if(current.description)panel.append(node('p','sub',current.description));
   if((current.responsibilities||[]).length){
