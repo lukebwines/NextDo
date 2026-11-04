@@ -212,14 +212,22 @@ class TaskStatus(BaseModel):
 
 class PasswordChange(BaseModel):
  current_password:str
- new_password:str=Field(min_length=12,max_length=256)
+ new_password:str=Field(min_length=8,max_length=256)
 
 class PasswordReset(BaseModel):
- new_password:str=Field(min_length=12,max_length=256)
+ new_password:str=Field(min_length=8,max_length=256)
 
 class AccountChange(BaseModel):
  role:str
  active:bool
+ promotion_password:Optional[str]=None
+
+def password_minimum(role):
+ return 12 if role=='admin' else 8
+
+def check_password_policy(password,role):
+ length=password_minimum(role)
+ if len(password)<length:fail('La password deve contenere almeno '+str(length)+' caratteri',400)
 
 def register_routes(app,*,conn,user,csrf,ph,record):
  def needadmin(req):
@@ -328,6 +336,7 @@ def register_routes(app,*,conn,user,csrf,ph,record):
  @app.post('/api/profile/password')
  def change_password(b:PasswordChange,req:Request):
   u=user(req);csrf(req)
+  check_password_policy(b.new_password,u['role'])
   with conn() as c:
    row=c.execute('SELECT password FROM users WHERE id=?',(u['id'],)).fetchone()
    try:ok=ph.verify(row['password'],b.current_password)
@@ -344,10 +353,18 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   with conn() as c:
    target=c.execute('SELECT * FROM users WHERE id=?',(uid,)).fetchone()
    if not target:fail('Utente inesistente',404)
+   promoting=target['role']!='admin' and b.role=='admin'
+   if promoting:
+    if not b.promotion_password:fail('Per nominare un amministratore impostare una nuova password di almeno 12 caratteri',400)
+    check_password_policy(b.promotion_password,'admin')
+   elif b.promotion_password:fail('La password di promozione è consentita soltanto per una promozione ad amministratore',400)
    if target['role']=='admin' and target['active'] and (b.role!='admin' or not b.active):
     n=c.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND active=1").fetchone()[0]
     if n<=1:fail('Impossibile disattivare l’ultimo amministratore',400)
-   c.execute('UPDATE users SET role=?,active=? WHERE id=?',(b.role,int(b.active),uid))
+   if promoting:
+    c.execute('UPDATE users SET role=?,active=?,password=? WHERE id=?',(b.role,int(b.active),ph.hash(b.promotion_password),uid))
+   else:
+    c.execute('UPDATE users SET role=?,active=? WHERE id=?',(b.role,int(b.active),uid))
    c.execute('DELETE FROM sessions WHERE user_id=?',(uid,))
    record(c,u['id'],'update','user',uid)
   return {'ok':True}
@@ -355,7 +372,9 @@ def register_routes(app,*,conn,user,csrf,ph,record):
  def reset_password(uid:int,b:PasswordReset,req:Request):
   u=needadmin(req);csrf(req)
   with conn() as c:
-   if not c.execute('SELECT 1 FROM users WHERE id=?',(uid,)).fetchone():fail('Utente inesistente',404)
+   target=c.execute('SELECT role FROM users WHERE id=?',(uid,)).fetchone()
+   if not target:fail('Utente inesistente',404)
+   check_password_policy(b.new_password,target['role'])
    c.execute('UPDATE users SET password=? WHERE id=?',(ph.hash(b.new_password),uid))
    c.execute('DELETE FROM sessions WHERE user_id=?',(uid,))
    record(c,u['id'],'password_reset','user',uid)

@@ -211,20 +211,23 @@ const NextDoWorkspace=(()=>{
  function changePasswordForm(){
   const {box,back}=modal('Cambia la tua password');
   const f=el('form',{class:'formgrid'});
-  const old=input('old','Password attuale','','password'),pw=input('new','Nuova password (almeno 12 caratteri)','','password'),again=input('again','Conferma nuova password','','password');
+  const minimum=S.me.role==='admin'?12:8;
+  const old=input('old','Password attuale','','password'),pw=input('new','Nuova password (almeno '+minimum+' caratteri)','','password'),again=input('again','Conferma nuova password','','password');
   f.append(field('Password attuale',old),field('Nuova password',pw),field('Conferma nuova password',again));
   f.append(el('button',{type:'submit',class:'btn primary',text:'Aggiorna password'}));
   f.addEventListener('submit',async e=>{
    e.preventDefault();if(pw.value!==again.value)return msg('Le password non coincidono',true);
+   if(pw.value.length<minimum)return msg('Servono almeno '+minimum+' caratteri',true);
    try{await api('/profile/password',{method:'POST',body:JSON.stringify({current_password:old.value,new_password:pw.value})});back.remove();alert('Password aggiornata. Accedi nuovamente.');location.reload()}catch(error){msg(error.message,true)}
   });box.append(f);
  }
  function resetPassword(u){
   const {box,back}=modal('Reimposta password — '+u.display_name);
   box.append(node('p','sub','La password attuale non è visibile. Dopo la modifica tutte le sessioni di questo utente saranno revocate.'));
-  const pw=input('pw','Nuova password (almeno 12 caratteri)','','password');
+  const minimum=u.role==='admin'?12:8;
+  const pw=input('pw','Nuova password (almeno '+minimum+' caratteri)','','password');
   box.append(field('Nuova password',pw),opt('Reimposta password',async()=>{
-   if(pw.value.length<12)return msg('Servono almeno 12 caratteri',true);
+   if(pw.value.length<minimum)return msg('Servono almeno '+minimum+' caratteri',true);
    if(!confirm('Reimpostare la password per '+u.display_name+'?'))return;
    try{await api('/admin/users/'+u.id+'/password',{method:'POST',body:JSON.stringify({new_password:pw.value})});back.remove();msg('Password reimpostata')}catch(e){msg(e.message,true)}
   },'primary'));
@@ -233,8 +236,16 @@ const NextDoWorkspace=(()=>{
   const {box,back}=modal('Gestisci account — '+u.display_name);
   const role=select('role',[['user','Utente'],['admin','Amministratore']],u.role);
   const active=el('input',{type:'checkbox',checked:!!u.active});
-  box.append(field('Ruolo',role),el('label',{},[active,' Account attivo']),opt('Salva',async()=>{
-   try{await api('/admin/users/'+u.id,{method:'PUT',body:JSON.stringify({role:role.value,active:active.checked})});back.remove();await refresh();render();msg('Account aggiornato')}catch(e){msg(e.message,true)}
+  const promotion=el('input',{class:'field',type:'password',placeholder:'Nuova password amministratore (almeno 12 caratteri)',autocomplete:'new-password'});
+  const promotionField=field('Nuova password obbligatoria se promuovi un utente ad amministratore',promotion);
+  const update=()=>{promotionField.hidden=!(u.role!=='admin'&&role.value==='admin')};
+  role.addEventListener('change',update);update();
+  box.append(field('Ruolo',role),el('label',{},[active,' Account attivo']),promotionField,opt('Salva',async()=>{
+   const promoting=u.role!=='admin'&&role.value==='admin';
+   if(promoting&&promotion.value.length<12)return msg('Per promuovere un utente servono almeno 12 caratteri',true);
+   const data={role:role.value,active:active.checked};
+   if(promoting)data.promotion_password=promotion.value;
+   try{await api('/admin/users/'+u.id,{method:'PUT',body:JSON.stringify(data)});back.remove();await refresh();render();msg('Account aggiornato')}catch(e){msg(e.message,true)}
   },'primary'));
  }
  return {projectView,projectForm,courseAssignmentForm,courseAdminButton,settings,taskScopeOptions,scopedCourses};

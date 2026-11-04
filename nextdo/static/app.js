@@ -271,6 +271,22 @@ function restoreForm(){
  },'primary');
  box.append(el('div',{class:'actions'},[btn('Annulla',()=>back.remove()),action]));
 }
-function userForm(){const {box,back}=modal('Nuovo utente NextDo');const form=el('form',{class:'formgrid'});const u=input('username','Nome utente'),d=input('display_name','Nome completo'),p=input('password','Password (almeno 12 caratteri)','','password'),r=select('role',[['user','Utente'],['admin','Amministratore']]);form.append(field('Username',u),field('Nome visualizzato',d),field('Password',p),field('Ruolo',r),el('button',{type:'submit',class:'btn primary',text:'Crea utente'}));form.addEventListener('submit',async e=>{e.preventDefault();try{await api('/users',{method:'POST',body:JSON.stringify({username:u.value,display_name:d.value,password:p.value,role:r.value})});back.remove();await refresh();render()}catch(e){msg(e.message,true)}});box.append(form)}
+function userForm(){
+ const {box,back}=modal('Nuovo utente NextDo');
+ const form=el('form',{class:'formgrid'});
+ const u=input('username','Nome utente'),d=input('display_name','Nome completo');
+ const p=input('password','Password (almeno 8 caratteri)','','password');
+ const r=select('role',[['user','Utente'],['admin','Amministratore']]);
+ const update=()=>{p.placeholder='Password (almeno '+(r.value==='admin'?12:8)+' caratteri)'};
+ r.addEventListener('change',update);update();
+ form.append(field('Username',u),field('Nome visualizzato',d),field('Password',p),field('Ruolo',r),el('button',{type:'submit',class:'btn primary',text:'Crea utente'}));
+ form.addEventListener('submit',async e=>{
+  e.preventDefault();const length=r.value==='admin'?12:8;
+  if(p.value.length<length)return msg('Servono almeno '+length+' caratteri per il ruolo selezionato',true);
+  try{await api('/users',{method:'POST',body:JSON.stringify({username:u.value,display_name:d.value,password:p.value,role:r.value})});back.remove();await refresh();render()}
+  catch(error){msg(error.message,true)}
+ });
+ box.append(form)
+}
 function displayForm(){const {box}=modal('Crea un monitor NextDo');const name=input('name','Nome monitor'),group=select('group_id',[['','Tutti i gruppi con attività pubblicate'],...S.groups.map(g=>[String(g.id),g.name])]);box.append(field('Nome schermo',name),field('Filtro gruppo',group),btn('Genera link',async()=>{try{const d=await api('/displays',{method:'POST',body:JSON.stringify({name:name.value,group_id:group.value?Number(group.value):null})});const url=new URL('display/'+encodeURIComponent(d.token),location.href).href;box.append(el('p',{class:'message',text:'Copia il link e custodiscilo: chiunque lo possieda può visualizzare le scadenze pubblicate.'}),el('textarea',{class:'field code',rows:'4',readonly:'',value:url}));msg('Monitor creato')}catch(e){msg(e.message,true)}},'primary'))}
 init().catch(e=>{$('app').replaceChildren(node('div','authbox','Errore di avvio: '+e.message))});

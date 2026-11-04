@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.10-test.** Corregge il trascinamento delle schede Kanban per i colleghi che lavorano su attività condivise non assegnate e introduce un menu immediato per cambiare stato anche da dispositivi touch. Mantiene le funzioni della 0.1.9-test.
+**Versione candidata: 0.1.11-test.** Password da almeno 8 caratteri per gli utenti ordinari, minimo 12 per gli amministratori. Requisiti uniformi su creazione account, modifica, reimpostazione e promozione a amministratore. Mantiene le funzioni della 0.1.10-test.
+
+**Versione precedente: 0.1.10-test.** Corregge il trascinamento delle schede Kanban e introduce un selettore dello stato alternativo.
 
 **Versione precedente: 0.1.9-test.** Porta i Gantt dei progetti in evidenza nella Dashboard di ciascun partecipante e aggiunge aggiornamenti rapidi delle attività con stato, nota, autore e data.
 
@@ -133,3 +135,12 @@ In **Progetti → Kanban**, le schede contrassegnate dal simbolo **⠿** possono
 Le scadenze a **completamento separato per CdS** non possono essere chiuse o riaperte trascinandole: utilizzare i pulsanti di completamento dei singoli corsi. Ogni cambio di stato viene registrato nella cronologia di avanzamento.
 
 **Verifiche:** test API per membri, assegnatari, responsabili e accessi negati, oltre a una prova automatizzata con Chromium che trascina realmente una scheda e verifica il salvataggio sul server. La suite non sostituisce il collaudo sul proprio Raspberry: prima dell'aggiornamento di NextDo eseguire un backup dell'add-on, poi usare Aggiorna senza disinstallare.
+
+
+## Password per ruolo (0.1.11-test)
+
+- Ruolo **Utente**: minimo 8 caratteri in fase di creazione, modifica autonoma e reimpostazione da parte dell'amministratore.
+- Ruolo **Amministratore**: minimo 12 caratteri in fase di primo avvio, creazione, modifica autonoma e reimpostazione.
+- La promozione di un normale utente ad amministratore richiede l'impostazione contestuale di una nuova password da almeno 12 caratteri; le vecchie sessioni vengono revocate.
+- Il login continua ad accettare la lunghezza delle password precedentemente create (nessuna interruzione di compatibilità).
+- Usare passphrase non riutilizzate, protezione Cloudflare Access con verifica d'identità e limitazione degli accessi; il minimo di 8 caratteri non sostituisce questi controlli.
