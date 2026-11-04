@@ -2,13 +2,13 @@
 /* Dashboard views of featured project timelines and personal work updates. */
 const NextDoProgress=(()=>{
  function activeTasks(){
-  const ids=new Set(S.projects.map(p=>p.id));
+  const ids=new Set(S.projects.filter(p=>!p.archived_at).map(p=>p.id));
   return S.tasks.filter(t=>t.kind==='task'&&t.scope==='project'&&ids.has(t.project_id)&&(
    t.assigned_to===S.me.id||(t.assigned_to==null&&t.owner_id===S.me.id)
   ));
  }
  function dashboard(main){
-  const featured=S.projects.filter(p=>p.featured!==0);
+  const featured=S.projects.filter(p=>p.featured!==0&&!p.archived_at);
   const mine=activeTasks().sort((a,b)=>(a.status==='done')-(b.status==='done')||(a.due_at||'9999').localeCompare(b.due_at||'9999'));
   if(!featured.length&&!mine.length)return;
   const section=el('section',{class:'card dashboard-work'});
