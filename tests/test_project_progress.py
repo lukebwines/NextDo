@@ -68,5 +68,23 @@ def test_progress_per_course_cannot_bypass_individual_completion(tmp_path):
  assert c.post(f'/api/tasks/{tid}/progress',headers=h,json={'status':'doing','note':'Planning'}).status_code==200
  assert c.post(f'/api/tasks/{tid}/complete/{course.json()["id"]}',headers=h).status_code==200
  assert c.get(f'/api/tasks/{tid}').json()['status']=='done'
+ entries=c.get(f'/api/tasks/{tid}/progress').json()
+ assert entries[0]['note']=='Completamento CdS: MZ1'
  assert c.post(f'/api/tasks/{tid}/progress',headers=h,json={'status':'todo','note':'Try reopen without course'}).status_code==400
+ c.close()
+
+def test_drag_drop_and_manual_status_updates_appear_in_progress_history(tmp_path):
+ c,h=init(tmp_path)
+ project=c.post('/api/projects',headers=h,json={'title':'Kanban history','scope':'independent'})
+ assert project.status_code==200
+ task=c.post('/api/tasks',headers=h,json={'title':'Review','kind':'task','scope':'project','project_id':project.json()['id']})
+ assert task.status_code==200
+ tid=task.json()['id']
+ assert c.patch(f'/api/tasks/{tid}/status',headers=h,json={'status':'doing'}).status_code==200
+ events=c.get(f'/api/tasks/{tid}/progress').json()
+ assert len(events)==1 and events[0]['old_status']=='todo' and events[0]['new_status']=='doing'
+ assert c.patch(f'/api/tasks/{tid}/status',headers=h,json={'status':'doing'}).status_code==200
+ assert len(c.get(f'/api/tasks/{tid}/progress').json())==1
+ assert c.post(f'/api/tasks/{tid}/toggle',headers=h).status_code==200
+ assert c.get(f'/api/tasks/{tid}/progress').json()[0]['new_status']=='done'
  c.close()
