@@ -393,6 +393,33 @@ def task_create(b:TaskIn,req:Request):
   ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
   put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'create','task',tid)
  return {'id':tid}
+
+@app.post('/api/tasks/{tid}/promote-to-project')
+def promote_task_to_project(tid:int,req:Request):
+ """Convert an existing deadline into the first task of a new project, preserving its ID/history."""
+ u=user(req);csrf(req)
+ with conn() as c:
+  t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
+  if not t:err(404,'Scadenza inesistente')
+  if not can_edit(c,u,t):err(403,'Scadenza non modificabile')
+  if t['kind']!='task' or t['scope'] not in ('personal','cds','common'):
+   err(400,'È possibile trasformare soltanto scadenze personali, CdS o comuni non già collegate a progetti')
+  if not is_admin(u) and t['owner_id']!=u['id']:err(403,'Solo il proprietario può trasformare la scadenza')
+  new_scope='cds' if t['scope']=='cds' else 'common' if t['scope']=='common' else 'independent'
+  course_ids=[r[0] for r in c.execute('SELECT course_id FROM task_courses WHERE task_id=?',(tid,))] if new_scope=='cds' else []
+  if new_scope=='cds' and not course_ids:err(400,'Scadenza priva di CdS')
+  if new_scope=='cds' and not is_admin(u) and any(not workspace.owns_course(c,u['id'],x) for x in course_ids):err()
+  pid=c.execute('INSERT INTO projects(title,description,scope,owner_id,manager_id,status,due_at,featured) VALUES(?,?,?,?,?,?,?,?)',
+    (t['title'],'',new_scope,t['owner_id'],u['id'],'doing',t['due_at'],1)).lastrowid
+  c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,x) for x in course_ids])
+  c.execute('INSERT OR IGNORE INTO project_members(project_id,user_id,role) VALUES(?,?,?)',(pid,u['id'],'manager'))
+  # Preserve the current task ID, dates, attachments and progress history.
+  c.execute('UPDATE tasks SET scope=?,project_id=?,group_id=NULL,display_enabled=0,recurrence="none",updated_at=? WHERE id=?',
+    ('project',pid,iso(),tid))
+  record(c,u['id'],'promote','task',tid)
+  record(c,u['id'],'create','project',pid)
+ return {'ok':True,'project_id':pid,'task_id':tid}
+
 @app.get('/api/tasks/{tid}')
 def task_get(tid:int,req:Request):
  u=user(req)
@@ -646,7 +673,7 @@ from .backup_restore import register_restore_routes
 register_restore_routes(app,user=user,csrf=csrf,db_path=DB,attachments_path=FILES,data_path=DATA,db_lock=DB_LOCK)
 
 # Workspaces, course ownership, Kanban projects and user account management.
-workspace.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record)
+workspace.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record,data_path=DATA)
 from . import progress
 progress.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
 from . import microsoft_lists
