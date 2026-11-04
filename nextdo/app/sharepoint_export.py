@@ -22,6 +22,33 @@ def build_project_export(c, project):
   "SELECT id,title,status,due_at FROM tasks WHERE scope='project' AND project_id=? ORDER BY id",
   (project["id"],)
  ).fetchall()
+ by_course={}
+ for r in c.execute(
+  """SELECT r.course_id,r.user_id,c.code,c.name
+     FROM project_responsibilities r
+     JOIN courses c ON c.id=r.course_id
+     WHERE r.project_id=?
+     ORDER BY c.code,c.id,r.user_id""",
+  (project["id"],)
+ ):
+  if r["course_id"] not in by_course:
+   by_course[r["course_id"]]={
+    "course_code":r["code"],"course_name":r["name"],"responsible_user_ids":[]}
+  by_course[r["course_id"]]["responsible_user_ids"].append(r["user_id"])
+ tasks=[]
+ for row in rows:
+  base={"title":row["title"],"status":row["status"],"due_at":row["due_at"]}
+  if not by_course:
+   # Preserve previously published IDs for projects with no CdS assignments.
+   tasks.append({"id":"NEXTDO-T"+str(row["id"]),**base})
+  else:
+   for course_id,details in by_course.items():
+    tasks.append({
+     "id":"NEXTDO-T"+str(row["id"])+"-C"+str(course_id),
+     **base,
+     "project_title":project["title"],
+     **details
+    })
  return {
   "schema_version":"1.0",
   "source":"NextDo",
@@ -29,12 +56,7 @@ def build_project_export(c, project):
    "id":"NEXTDO-P"+str(project["id"]),
    "title":project["title"]
   },
-  "tasks":[{
-   "id":"NEXTDO-T"+str(row["id"]),
-   "title":row["title"],
-   "status":row["status"],
-   "due_at":row["due_at"]
-  } for row in rows]
+  "tasks":tasks
  }
 
 
