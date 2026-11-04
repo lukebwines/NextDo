@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.14-test.** Permette di assegnare i colleghi a uno o più CdS direttamente nel progetto e genera automaticamente le righe di avanzamento per ciascun CdS nell'esportazione JSON.
+**Versione candidata: 0.1.15-test.** Precompila mediante spunte i CdS gestiti abitualmente da ogni collega nel modulo progetto, lasciando indipendenti le assegnazioni salvate per ciascun progetto.
+
+**Versione precedente: 0.1.14-test.** Permette di assegnare i colleghi a uno o più CdS direttamente nel progetto e genera automaticamente le righe di avanzamento per ciascun CdS nell'esportazione JSON.
 
 **Versione precedente: 0.1.13-test.** Esporta ogni progetto NextDo in JSON, con identificativi stabili delle attività e un nome file nuovo a ogni download, compatibile con il flusso Power Automate testato.
 
@@ -196,3 +198,16 @@ La funzione **Esporta JSON per Lists** ora genera per ciascuna attività un reco
 **Prima di importare un progetto già presente in Lists:** l'aggiunta di destinazioni CdS cambia gli ID delle righe da `NEXTDO-T{id}` a `NEXTDO-T{id}-C{course_id}`. Il vecchio record generico non sarà cancellato né convertito dal flusso; bisogna archiviarlo o riconciliarlo manualmente nel collaudo. La rimozione di assegnazioni dal progetto, inoltre, non elimina elementi già esistenti in Lists. Non usare il nuovo export con dati reali finché le colonne e la mappatura utenti non sono state collaudate.
 
 **Ambito attuale:** NextDo → file JSON scaricato manualmente → SharePoint → Power Automate → Microsoft Lists. La sincronizzazione di ritorno per aggiornare la dashboard NextDo con gli stati per singolo CdS è ancora da realizzare. Gli stati globali nel Kanban NextDo non costituiscono un aggregato delle lavorazioni Microsoft Lists.
+
+
+## NextDo 0.1.15-test — CdS predefiniti, modificabili con spunte per progetto
+
+L'anagrafica **Corsi di Studio → Assegna colleghi** continua a memorizzare la distribuzione ordinaria dei CdS: tali associazioni sono persistenti fino a successiva modifica esplicita. Non occorre reinserirle a ogni progetto.
+
+In **Progetti → Nuovo progetto / Modifica progetto → Responsabili dei singoli CdS**, usare **+ Aggiungi collega** e selezionare il collaboratore. NextDo mostra i CdS attivi e **preseleziona con una spunta** quelli associati abitualmente al collega. L'utente può rimuovere i CdS non interessati e aggiungerne altri per il singolo progetto. Il pulsante **Ripristina predefiniti** ripropone le associazioni correnti, solo quando richiesto.
+
+**Salvataggio separato e conservativo:** le coppie collega–CdS selezionate sono registrate nella tabella del progetto, che rimane indipendente dall'anagrafica generale. Quando si riapre un progetto si vedono le selezioni effettivamente salvate, **anche se nel frattempo l'anagrafica generale è cambiata**. Solo la modifica esplicita del progetto ne aggiorna i destinatari e quindi i record delle successive esportazioni. La disattivazione di un CdS o utente va gestita prima del successivo salvataggio di un progetto interessato, secondo la validazione esistente.
+
+**Accesso ai suggerimenti:** amministratori possono vedere tutte le associazioni attive; altri utenti vedono i suggerimenti delle associazioni relative soltanto ai propri CdS. Le assegnazioni degli altri CdS non vengono pubblicate a tutti gli utenti. Il pulsante **+ Aggiungi collega** non modifica l'anagrafica generale.
+
+**Invariato il flusso Microsoft Lists:** tutte le attività di un progetto continuano a essere esportate con righe indipendenti per CdS. L'importazione SharePoint di prova va adattata per CdS, Progetto e responsabili prima di usare dati reali. Non è stata implementata la sincronizzazione degli stati da Lists a NextDo.
