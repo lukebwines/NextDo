@@ -195,6 +195,7 @@ def register_routes(app,*,conn,user,csrf,record):
      continue
     summary=[
      "Fonte: "+filename+" — foglio Programmazione didattica, riga "+str(r["row_number"]),
+     "Titolo originale completo: "+r["title"],
      "Anno accademico: "+(r["year"] or "[DA VERIFICARE]"),
      "Macroprocesso: "+(r["macro_process"] or "[DA VERIFICARE]"),
      "Sottoprocesso: "+(r["process"] or "[DA VERIFICARE]"),
