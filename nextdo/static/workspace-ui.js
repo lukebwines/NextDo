@@ -80,7 +80,7 @@ const NextDoWorkspace=(()=>{
      const coursesLabel=codes||(p.scope==='common'?'Tutti i CdS':
       p.scope==='independent'?'Indipendente dai CdS':'Nessun CdS associato');
      const responsible=S.users.find(u=>u.id===(p.manager_id||p.owner_id))?.display_name;
-     const meta=[projectLabel(p.scope),coursesLabel, ...(responsible?['Responsabile: '+responsible]:[])];
+     const meta=[projectLabel(p),coursesLabel, ...(responsible?['Responsabile: '+responsible]:[])];
      const summary=el('div',{class:'project-list-main'},[
       node('strong','project-list-title',p.title),
       node('span','project-list-meta',meta.join(' · '))
