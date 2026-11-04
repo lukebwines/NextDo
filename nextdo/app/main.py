@@ -158,7 +158,7 @@ def check_course_code(code):
 
 def asset_versions():
  return {name:hashlib.sha256((ROOT/'static'/name).read_bytes()).hexdigest()[:12]
-         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','workspace-ui.css','workspace-ui.js','app.js')}
+         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','workspace-ui.css','workspace-ui.js','gantt.css','gantt.js','app.js')}
 
 @app.get('/',response_class=HTMLResponse)
 def home():
