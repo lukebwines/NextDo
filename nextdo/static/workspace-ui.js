@@ -53,37 +53,90 @@ const NextDoWorkspace=(()=>{
    return;
   }
   const kanban=el('div',{class:'kanban-board'});
+  let draggingId=null;
+  const updateTask=async(t,newStatus)=>{
+   if(newStatus===t.status)return;
+   try{
+    await api('/tasks/'+t.id+'/status',{method:'PATCH',body:JSON.stringify({status:newStatus})});
+    await refresh();render();
+   }catch(error){msg('Impossibile aggiornare «'+t.title+'»: '+error.message,true);await refresh();render()}
+  };
   for(const [status,label] of Object.entries(statuses)){
    const col=el('section',{class:'kanban-col','data-status':status});
    const cards=S.tasks.filter(t=>t.project_id===current.id&&t.status===status);
    col.append(el('h3',{},[label,tag(String(cards.length))]));
    if(!cards.length)col.append(node('p','kanban-empty','Nessuna attività'));
    for(const t of cards){
-    const card=el('div',{class:'kanban-task',draggable:t.can_edit===false?'false':'true'},[
+    const movable=t.can_move===true;
+    const card=el('div',{class:'kanban-task'+(movable?' kanban-movable':' kanban-readonly'),draggable:String(movable),
+     title:movable?'Trascina in un’altra colonna per aggiornare lo stato':'Sola lettura: attività assegnata a un altro collega',
+     'aria-label':t.title+' — '+(statuses[t.status]||t.status)});
+    if(movable)card.append(node('span','kanban-drag-handle','⠿'));
+    card.append(
      node('strong','',t.title),
      node('span','muted',t.due_at?fmt(t.due_at):'Senza scadenza'),
      el('div',{class:'kanban-tags'},[tag(priority[t.priority]||'Normale',t.priority),...(t.labels||[]).slice(0,2).map(x=>tag(x))])
-    ]);
-    if(t.can_edit!==false)card.append(el('div',{class:'kanban-card-tools'},[
-     opt('Aggiorna stato',e=>{e.stopPropagation();NextDoProgress.open(t)},'small')
-    ]));
-    card.addEventListener('click',()=>taskForm(t));
-    card.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',String(t.id));e.dataTransfer.effectAllowed='move'});
+    );
+    if(movable){
+     const controls=el('div',{class:'kanban-card-tools'});
+     const newStatus=select('task_status',Object.entries(statuses),t.status);
+     newStatus.classList.add('kanban-status-select');
+     newStatus.setAttribute('aria-label','Cambia stato: '+t.title);
+     if(t.completion_mode==='per_course'&&(t.courses||[]).length){
+      const doneOption=newStatus.querySelector('option[value="done"]');
+      if(doneOption&&t.status!=='done')doneOption.disabled=true;
+     }
+     newStatus.addEventListener('click',e=>e.stopPropagation());
+     newStatus.addEventListener('pointerdown',e=>e.stopPropagation());
+     newStatus.addEventListener('change',e=>{e.stopPropagation();updateTask(t,newStatus.value)});
+     controls.append(newStatus,opt('Aggiorna',e=>{e.stopPropagation();NextDoProgress.open(t)},'small'));
+     card.append(controls);
+     card.addEventListener('dragstart',e=>{
+      if(e.target.closest?.('select,button')){e.preventDefault();return}
+      draggingId=t.id;
+      e.dataTransfer.setData('text/plain',String(t.id));
+      e.dataTransfer.effectAllowed='move';
+      card.classList.add('kanban-dragging');
+     });
+     card.addEventListener('dragend',()=>{
+      draggingId=null;
+      card.classList.remove('kanban-dragging');
+      kanban.querySelectorAll('.kanban-over').forEach(x=>x.classList.remove('kanban-over'));
+     });
+    }else{
+     card.append(node('span','kanban-permission-label','Visibile · non assegnata a te'));
+    }
+    card.addEventListener('click',e=>{
+     if(e.target.closest?.('button,select'))return;
+     taskForm(t);
+    });
     col.append(card);
    }
-   col.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('text/plain')){e.preventDefault();col.classList.add('kanban-over')}});
-   col.addEventListener('dragleave',()=>col.classList.remove('kanban-over'));
-   col.addEventListener('drop',async e=>{
+   col.addEventListener('dragenter',e=>{
+    if(draggingId!==null){e.preventDefault();col.classList.add('kanban-over')}
+   });
+   col.addEventListener('dragover',e=>{
+    if(draggingId!==null){
+     e.preventDefault();
+     if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+     col.classList.add('kanban-over');
+    }
+   });
+   col.addEventListener('dragleave',e=>{
+    if(!col.contains(e.relatedTarget))col.classList.remove('kanban-over');
+   });
+   col.addEventListener('drop',e=>{
     e.preventDefault();col.classList.remove('kanban-over');
-    const id=Number(e.dataTransfer.getData('text/plain'));
-    if(!S.tasks.some(t=>t.id===id&&t.project_id===current.id))return;
-    try{await api('/tasks/'+id+'/status',{method:'PATCH',body:JSON.stringify({status})});await refresh();render()}
-    catch(err){msg(err.message,true)}
+    const id=draggingId||Number(e.dataTransfer?.getData('text/plain'));
+    draggingId=null;
+    const t=S.tasks.find(x=>x.id===id&&x.project_id===current.id);
+    if(!t||!t.can_move)return;
+    updateTask(t,status);
    });
    kanban.append(col);
   }
   panel.append(kanban);
-  const hint=node('p','sub','Trascina una scheda tra le colonne oppure aprila e cambia lo stato. Le attività con completamento per CdS richiedono la conferma del singolo corso.');
+  const hint=node('p','sub','Trascina una scheda con il simbolo ⠿ oppure usa il menu Stato in basso alla scheda. Le attività assegnate ad altri colleghi sono in sola lettura; i completamenti per CdS richiedono la conferma del singolo corso.');
   panel.append(hint);main.append(panel);
  }
  function projectForm(p=null){

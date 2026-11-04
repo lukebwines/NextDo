@@ -1,0 +1,28 @@
+name: Browser Kanban drag smoke
+
+on:
+  pull_request:
+    paths:
+      - 'nextdo/static/**'
+      - 'nextdo/app/**'
+      - 'nextdo/config.yaml'
+      - 'tests/browser_drag_smoke.py'
+      - '.github/workflows/browser-drag.yml'
+
+jobs:
+  chromium-kanban:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install app and Playwright
+        run: pip install -r nextdo/requirements.txt httpx playwright
+      - name: Install Chromium
+        run: python -m playwright install chromium
+      - name: Test colleague mouse drag and status selector
+        env:
+          PYTHONPATH: nextdo
+        run: python tests/browser_drag_smoke.py

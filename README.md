@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.9-test.** Porta i Gantt dei progetti in evidenza nella Dashboard di ciascun partecipante e aggiunge aggiornamenti rapidi delle attività con stato, nota, autore e data. Mantiene le viste Kanban e Gantt della 0.1.8-test.
+**Versione candidata: 0.1.10-test.** Corregge il trascinamento delle schede Kanban per i colleghi che lavorano su attività condivise non assegnate e introduce un menu immediato per cambiare stato anche da dispositivi touch. Mantiene le funzioni della 0.1.9-test.
+
+**Versione precedente: 0.1.9-test.** Porta i Gantt dei progetti in evidenza nella Dashboard di ciascun partecipante e aggiunge aggiornamenti rapidi delle attività con stato, nota, autore e data.
 
 **Versione precedente: 0.1.8-test.** Aggiunge il diagramma di Gantt ai progetti, accanto al Kanban, con inizio facoltativo, scadenza, responsabile, stato e attività da pianificare.
 
@@ -120,3 +122,14 @@ Nel **Kanban**, le schede modificabili possono essere trascinate tra colonne opp
 Il **Gantt non supporta ancora il trascinamento temporale delle barre**: cliccando sulla barra si apre la scheda per modificare le date di inizio e fine. La funzione è stata volutamente distinta dal trascinamento Kanban, che serve invece a cambiare lo stato.
 
 **Migrazione:** il database viene esteso senza cancellare i progetti; se occorre aggiungere il flag di evidenza viene creato il backup SQLite `/data/nextdo-before-featured-projects-migration.sqlite3`. Prima dell'installazione della 0.1.9-test eseguire anche un backup dell'add-on Home Assistant. Le nuove funzioni richiedono un collaudo nell'interfaccia web e sui permessi con account di prova prima dell'uso quotidiano dei colleghi.
+
+
+## Correzione Kanban e cambio di stato (0.1.10-test)
+
+In **Progetti → Kanban**, le schede contrassegnate dal simbolo **⠿** possono essere trascinate nelle colonne Da fare, In corso, In attesa e Completata. Le colonne si evidenziano durante il trascinamento. In alternativa il menu **Stato** nella scheda aggiorna immediatamente lo stato e funziona anche sui dispositivi che non supportano il trascinamento HTML5.
+
+**Autorizzazioni:** amministratori e responsabili di progetto gestiscono le attività del progetto. Un partecipante può cambiare lo stato delle attività assegnate a sé e di quelle non ancora assegnate nel proprio progetto. Per i progetti associati a CdS, può anche far avanzare attività non assegnate se è responsabile di uno dei CdS del progetto. Le attività affidate esplicitamente a un altro collega sono visibili, ma non trascinabili dai semplici partecipanti. Il cambiamento dello stato non concede automaticamente il permesso di modificare o cancellare l'intera scheda, il progetto o gli allegati.
+
+Le scadenze a **completamento separato per CdS** non possono essere chiuse o riaperte trascinandole: utilizzare i pulsanti di completamento dei singoli corsi. Ogni cambio di stato viene registrato nella cronologia di avanzamento.
+
+**Verifiche:** test API per membri, assegnatari, responsabili e accessi negati, oltre a una prova automatizzata con Chromium che trascina realmente una scheda e verifica il salvataggio sul server. La suite non sostituisce il collaudo sul proprio Raspberry: prima dell'aggiornamento di NextDo eseguire un backup dell'add-on, poi usare Aggiorna senza disinstallare.

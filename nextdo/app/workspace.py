@@ -135,11 +135,34 @@ def can_write(c,u,t):
   return bool(member and member['role']=='manager')
  return False
 
+def can_move(c,u,t):
+ """Permission to advance a task, independent of editing its metadata.
+
+ An unassigned project task can be moved by explicit project members, and by
+ colleagues responsible for a linked CdS. A task assigned to someone else
+ can be moved only by a project manager or administrator.
+ """
+ if not can_read(c,u,t):return False
+ if t['scope']!='project' or not t['project_id']:
+  return can_write(c,u,t)
+ p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
+ if not p or not project_can_view(c,u,p):return False
+ if project_can_edit(c,u,p):return True
+ if t['assigned_to'] is not None:
+  return t['assigned_to']==u['id']
+ if t['owner_id']==u['id']:return True
+ if c.execute('SELECT 1 FROM project_members WHERE project_id=? AND user_id=?',(p['id'],u['id'])).fetchone():return True
+ if p['scope']=='cds':
+  return bool(c.execute("""SELECT 1 FROM project_courses pc JOIN course_assignees ca
+   ON ca.course_id=pc.course_id WHERE pc.project_id=? AND ca.user_id=? LIMIT 1""",(p['id'],u['id'])).fetchone())
+ return False
+
 def can_finish(c,u,t):
  if not can_read(c,u,t):return False
  scope=t['scope']
  if scope=='common' and t['completion_mode']=='global':
   return u['role']=='admin' or t['owner_id']==u['id'] or t['assigned_to']==u['id']
+ if scope=='project':return can_move(c,u,t)
  return can_write(c,u,t)
 
 def validate_scope(c,u,b):
@@ -291,10 +314,9 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   with conn() as c:
    t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
    if not t:fail('Attività inesistente',404)
-   allowed=can_finish(c,u,t) if b.status=='done' else can_write(c,u,t)
-   if not allowed:fail()
-   if b.status=='done' and t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
-    fail('Completare separatamente i CdS',400)
+   if not (can_finish(c,u,t) if b.status=='done' else can_move(c,u,t)):fail()
+   if (b.status=='done' or t['status']=='done') and b.status!=t['status'] and t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
+    fail('Completare o riaprire separatamente i CdS',400)
    if b.status!=t['status']:
     c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(b.status,datetime.now(timezone.utc).isoformat(),tid))
     c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],b.status,''))
