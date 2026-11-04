@@ -80,6 +80,13 @@ def main():
      page.locator('input[name="password"]').fill('synthetic colleague password 123')
      page.get_by_role('button',name='Accedi').click()
      page.get_by_role('button',name='Progetti',exact=True).wait_for()
+     page.locator('.dashboard-work').wait_for()
+     assert page.evaluate("""() => {
+       const content=document.querySelector('.dashboard-page');
+       const children=[...content.children];
+       return children.indexOf(content.querySelector('.dashboard-work'))
+         > children.indexOf(content.querySelector('.dash-bottom'));
+     }"""),'The project and Gantt section must appear after the regular dashboard summaries'
      page.get_by_role('button',name='Progetti',exact=True).click()
      assert page.locator('.project-list-row').count()==2,'Two projects must fit in the compact index'
      assert 'Indipendente dai CdS' in page.locator('.project-list-row',has_text='Synthetic team project').inner_text()
