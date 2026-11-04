@@ -40,7 +40,7 @@ const NextDoGantt=(()=>{
    el('span',{},[el('i',{class:'gantt-key gantt-key--milestone'}),' Scadenza puntuale'])
   ]);
  }
- function render(project){
+ function draw(project){
   const section=el('div',{class:'gantt-section'});
   const tasks=S.tasks.filter(t=>t.project_id===project.id&&t.kind==='task');
   const planned=tasks.map(t=>({task:t,start:utcDay(t.start_at),end:utcDay(t.due_at)})).filter(t=>t.start!==null||t.end!==null);
@@ -125,5 +125,5 @@ const NextDoGantt=(()=>{
   }
  }
  function renderProjectAgain(){if(S.view==='projects')render()}
- return {render};
+ return {render:draw};
 })();
