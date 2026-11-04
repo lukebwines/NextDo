@@ -29,7 +29,7 @@ const NextDoProgress=(()=>{
     ]);
     const status=tag(statuses[t.status]||t.status,t.status);
     row.append(name,status);
-    if(t.can_edit!==false||t.can_complete)row.append(btn('Aggiorna',()=>open(t),'small'));
+    if(t.can_move===true||t.can_complete===true)row.append(btn('Aggiorna',()=>open(t),'small'));
     else row.append(btn('Dettagli',()=>taskForm(t),'small'));
     tracker.append(row);
    }
@@ -92,7 +92,7 @@ const NextDoProgress=(()=>{
    btn('Apri scheda',()=>{back.remove();taskForm(task)},'small'),
    el('button',{class:'btn primary',type:'submit',text:'Salva aggiornamento'})
   ]);
-  if(task.can_edit===false){
+  if(task.can_move!==true){
    st.disabled=true;note.disabled=true;actions.lastChild.disabled=true;
    form.append(node('p','sub','Non hai i permessi per aggiornare questa attività.'));
   }
