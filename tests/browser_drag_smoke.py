@@ -46,7 +46,7 @@ def main():
    'member_ids':[ids['alice'],ids['bob']]}))
   pid=project['id']
   course_id=check(client.post('/api/courses',headers=headers,json={
-   'code':'ZZ01','name':'Synthetic course','active':True}))['id']
+   'code':'MZ01','name':'Synthetic course','active':True}))['id']
   check(client.post('/api/projects',headers=headers,json={
    'title':'Synthetic course project','scope':'cds',
    'course_ids':[course_id],'member_ids':[ids['alice']]}))
