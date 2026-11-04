@@ -147,7 +147,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
   projectWrap.hidden=scope.value!=='project';
   groupWrap.hidden=scope.value!=='group';
   displayWrap.hidden=scope.value!=='group';
-  modeWrap.hidden=!['cds','common','group'].includes(scope.value);
+  modeWrap.hidden=!['cds','common','group','project'].includes(scope.value);
  }
  scope.addEventListener('change',updateScope);
  form.append(field('Titolo *',title),field('Tipologia',type),el('div',{class:'full'},[field('Descrizione / nota',desc)]),field('Priorità',pr),field('Stato',st),field('Inizio previsto (facoltativo)',start),field('Data e ora scadenza',due),field('Ricorrenza',rec),field('Ambito / visibilità',scope),courseWrap,projectWrap,groupWrap,field('Responsabile',assigned),modeWrap,field('Etichette (separate da virgola)',labels),field('Promemoria in minuti prima della scadenza',reminders),displayWrap);
