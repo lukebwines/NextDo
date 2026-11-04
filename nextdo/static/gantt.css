@@ -56,3 +56,14 @@
 .light .gantt-head-track,.light .gantt-name{background:#fff}
 .light .gantt-row:hover .gantt-body-track{background-color:#e7f1fa}
 @media(max-width:650px){.gantt-grid{width:calc(175px + var(--gantt-days-width))}.gantt-name{flex-basis:175px;width:175px;padding:7px}.gantt-controls{align-items:flex-start}.gantt-controls .field{min-width:118px}.project-view-toolbar .btn{min-width:80px}.gantt-unplanned-row .btn{font-size:11px}}
+
+/* Expandable activity -> CdS -> colleague progress. Unknown states are neutral. */
+.gantt-expand{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;float:left;margin:-2px 5px 0 -5px;border:1px solid var(--stroke);border-radius:5px;color:var(--ink);background:var(--panel2);cursor:pointer;font-size:15px}
+.gantt-expand:focus-visible{outline:2px solid #57a6ff}
+.gantt-course-row[hidden]{display:none!important}
+.gantt-course-row{min-height:64px}
+.gantt-child-name{padding-left:24px;display:flex;flex-direction:column;justify-content:center;gap:3px;background:var(--panel2)}
+.gantt-child-name strong{font-size:11px}
+.gantt-child-name .gantt-subtitle{font-size:10px}
+.gantt-bar--unsynced{background:#768090;border:1px dashed #b7c0cb;opacity:.64}
+.light .gantt-child-name{background:#edf3f9}
