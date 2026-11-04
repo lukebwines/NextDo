@@ -181,7 +181,7 @@ def validate_scope(c,u,b):
   if u['role']!='admin':fail('Solo l’amministratore può creare una scadenza comune')
   if b.project_id or b.course_ids:fail('Le scadenze comuni si applicano a tutti i CdS automaticamente',400)
  if scope=='project':
-  if not b.project_id or b.course_ids:fail('Selezionare un progetto e non duplicare i CdS',400)
+  if not b.project_id:fail('Selezionare un progetto',400)
   p=c.execute('SELECT * FROM projects WHERE id=?',(b.project_id,)).fetchone()
   if not p or not project_can_view(c,u,p):fail('Progetto non accessibile')
  if scope=='group' and not b.group_id:fail('Gruppo richiesto',400)
