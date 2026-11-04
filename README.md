@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.13-test.** Esporta ogni progetto NextDo in JSON, con identificativi stabili delle attività e un nome file nuovo a ogni download, compatibile con il flusso Power Automate testato.
+**Versione candidata: 0.1.14-test.** Permette di assegnare i colleghi a uno o più CdS direttamente nel progetto e genera automaticamente le righe di avanzamento per ciascun CdS nell'esportazione JSON.
+
+**Versione precedente: 0.1.13-test.** Esporta ogni progetto NextDo in JSON, con identificativi stabili delle attività e un nome file nuovo a ogni download, compatibile con il flusso Power Automate testato.
 
 **Versione precedente: 0.1.12-test.** Avvia un collegamento Microsoft Lists di prova in sola lettura, con autorizzazione delegata temporanea e identificazione degli elenchi SharePoint. Non modifica né pubblica alcun dato sul tenant Microsoft 365.
 
@@ -179,3 +181,18 @@ Il JSON usa lo schema già verificato con il flusso Power Automate: `schema_vers
 **Minimizzazione dei dati:** il file contiene titoli dei progetti e delle attività, stato e scadenza. Non esporta descrizioni, note di avanzamento, dati degli utenti o allegati. Controllare i titoli prima di caricarli sul sito istituzionale. Non esportare attività con contenuti riservati o personali senza autorizzazione.
 
 **Limiti attuali:** l'integrazione è **a senso unico** e richiede l'upload manuale del JSON. Il flusso Microsoft Lists sperimentale crea solo i campi **Titolo** e **NextDoID**, e salta completamente gli elementi esistenti; non aggiorna in SharePoint gli stati, i titoli e le scadenze di attività già importate. Non recupera ancora gli stati aggiornati dai colleghi in NextDo. Nessun collegamento con l'API Microsoft viene effettuato dal pulsante di esportazione. Per una vera sincronizzazione bidirezionale serve una fase ulteriore con autorizzazioni appropriate e regole di ownership dei campi.
+
+
+## NextDo 0.1.14-test — Responsabili CdS a livello di progetto
+
+Nel modulo **Progetti → Modifica progetto**, la sezione **Responsabili dei singoli CdS** permette di scegliere le coppie **collega + Corso di Studio**. Un collega può gestire più CdS, e più colleghi possono essere assegnati al medesimo CdS. Le assegnazioni sono registrate a livello di progetto e valgono automaticamente per tutte le attività del progetto, senza richiedere altre selezioni nei moduli delle singole attività. I CdS e gli utenti provengono soltanto dalle anagrafiche locali di NextDo; nel repository non sono inseriti nominativi reali.
+
+I destinatari assegnati possono visualizzare il progetto e le attività pertinenti senza acquisire automaticamente permessi per modificarne le impostazioni o spostare gli stati globali in NextDo. Gli **Altri partecipanti** continuano a seguire le regole di accesso già esistenti: se non devono poter intervenire sulle attività globali, non devono essere aggiunti come partecipanti generici. Il cambio degli incarichi non altera gli ID delle attività nel database e conserva la struttura precedente dei progetti non ancora configurati.
+
+La funzione **Esporta JSON per Lists** ora genera per ciascuna attività un record con ID stabile **`NEXTDO-T{task_id}-C{course_id}`** per ogni CdS distinto nel progetto. Se più colleghi seguono lo stesso CdS si crea comunque **una sola riga per coppia attività–CdS**, con il campo aggiuntivo **`responsible_user_ids`** che contiene i relativi identificativi interni NextDo. Sono inoltre esportati **`course_code`**, **`course_name`** e **`project_title`**, sempre attingendo ai dati dell'installazione. Non sono esportati nomi utenti, email, descrizioni, note, né allegati. Senza assegnazioni restano gli ID e la struttura JSON precedenti, compatibili con i primi test.
+
+**Configurazione successiva necessaria su Microsoft Lists e Power Automate:** aggiungere nella lista `test` le colonne **CdS**, **Progetto** e un campo Persona/collegamento all'account Microsoft 365, con mappatura autorizzata tra gli ID NextDo e le utenze Microsoft. Aggiornare l'azione **Crea elemento** del flusso per valorizzarle solo alla prima importazione. La colonna **Stato** e le note compilate dai colleghi in Microsoft Lists devono rimanere di proprietà di Lists, senza essere sovrascritte da nuovi upload. Fino a tale configurazione il JSON contiene i dati, ma il flusso importa soltanto titolo e ID, quindi **non dispone ancora di viste personali affidabili per i colleghi**.
+
+**Prima di importare un progetto già presente in Lists:** l'aggiunta di destinazioni CdS cambia gli ID delle righe da `NEXTDO-T{id}` a `NEXTDO-T{id}-C{course_id}`. Il vecchio record generico non sarà cancellato né convertito dal flusso; bisogna archiviarlo o riconciliarlo manualmente nel collaudo. La rimozione di assegnazioni dal progetto, inoltre, non elimina elementi già esistenti in Lists. Non usare il nuovo export con dati reali finché le colonne e la mappatura utenti non sono state collaudate.
+
+**Ambito attuale:** NextDo → file JSON scaricato manualmente → SharePoint → Power Automate → Microsoft Lists. La sincronizzazione di ritorno per aggiornare la dashboard NextDo con gli stati per singolo CdS è ancora da realizzare. Gli stati globali nel Kanban NextDo non costituiscono un aggregato delle lavorazioni Microsoft Lists.
