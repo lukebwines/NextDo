@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.8-test.** Aggiunge il diagramma di Gantt ai progetti, accanto al Kanban, con inizio facoltativo, scadenza, responsabile, stato e attività da pianificare. Mantiene tutte le funzioni della 0.1.7-test.
+**Versione candidata: 0.1.9-test.** Porta i Gantt dei progetti in evidenza nella Dashboard di ciascun partecipante e aggiunge aggiornamenti rapidi delle attività con stato, nota, autore e data. Mantiene le viste Kanban e Gantt della 0.1.8-test.
+
+**Versione precedente: 0.1.8-test.** Aggiunge il diagramma di Gantt ai progetti, accanto al Kanban, con inizio facoltativo, scadenza, responsabile, stato e attività da pianificare.
 
 **Versione precedente: 0.1.7-test.** Aggiunge spazi personali, assegnazione CdS ai colleghi, scadenze comuni e Project Manager Kanban.
 
@@ -105,3 +107,16 @@ Aprire **Progetti**, selezionare il progetto e usare il selettore **Kanban / Gan
 **Migrazione:** i dati da 0.1.7-test vengono preservati; prima di aggiungere la colonna locale `start_at` viene creata, quando necessaria, la copia SQLite `/data/nextdo-before-gantt-migration.sqlite3`. Non cancellare la copia precedente e creare sempre un backup dell'add-on Home Assistant prima dell'aggiornamento.
 
 **Limiti della prima versione:** la pianificazione si modifica dalle schede, non trascinando le barre; dipendenze tra attività, percorso critico e avanzamento percentuale per singola attività non sono ancora implementati. È necessario collaudare l'interfaccia sull'installazione ARM64 Home Assistant prima dell'uso con i colleghi.
+
+
+## Dashboard dei colleghi e Gantt in evidenza (0.1.9-test)
+
+La **Dashboard** di ogni collega mostra i Gantt dei progetti a cui ha accesso che sono stati contrassegnati come in evidenza. In **Progetti → Modifica progetto**, i responsabili possono attivare o disattivare **Mostra Gantt nella Dashboard dei partecipanti**. I progetti esistenti sono inizialmente in evidenza e possono essere esclusi dalle rispettive dashboard. Le note personali restano private e non compaiono nei Gantt.
+
+La sezione **Le mie attività di progetto** mostra le attività assegnate direttamente all'utente e quelle non assegnate che ha creato lui, ordinate prioritariamente per stato e scadenza. Il pulsante **Aggiorna** permette di scegliere lo stato (Da fare, In corso, In attesa, Completata) e di aggiungere una breve nota operativa. La scheda conserva la cronologia degli aggiornamenti con **autore, data, stato precedente/nuovo e commento**, visibile soltanto agli utenti con accesso alla relativa attività.
+
+Nel **Kanban**, le schede modificabili possono essere trascinate tra colonne oppure aggiornate tramite **Aggiorna stato**. Il trascinamento aggiorna lo stato sul server e registra la variazione nello storico, anche se il collega non aggiunge una nota. Sulle scadenze a completamento separato per CdS, lo spostamento a Completata non sostituisce la conferma dei singoli CdS.
+
+Il **Gantt non supporta ancora il trascinamento temporale delle barre**: cliccando sulla barra si apre la scheda per modificare le date di inizio e fine. La funzione è stata volutamente distinta dal trascinamento Kanban, che serve invece a cambiare lo stato.
+
+**Migrazione:** il database viene esteso senza cancellare i progetti; se occorre aggiungere il flag di evidenza viene creato il backup SQLite `/data/nextdo-before-featured-projects-migration.sqlite3`. Prima dell'installazione della 0.1.9-test eseguire anche un backup dell'add-on Home Assistant. Le nuove funzioni richiedono un collaudo nell'interfaccia web e sui permessi con account di prova prima dell'uso quotidiano dei colleghi.
