@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.12-test.** Avvia un collegamento Microsoft Lists di prova in sola lettura, con autorizzazione delegata temporanea e identificazione degli elenchi SharePoint. Non modifica né pubblica alcun dato sul tenant Microsoft 365.
+**Versione candidata: 0.1.13-test.** Esporta ogni progetto NextDo in JSON, con identificativi stabili delle attività e un nome file nuovo a ogni download, compatibile con il flusso Power Automate testato.
+
+**Versione precedente: 0.1.12-test.** Avvia un collegamento Microsoft Lists di prova in sola lettura, con autorizzazione delegata temporanea e identificazione degli elenchi SharePoint. Non modifica né pubblica alcun dato sul tenant Microsoft 365.
 
 **Versione precedente: 0.1.11-test.** Password da almeno 8 caratteri per gli utenti ordinari, minimo 12 per gli amministratori.
 
@@ -166,3 +168,14 @@ Istruzioni: inserire gli identificativi e l'indirizzo del sito SharePoint (è ac
 - Il collegamento usa soltanto endpoint Microsoft predefiniti, valida le URL SharePoint e non segue reindirizzamenti che potrebbero esporre i token.
 - Non si deve utilizzare l'app con dati di lavoro reali senza validazione da parte dei servizi informatici dell'Ateneo.
 - **Passaggi successivi non ancora disponibili:** creazione automatica delle colonne, pubblicazione delle attività, vista bacheca e importazione degli stati. Per creare colonne Graph richiede almeno il permesso delegato `Sites.Manage.All`; per aggiungere o aggiornare le righe `Sites.ReadWrite.All`. Sono permessi ampi, da approvare espressamente prima di implementarli e richiederli. La successiva sincronizzazione dovrà scrivere solo i campi di pianificazione di NextDo e mai sostituire lo stato o le note dei colleghi.
+
+
+## Esportazione progetti verso Microsoft Lists tramite Power Automate (0.1.13-test)
+
+Nel progetto desiderato, il responsabile o un amministratore può scegliere **Esporta JSON per Lists**. Il browser scarica un nuovo file `nextdo-project-{id}-{timestamp}-{suffix}.json`, da caricare manualmente nella cartella SharePoint `Documenti condivisi/NextDo_Sync` configurata nell'esperimento. Nessuna trasmissione automatica o registrazione di app Entra è richiesta per questa modalità manuale. Il pulsante non è visibile ai partecipanti senza permessi di gestione; anche l'endpoint del download controlla i permessi.
+
+Il JSON usa lo schema già verificato con il flusso Power Automate: `schema_version=1.0`, `source=NextDo`, `project.{id,title}` e l'array `tasks` con `id,title,status,due_at`. Gli ID sono permanenti nel database NextDo: `NEXTDO-P{project_id}` e `NEXTDO-T{task_id}`. Il nome del file cambia a ogni esportazione in modo che il trigger SharePoint **Quando viene creato un file (solo proprietà)** rilevi anche i nuovi caricamenti, mentre l'ID dell'attività non cambia, consentendo il controllo anti-duplicazione.
+
+**Minimizzazione dei dati:** il file contiene titoli dei progetti e delle attività, stato e scadenza. Non esporta descrizioni, note di avanzamento, dati degli utenti o allegati. Controllare i titoli prima di caricarli sul sito istituzionale. Non esportare attività con contenuti riservati o personali senza autorizzazione.
+
+**Limiti attuali:** l'integrazione è **a senso unico** e richiede l'upload manuale del JSON. Il flusso Microsoft Lists sperimentale crea solo i campi **Titolo** e **NextDoID**, e salta completamente gli elementi esistenti; non aggiorna in SharePoint gli stati, i titoli e le scadenze di attività già importate. Non recupera ancora gli stati aggiornati dai colleghi in NextDo. Nessun collegamento con l'API Microsoft viene effettuato dal pulsante di esportazione. Per una vera sincronizzazione bidirezionale serve una fase ulteriore con autorizzazioni appropriate e regole di ownership dei campi.
