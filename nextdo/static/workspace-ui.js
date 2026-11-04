@@ -33,7 +33,7 @@ const NextDoWorkspace=(()=>{
   const panel=el('section',{class:'card project-board'});
   const heading=el('div',{class:'card-head'},[
    node('h2','',current.title),
-   opt('Modifica progetto',()=>projectForm(current),'small'),
+   ...(current.can_edit?[opt('Modifica progetto',()=>projectForm(current),'small')]:[]),
    opt('+ Attività',()=>taskForm(null,'task',null,{scope:'project',project_id:current.id}),'primary')
   ]);
   panel.append(heading);
@@ -64,6 +64,9 @@ const NextDoWorkspace=(()=>{
      node('span','muted',t.due_at?fmt(t.due_at):'Senza scadenza'),
      el('div',{class:'kanban-tags'},[tag(priority[t.priority]||'Normale',t.priority),...(t.labels||[]).slice(0,2).map(x=>tag(x))])
     ]);
+    if(t.can_edit!==false)card.append(el('div',{class:'kanban-card-tools'},[
+     opt('Aggiorna stato',e=>{e.stopPropagation();NextDoProgress.open(t)},'small')
+    ]));
     card.addEventListener('click',()=>taskForm(t));
     card.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',String(t.id));e.dataTransfer.effectAllowed='move'});
     col.append(card);
@@ -92,18 +95,20 @@ const NextDoWorkspace=(()=>{
   const status=select('status',Object.entries(statuses),p?.status||'doing');
   const manager=select('manager_id',[['','Me stesso'],...S.users.map(u=>[String(u.id),u.display_name])],String(p?.manager_id||''));
   const due=input('due','',dtLocal(p?.due_at),'datetime-local');
+  const featured=el('input',{type:'checkbox',checked:p?p.featured!==0:true});
   const courseBox=checkboxes('CdS coinvolti',scopedCourses().map(c=>[c.id,c.code+' — '+c.name]),p?.course_ids||[]);
   const memberBox=checkboxes('Colleghi partecipanti',S.users.filter(u=>u.active&&u.id!==S.me.id).map(u=>[u.id,u.display_name]),p?.member_ids||[]);
   const courseWrap=el('div',{class:'full'},[courseBox.outer]);
   const update=()=>{courseWrap.style.display=scope.value==='cds'?'':'none'};
   scope.addEventListener('change',update);
-  f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,memberBox.outer);
+  f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,memberBox.outer,
+   el('label',{class:'full project-featured-option'},[featured,' Mostra Gantt nella Dashboard dei partecipanti']));
   update();
   const actions=el('div',{class:'actions full'},[opt('Annulla',()=>back.remove()),el('button',{type:'submit',class:'btn primary',text:p?'Salva progetto':'Crea progetto'})]);
   f.append(actions);
   f.addEventListener('submit',async e=>{
    e.preventDefault();
-   const data={title:title.value.trim(),description:desc.value,scope:scope.value,status:status.value,
+   const data={title:title.value.trim(),description:desc.value,scope:scope.value,status:status.value,featured:featured.checked,
     manager_id:manager.value?Number(manager.value):null,due_at:due.value?new Date(due.value).toISOString():null,
     course_ids:scope.value==='cds'?courseBox.selected():[],member_ids:memberBox.selected()};
    if(!data.title)return msg('Titolo obbligatorio',true);
