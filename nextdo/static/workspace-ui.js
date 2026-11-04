@@ -540,10 +540,29 @@ const NextDoWorkspace=(()=>{
     }catch(error){msg(error.message,true)}
    },'primary')]));
  }
+
+ function courseCollaboratorForm(c){
+  const {box,back}=modal('Collaboratori Microsoft Lists — '+c.code);
+  const selected=S.courseCollaborators.filter(x=>x.course_id===c.id).map(x=>x.collaborator_id);
+  const checklist=checkboxes('Collaboratori associati al CdS',
+   S.collaborators.filter(x=>x.active).map(x=>[x.id,x.display_name+(x.linked_user_id?' (NextDo attivo)':' (solo Lists)')]),selected);
+  box.append(node('p','sub','L’associazione è stabile finché non la modifichi. Non assegna un account NextDo e non modifica automaticamente i permessi SharePoint.'),checklist.outer,
+   btn('Salva associazioni',async()=>{
+    try{
+     await api('/courses/'+c.id+'/collaborators',{method:'PUT',
+      body:JSON.stringify({collaborator_ids:checklist.selected()})});
+     back.remove();await refresh();render();msg('Collaboratori associati al CdS');
+    }catch(e){msg(e.message,true)}
+   },'primary'));
+ }
  function courseAdminButton(c){
   if(S.me.role!=='admin')return null;
   const assigned=S.courseAssignees.filter(a=>a.course_id===c.id);
-  return opt('Assegna colleghi ('+assigned.length+')',()=>courseAssignmentForm(c),'small');
+  const onlyLists=S.courseCollaborators.filter(x=>x.course_id===c.id).length;
+  return el('div',{style:'display:flex;flex-wrap:wrap;gap:6px'},[
+   opt('Assegna colleghi ('+assigned.length+')',()=>courseAssignmentForm(c),'small'),
+   opt('Collaboratori Lists ('+onlyLists+')',()=>courseCollaboratorForm(c),'small')
+  ]);
  }
  function settings(main){
   const section=el('section',{class:'card workspace-settings',style:'margin-top:16px'});
@@ -562,6 +581,59 @@ const NextDoWorkspace=(()=>{
    section2.append(line);
   }
   main.append(section2);
+  const section3=el('section',{class:'card workspace-settings',style:'margin-top:16px'});
+  section3.append(node('h2','','Collaboratori Microsoft Lists'),
+   node('p','sub','Queste persone lavorano in Microsoft Lists e non possiedono credenziali NextDo finché non attivi esplicitamente il loro accesso.'),
+   opt('+ Nuovo collaboratore',()=>collaboratorForm(),'primary'));
+  for(const c of S.collaborators){
+   const line=el('div',{class:'rowtask'});
+   const activeUser=c.linked_user_id?S.users.find(u=>u.id===c.linked_user_id&&u.active):null;
+   line.append(node('span','taskmain',c.display_name+' · '+(c.active?'Attivo':'Inattivo')+' · '+
+    (activeUser?'Accesso NextDo attivo':'Solo Microsoft Lists')+
+    (c.microsoft_upn?' · '+c.microsoft_upn:' · UPN [DA VERIFICARE]')),
+    opt('Modifica',()=>collaboratorForm(c),'small'),
+    activeUser?opt('Disattiva accesso',()=>deactivateCollaboratorAccess(c),'small'):
+     opt('Attiva accesso NextDo',()=>activateCollaboratorAccess(c),'small'));
+   section3.append(line);
+  }
+  main.append(section3);
+ }
+ function collaboratorForm(c=null){
+  const {box,back}=modal(c?'Modifica collaboratore':'Nuovo collaboratore Microsoft Lists');
+  const name=input('display_name','Nome e cognome',c?.display_name||'');
+  const upn=input('microsoft_upn','Account Microsoft 365 (UPN), facoltativo',c?.microsoft_upn||'');
+  const active=el('input',{type:'checkbox',checked:c?!!c.active:true});
+  box.append(field('Nome visualizzato',name),field('Account Microsoft 365',upn),
+   node('p','sub','L’identificativo Microsoft deve essere verificato prima di assegnare attività in Lists. Non è una credenziale NextDo.'),
+   el('label',{},[active,' Collaboratore attivo']),
+   opt(c?'Salva collaboratore':'Crea collaboratore',async()=>{
+    if(!name.value.trim())return msg('Nome obbligatorio',true);
+    try{
+     await api('/collaborators'+(c?'/'+c.id:''),{method:c?'PUT':'POST',
+      body:JSON.stringify({display_name:name.value.trim(),microsoft_upn:upn.value.trim(),active:active.checked})});
+     back.remove();await refresh();render();msg('Anagrafica collaboratore salvata');
+    }catch(e){msg(e.message,true)}
+   },'primary'));
+ }
+ function activateCollaboratorAccess(c){
+  const {box,back}=modal('Attiva NextDo — '+c.display_name);
+  const username=input('username','Nome utente NextDo');
+  const password=input('password','Nuova password (almeno 8 caratteri)','','password');
+  box.append(node('p','sub','L’accesso verrà collegato all’anagrafica già esistente: nessuna assegnazione CdS o progetto verrà cancellata.'),
+   field('Nome utente',username),field('Password iniziale',password),
+   opt('Attiva accesso',async()=>{
+    if(!confirm('Attivare l’accesso NextDo per '+c.display_name+'?'))return;
+    try{await api('/collaborators/'+c.id+'/activate-access',{method:'POST',
+     body:JSON.stringify({username:username.value,password:password.value})});
+     back.remove();await refresh();render();msg('Accesso NextDo attivato');
+    }catch(e){msg(e.message,true)}
+   },'primary'));
+ }
+ async function deactivateCollaboratorAccess(c){
+  if(!confirm('Disattivare l’accesso NextDo per '+c.display_name+' mantenendo tutte le sue assegnazioni?'))return;
+  try{await api('/collaborators/'+c.id+'/deactivate-access',{method:'POST'});
+   await refresh();render();msg('Accesso NextDo disattivato; il collaboratore resta in Lists')}
+  catch(e){msg(e.message,true)}
  }
  function changePasswordForm(){
   const {box,back}=modal('Cambia la tua password');
