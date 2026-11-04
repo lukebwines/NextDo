@@ -137,7 +137,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  const project=select('project_id',[['','Seleziona un progetto'],...S.projects.map(p=>[String(p.id),p.title])],String(t?.project_id||preferences.project_id||''));
  const courses=checkboxes('Corsi di Studio interessati (selezione multipla)',NextDoWorkspace.scopedCourses().filter(c=>c.active).map(c=>[c.id,c.code+' — '+c.name]),(t?.courses||[]).map(c=>c.id));
  const courseWrap=el('div',{class:'full'},[courses.outer]);
- const projectWrap=el('div',{class:'full'},[field('Progetto',project)]);
+ const projectWrap=el('div',{class:'full'},[field('Progetto',project),node('p','sub','I CdS destinatari e i colleghi responsabili si assegnano nella scheda del progetto: tutte le attività ne erediteranno le associazioni.')]);
  const groupWrap=el('div',{class:'full'},[field('Gruppo di condivisione',grp)]);
  const displayWrap=el('label',{class:'full'},[display,' Pubblica esplicitamente su NextDo Display (solo attività di gruppo)']);
  const modeWrap=el('div',{class:'full'},[field('Modalità di completamento',mode)]);
