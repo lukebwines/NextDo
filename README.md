@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.17-test.** Vista Progetti compatta, ricerca e filtri per CdS/responsabile, dettaglio Kanban/Gantt separato. Nessuna modifica al database.
+**Versione candidata: 0.1.18-test.** Sposta la sezione I miei progetti e avanzamenti e i relativi Gantt alla fine della Dashboard, dopo scadenze, aggiunta rapida, settimana ed etichette. Nessuna modifica ai dati o al criterio di aggiornamento del Gantt.
+
+**Versione precedente: 0.1.17-test.** Vista Progetti compatta, ricerca e filtri per CdS/responsabile, dettaglio Kanban/Gantt separato. Nessuna modifica al database.
 
 **Versione candidata: 0.1.15-test.** Precompila mediante spunte i CdS gestiti abitualmente da ogni collega nel modulo progetto, lasciando indipendenti le assegnazioni salvate per ciascun progetto.
 
