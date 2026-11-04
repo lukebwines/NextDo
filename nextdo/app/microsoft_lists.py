@@ -26,7 +26,7 @@ SCOPE = "https://graph.microsoft.com/Sites.Read.All"
 FLOWS = {}
 TOKENS = {}
 UUID_RE = re.compile(r"^[a-fA-F0-9-]{36}$")
-HOST_RE = re.compile(r"^[a-zA-Z0-9-]+\\.sharepoint\\.com$")
+HOST_RE = re.compile(r"^[a-zA-Z0-9-]+\.sharepoint\.com$")
 SITE_PATH_RE = re.compile(r"^/(?:sites|teams)/[a-zA-Z0-9._-]+/?$")
 
 
@@ -101,8 +101,13 @@ def _http_json(url, form=None, token=None):
   data=urllib.parse.urlencode(form).encode("utf-8")
   headers["Content-Type"]="application/x-www-form-urlencoded"
  request=urllib.request.Request(url,data=data,headers=headers,method="POST" if form is not None else "GET")
+ # Never forward Microsoft access tokens or device-code credentials to redirected URLs.
+ class NoRedirect(urllib.request.HTTPRedirectHandler):
+  def redirect_request(self,req,fp,code,msg,headers,newurl):
+   return None
+ opener=urllib.request.build_opener(NoRedirect())
  try:
-  with urllib.request.urlopen(request,timeout=15) as response:
+  with opener.open(request,timeout=15) as response:
    return response.status,json.loads(response.read(2_000_000).decode("utf-8"))
  except urllib.error.HTTPError as error:
   try: payload=json.loads(error.read(16_384).decode("utf-8"))
