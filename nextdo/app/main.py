@@ -172,7 +172,7 @@ def home():
 @app.get('/api/build')
 def build_details(req:Request):
  user(req)
- return {'version':'0.1.18-test','assets':asset_versions()}
+ return {'version':'0.1.19-test','assets':asset_versions()}
 @app.get('/api/setup')
 def setup():
  with conn() as c:count=c.execute('SELECT COUNT(*) FROM users').fetchone()[0]
