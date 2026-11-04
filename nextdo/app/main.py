@@ -451,7 +451,14 @@ def task_update(tid:int,b:TaskIn,req:Request):
    progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
   c.execute('UPDATE tasks SET title=?,description=?,kind=?,priority=?,status=?,due_at=?,start_at=?,assigned_to=?,group_id=?,completion_mode=?,display_enabled=?,recurrence=?,labels=?,scope=?,project_id=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.start_at,b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id,iso(),tid))
-  ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
+  if b.scope=='project':
+   ids=[r[0] for r in c.execute('SELECT course_id FROM task_courses WHERE task_id=?',(tid,))]
+   if b.completion_mode=='per_course' and not ids:
+    ids=[r[0] for r in c.execute('SELECT course_id FROM project_courses WHERE project_id=?',(b.project_id,))]
+    if not ids:
+     p=c.execute('SELECT scope FROM projects WHERE id=?',(b.project_id,)).fetchone()
+     if p and p['scope']=='common':ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')]
+  else:ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
   put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders)
   if t['status']!=b.status:
    c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],b.status,''))
