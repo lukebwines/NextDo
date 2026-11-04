@@ -124,6 +124,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  const pr=select('priority',Object.entries(priority),t?.priority||suggestion?.priority||'normal');
  const st=select('status',Object.entries(statuses),t?.status||'todo');
  const due=input('due_at','',dtLocal(t?.due_at||suggestion?.due_at),'datetime-local');
+ const start=input('start_at','',dtLocal(t?.start_at||suggestion?.start_at),'datetime-local');
  const rec=select('recurrence',[['none','Nessuna'],['daily','Giornaliera'],['weekly','Settimanale'],['monthly','Mensile'],['yearly','Annuale']],t?.recurrence||suggestion?.recurrence||'none');
  const grp=select('group_id',[['','Privata (nessun gruppo)'],...S.groups.map(g=>[String(g.id),g.name])],t?.group_id||'');
  const assigned=select('assigned_to',[['','Non assegnata'],...S.users.map(u=>[String(u.id),u.display_name])],t?.assigned_to||'');
@@ -147,7 +148,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
   modeWrap.hidden=!['cds','common','group'].includes(scope.value);
  }
  scope.addEventListener('change',updateScope);
- form.append(field('Titolo *',title),field('Tipologia',type),el('div',{class:'full'},[field('Descrizione / nota',desc)]),field('Priorità',pr),field('Stato',st),field('Data e ora scadenza',due),field('Ricorrenza',rec),field('Ambito / visibilità',scope),courseWrap,projectWrap,groupWrap,field('Responsabile',assigned),modeWrap,field('Etichette (separate da virgola)',labels),field('Promemoria in minuti prima della scadenza',reminders),displayWrap);
+ form.append(field('Titolo *',title),field('Tipologia',type),el('div',{class:'full'},[field('Descrizione / nota',desc)]),field('Priorità',pr),field('Stato',st),field('Inizio previsto (facoltativo)',start),field('Data e ora scadenza',due),field('Ricorrenza',rec),field('Ambito / visibilità',scope),courseWrap,projectWrap,groupWrap,field('Responsabile',assigned),modeWrap,field('Etichette (separate da virgola)',labels),field('Promemoria in minuti prima della scadenza',reminders),displayWrap);
  updateScope();
  if(t?.completion_mode==='per_course'&&t.courses.length){
   const section=el('div',{class:'full card'},[node('h2','','Completamento per CdS')]);
@@ -189,10 +190,12 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  form.addEventListener('submit',async e=>{
   e.preventDefault();if(busy)return;
   busy=true;save.disabled=true;
-  const mins=reminders.value.split(',').map(x=>x.trim()).filter(Boolean).map(Number);
+  if(start.value&&due.value&&new Date(start.value)>new Date(due.value)){busy=false;save.disabled=false;msg('La data di inizio non può essere successiva alla scadenza',true);return}
+   const mins=reminders.value.split(',').map(x=>x.trim()).filter(Boolean).map(Number);
   const data={
    title:title.value,description:desc.value,kind:type.value,priority:pr.value,status:st.value,
-   due_at:due.value?new Date(due.value).toISOString():null,recurrence:rec.value,
+   start_at:start.value?new Date(start.value).toISOString():null,
+    due_at:due.value?new Date(due.value).toISOString():null,recurrence:rec.value,
    group_id:scope.value==='group'&&grp.value?Number(grp.value):null,assigned_to:scope.value==='personal'?null:assigned.value?Number(assigned.value):null,
    completion_mode:modeWrap.hidden?'global':mode.value,display_enabled:scope.value==='group'&&display.checked,scope:scope.value,project_id:scope.value==='project'&&project.value?Number(project.value):null,
    labels:labels.value.split(',').map(x=>x.trim()).filter(Boolean),
