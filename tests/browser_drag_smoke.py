@@ -82,6 +82,7 @@ def main():
      page.get_by_role('button',name='Progetti',exact=True).wait_for()
      page.get_by_role('button',name='Progetti',exact=True).click()
      assert page.locator('.project-list-row').count()==2,'Two projects must fit in the compact index'
+     assert 'Indipendente dai CdS' in page.locator('.project-list-row',has_text='Synthetic team project').inner_text()
      assert page.locator('.kanban-board').count()==0,'Kanban must open only within a project'
      page.get_by_label('Cerca progetti').fill('Synthetic team project')
      assert page.locator('.project-list-row').count()==1
