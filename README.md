@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.9-test.** Porta i Gantt dei progetti in evidenza nella Dashboard di ciascun partecipante e aggiunge aggiornamenti rapidi delle attività con stato, nota, autore e data. Mantiene le viste Kanban e Gantt della 0.1.8-test.
+**Versione candidata: 0.1.10-test.** Corregge il trascinamento delle schede Kanban nei progetti condivisi, distinguendo la modifica dello stato dalle modifiche strutturali delle attività. Mantiene le funzioni della 0.1.9-test.
+
+**Versione precedente: 0.1.9-test.** Porta i Gantt dei progetti in evidenza nella Dashboard di ciascun partecipante e aggiunge aggiornamenti rapidi delle attività con stato, nota, autore e data.
 
 **Versione precedente: 0.1.8-test.** Aggiunge il diagramma di Gantt ai progetti, accanto al Kanban, con inizio facoltativo, scadenza, responsabile, stato e attività da pianificare.
 
@@ -120,3 +122,14 @@ Nel **Kanban**, le schede modificabili possono essere trascinate tra colonne opp
 Il **Gantt non supporta ancora il trascinamento temporale delle barre**: cliccando sulla barra si apre la scheda per modificare le date di inizio e fine. La funzione è stata volutamente distinta dal trascinamento Kanban, che serve invece a cambiare lo stato.
 
 **Migrazione:** il database viene esteso senza cancellare i progetti; se occorre aggiungere il flag di evidenza viene creato il backup SQLite `/data/nextdo-before-featured-projects-migration.sqlite3`. Prima dell'installazione della 0.1.9-test eseguire anche un backup dell'add-on Home Assistant. Le nuove funzioni richiedono un collaudo nell'interfaccia web e sui permessi con account di prova prima dell'uso quotidiano dei colleghi.
+
+
+## Correzione del trascinamento Kanban (0.1.10-test)
+
+In **Progetti → Kanban**, i membri autorizzati di un progetto e i colleghi assegnati ai CdS del progetto possono spostare le **attività senza assegnatario** tra *Da fare / In corso / In attesa / Completata*, anche se il proprietario della scheda è l'amministratore. Il trascinamento è disponibile sulle attività espressamente assegnate al proprio account. Le schede di altri colleghi restano in sola lettura.
+
+Le attività trascinabili mostrano **«⋮⋮ Trascina»** e il pulsante **«Aggiorna stato»** come alternativa affidabile quando il browser o un dispositivo non gestisce il drag-and-drop. Le schede bloccate mostrano invece **«Sola lettura»** e una spiegazione. La selezione dello stato è salvata sul server e tracciata nello storico. Per il completamento separato per CdS è necessario confermare ogni CdS nella scheda, anziché trascinare direttamente su *Completata*.
+
+**Sicurezza:** il permesso di modificare lo stato e scrivere note di avanzamento (`can_move`) non autorizza a cancellare, riassegnare o modificare la struttura della scheda (`can_edit`). Per poter aggiornare le attività non assegnate, il collega deve essere un membro esplicito del progetto o un collega assegnato a uno dei CdS associati. La sola visibilità di un progetto comune non concede automaticamente permessi di modifica.
+
+Aggiornare l'add-on da Home Assistant dopo un backup. Non modificare il database né disinstallare l'add-on. Il comportamento nel browser reale va confermato con un account di prova.
