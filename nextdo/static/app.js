@@ -1,5 +1,5 @@
 'use strict';
-const S={me:null,csrf:'',tasks:[],courses:[],groups:[],users:[],view:'dashboard',editing:null,month:new Date(),light:localStorage.getItem('nextdo-light')==='1',listPreset:'all',labelFilter:'',searchTerm:'',projects:[],courseAssignees:[],myCourseIds:[],selectedProject:null,projectMode:localStorage.getItem('nextdo-project-view')==='gantt'?'gantt':'kanban',ganttZoom:localStorage.getItem('nextdo-gantt-zoom')||'normal'};
+const S={me:null,csrf:'',tasks:[],courses:[],groups:[],users:[],view:'dashboard',editing:null,month:new Date(),light:localStorage.getItem('nextdo-light')==='1',listPreset:'all',labelFilter:'',searchTerm:'',projects:[],courseAssignees:[],collaborators:[],courseCollaborators:[],myCourseIds:[],selectedProject:null,projectMode:localStorage.getItem('nextdo-project-view')==='gantt'?'gantt':'kanban',ganttZoom:localStorage.getItem('nextdo-gantt-zoom')||'normal'};
 const $=id=>document.getElementById(id), priority={low:'Bassa',normal:'Normale',high:'Alta',critical:'Critica'}, statuses={todo:'Da fare',doing:'In corso',waiting:'In attesa',done:'Completata'};
 function el(tag,attrs={},children=[]){const n=document.createElement(tag);for(const [k,v] of Object.entries(attrs)){if(k==='class')n.className=v;else if(k==='text')n.textContent=v;else if(k==='html')throw Error('Unsafe HTML');else if(k.startsWith('on'))n.addEventListener(k.slice(2),v);else if(k==='value')n.value=v;else if(k==='checked')n.checked=!!v;else if(k==='style')n.setAttribute('style',v);else n.setAttribute(k,v)}for(const c of (Array.isArray(children)?children:[children]))if(c!=null)n.append(typeof c==='string'?document.createTextNode(c):c);return n}
 function node(tag,cls,txt){return el(tag,{class:cls,text:txt})}
@@ -19,6 +19,7 @@ async function refresh(){
  const out=await Promise.all([api('/tasks'),api('/courses'),api('/groups'),api('/users'),api('/projects'),api('/my-courses')]);
  [S.tasks,S.courses,S.groups,S.users,S.projects,S.myCourseIds]=out;
  S.courseAssignees=await api('/course-assignee-defaults');
+ [S.collaborators,S.courseCollaborators]=await Promise.all([api('/collaborators'),api('/course-collaborators')]);
 }
 const iconDefs={paperclip:['M21.44 11.05l-8.49 8.49a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.4a2 2 0 0 1-2.83-2.83l8.49-8.49'],check:['M9 11l3 3L22 4','M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'],home:['M3 10l9-7 9 7','M5 9v12h14V9','M9 21v-8h6v8'],list:['M8 6h13','M8 12h13','M8 18h13','M3 6h.01','M3 12h.01','M3 18h.01'],calendar:['M8 2v4','M16 2v4','M3 10h18','M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2z'],note:['M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-5-5H8z','M16 3v5h5','M8 13h8','M8 17h5'],archive:['M3 4h18v5H3z','M5 9v12h14V9','M10 13h4'],settings:['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8','M4 12a8 8 0 0 1 16 0 8 8 0 0 1-16 0'],bell:['M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9','M10 21h4'],search:['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16','M21 21l-4.35-4.35'],user:['M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2','M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8'],clock:['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20','M12 6v6l4 2'],alert:['M12 3L2 21h20L12 3z','M12 9v4','M12 17h.01'],tag:['M3 3h8l10 10-8 8L3 11V3z','M7 7h.01'],plus:['M12 5v14','M5 12h14'],chevron:['M9 18l6-6-6-6']};
 function ico(name,cls=''){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','2');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');svg.setAttribute('class','ico '+cls);svg.setAttribute('aria-hidden','true');for(const d of iconDefs[name]||iconDefs.check){const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',d);svg.append(p)}return svg}
@@ -110,7 +111,7 @@ function dashboard(main){
  const legend=el('div',{class:'chart-legend'});count.forEach(([name,num],i)=>legend.append(el('div',{class:'legend-row'},[el('span',{class:'legend-dot',style:'background:'+colors[i]}),node('span','',name),node('strong','',String(num))])));if(!count.length)legend.append(node('span','muted','Nessuna etichetta assegnata'));chart.append(ring,legend);breakdown.append(chart);lower.append(week,breakdown);main.append(lower);
  NextDoProgress.dashboard(main);
 }
-function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['urgent','Urgenti'],['overdue','Scadute'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';tools.append(search,csel,gsel,status,preset);if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':t.kind==='task'&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&(preset.value==='all'||(preset.value==='urgent'&&['high','critical'].includes(t.priority)&&t.status!=='done')||(preset.value==='overdue'&&t.due_at&&new Date(t.due_at)<new Date()&&t.status!=='done')||(preset.value==='done'&&t.status==='done')));panel.append(node('h2','',`${tasks.length} elementi`));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.forEach(t=>panel.append(taskrow(t)))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
+function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['urgent','Urgenti'],['overdue','Scadute'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';tools.append(search,csel,gsel,status,preset);if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':t.kind==='task'&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&(preset.value==='all'||(preset.value==='urgent'&&['high','critical'].includes(t.priority)&&t.status!=='done')||(preset.value==='overdue'&&t.due_at&&new Date(t.due_at)<new Date()&&t.status!=='done')||(preset.value==='done'&&t.status==='done')));panel.append(node('h2','',`${tasks.length} elementi`));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.forEach(t=>panel.append(taskrow(t)))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
 function modal(title){const back=el('div',{class:'modalback'}),box=el('div',{class:'modal'});box.append(node('h2','',title));back.append(box);back.addEventListener('click',e=>{if(e.target===back)back.remove()});document.body.append(back);return {back,box}}
 function checkboxes(title,values,selected=[]){const outer=el('div',{class:'full'}),region=el('div',{class:'checkboxes'});outer.append(node('label','label',title),region);for(const [v,l] of values){const cb=el('input',{type:'checkbox',value:String(v),checked:selected.includes(Number(v))});region.append(el('label',{},[cb,' '+l]))}return {outer,selected:()=>[...region.querySelectorAll('input:checked')].map(e=>Number(e.value))}}
 function taskForm(t=null,kind='task',suggestion=null,preferences={}){
@@ -146,7 +147,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
   projectWrap.hidden=scope.value!=='project';
   groupWrap.hidden=scope.value!=='group';
   displayWrap.hidden=scope.value!=='group';
-  modeWrap.hidden=!['cds','common','group'].includes(scope.value);
+  modeWrap.hidden=!['cds','common','group','project'].includes(scope.value);
  }
  scope.addEventListener('change',updateScope);
  form.append(field('Titolo *',title),field('Tipologia',type),el('div',{class:'full'},[field('Descrizione / nota',desc)]),field('Priorità',pr),field('Stato',st),field('Inizio previsto (facoltativo)',start),field('Data e ora scadenza',due),field('Ricorrenza',rec),field('Ambito / visibilità',scope),courseWrap,projectWrap,groupWrap,field('Responsabile',assigned),modeWrap,field('Etichette (separate da virgola)',labels),field('Promemoria in minuti prima della scadenza',reminders),displayWrap);
@@ -179,6 +180,13 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  form.append(attachments);
  const actions=el('div',{class:'actions full'});
  actions.append(btn('Annulla',()=>back.remove()));
+ if(t&&t.kind==='task'&&t.scope!=='project'&&['personal','cds','common'].includes(t.scope)&&t.can_edit!==false){
+  actions.append(btn('Trasforma in progetto',async()=>{
+   if(!confirm('Trasformare questa scadenza in un progetto? Il numero dell’attività, gli allegati e lo storico saranno conservati.'))return;
+   try{const result=await api('/tasks/'+t.id+'/promote-to-project',{method:'POST'});back.remove();await refresh();S.selectedProject=result.project_id;S.projectMode='kanban';changeView('projects','all','',result.project_id);msg('Scadenza trasformata in progetto')}
+   catch(e){msg(e.message,true)}
+  },'small'));
+ }
  if(t&&t.can_edit!==false)actions.append(btn('Elimina',async()=>{
   if(!confirm('Eliminare definitivamente questa attività?'))return;
   try{await api('/tasks/'+t.id,{method:'DELETE'});back.remove();await refresh();render()}catch(e){msg(e.message,true)}
@@ -231,6 +239,67 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  }else if(preferences.focus==='labels')labels.focus();
  else if(preferences.focus==='attachments')picker.focus();
 }
+
+function calendarImportForm(){
+ const {box,back}=modal('Importa calendario annuale — UO SEGR CDS');
+ const notice=node('p','sub','Carica il file ufficiale .xlsx, verifica l’anteprima e seleziona soltanto le attività pertinenti. Le date sono indicative. Nessun dato viene importato prima della conferma.');
+ const picker=el('input',{type:'file',class:'field',accept:'.xlsx'});
+ const preview=el('div',{class:'calendar-import-preview',style:'max-height:52vh;overflow:auto'});
+ const counters=node('p','sub','');
+ const previewButton=btn('Analizza Excel',async()=>{
+  if(!picker.files?.length)return msg('Selezionare un file Excel',true);
+  const data=new FormData();data.append('file',picker.files[0]);
+  previewButton.disabled=true;
+  try{
+   const result=await api('/calendar-import/preview',{method:'POST',body:data});
+   showPreview(result);
+  }catch(e){msg(e.message,true)}
+  finally{previewButton.disabled=false}
+ },'small');
+ const applyButton=btn('Importa le righe selezionate',async()=>{
+  const selected=[...preview.querySelectorAll('input[data-calendar-id]:checked')].map(x=>x.dataset.calendarId);
+  if(!selected.length)return msg('Seleziona almeno una attività da importare',true);
+  if(!confirm('Confermi l’importazione di '+selected.length+' attività? Saranno inizialmente private dell’amministratore, da verificare e assegnare in seguito.'))return;
+  const data=new FormData();data.append('file',picker.files[0]);data.append('selected',JSON.stringify(selected));
+  applyButton.disabled=true;
+  try{
+   const result=await api('/calendar-import/apply',{method:'POST',body:data});
+   back.remove();await refresh();render();
+   msg('Importate '+result.created+' attività. Già presenti: '+result.skipped+'. Verificare incarichi, CdS e termini.');
+  }catch(e){msg(e.message,true)}
+  finally{applyButton.disabled=false}
+ },'primary');
+ applyButton.disabled=true;
+ box.append(notice,field('Calendario dell’offerta formativa (.xlsx)',picker),previewButton,counters,preview,applyButton);
+ picker.addEventListener('change',()=>{preview.replaceChildren();counters.textContent='';applyButton.disabled=true});
+ function showPreview(data){
+  preview.replaceChildren();
+  const rows=data.rows||[];
+  counters.textContent=rows.length+' attività UO SEGR CDS individuate · '+rows.filter(r=>r.already_imported).length+' già importate';
+  if(!rows.length){preview.append(node('p','empty','Nessuna attività UO SEGR CDS individuata.'));applyButton.disabled=true;return}
+  const selectAll=btn('Seleziona nuove future',()=>{
+   preview.querySelectorAll('input[data-calendar-id]').forEach(cb=>{cb.checked=cb.dataset.default==='yes'});
+  },'small');
+  preview.append(selectAll);
+  for(const r of rows){
+   const bad=r.invalid_dates?' · DATE INCOERENTI':r.requires_verification?' · [DA VERIFICARE]':'';
+   const old=r.already_imported?' · GIÀ IMPORTATA'+(r.changed_in_source?' — DATE VARIATE':''):'';
+   const check=el('input',{type:'checkbox',checked:r.select_by_default});
+   check.dataset.calendarId=r.key;
+   check.dataset.default=r.select_by_default?'yes':'no';
+   if(r.already_imported||r.invalid_dates)check.disabled=true;
+   const role=r.roles.join(', ');
+   const text=el('div',{},[
+    node('strong','',r.title),
+    node('div','sub','Scadenza: '+(r.due||'[DA VERIFICARE]')+' · A.A. '+(r.year||'[DA VERIFICARE]')+' · '+(r.process||'')+old+bad),
+    node('div','sub','UO SEGR CDS: '+role+' · Responsabile: '+(r.responsible||'[DA VERIFICARE]'))
+   ]);
+   preview.append(el('label',{class:'rowtask'},[check,text]));
+  }
+  applyButton.disabled=false;
+ }
+}
+
 function pasteForm(){const {box,back}=modal('Incolla nota e rileva scadenze');const txt=el('textarea',{class:'field',rows:'10',placeholder:'Incolla una comunicazione o una nota…'});box.append(field('Testo originale',txt));box.append(el('p',{class:'sub',text:'Il rilevamento è locale e non utilizza servizi di AI esterni. Le date e le priorità devono sempre essere confermate.'}),el('div',{class:'actions'},[btn('Annulla',()=>back.remove()),btn('Analizza testo',async()=>{try{const suggestion=await api('/extract',{method:'POST',body:JSON.stringify({text:txt.value})});if(suggestion.detected_dates.length>1)msg('Rilevate più date: verificare quelle aggiuntive nella descrizione.');suggestion.due_at=suggestion.detected_dates[0]?suggestion.detected_dates[0]+'T12:00:00':'';back.remove();taskForm(null,'task',suggestion)}catch(e){msg(e.message,true)}},'primary')]))}
 function calendar(main){const bar=el('div',{class:'toolbar'});bar.append(btn('←',()=>{S.month.setMonth(S.month.getMonth()-1);render()}),node('h2','',S.month.toLocaleDateString('it-IT',{month:'long',year:'numeric'})),btn('→',()=>{S.month.setMonth(S.month.getMonth()+1);render()}));main.append(bar);const grid=el('div',{class:'monthgrid'});for(const name of ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'])grid.append(node('div','day head',name));const y=S.month.getFullYear(),m=S.month.getMonth(),start=(new Date(y,m,1).getDay()+6)%7,num=new Date(y,m+1,0).getDate();for(let i=0;i<start;i++)grid.append(node('div','day',''));for(let d=1;d<=num;d++){const cell=el('div',{class:'day'},[node('strong','',String(d))]);for(const t of S.tasks.filter(t=>t.due_at&&new Date(t.due_at).getDate()===d&&new Date(t.due_at).getMonth()===m&&new Date(t.due_at).getFullYear()===y))cell.append(el('button',{class:'item',onclick:()=>taskForm(t),text:t.title}));grid.append(cell)}main.append(grid)}
 function coursesView(main){const card=el('section',{class:'card'});card.append(node('h2','','Anagrafica CdS'));if(S.me.role==='admin'){card.append(btn('+ Aggiungi CdS',()=>courseForm(),'primary'),node('p','muted','Import CSV UTF-8 con intestazioni code,name. I codici devono rispettare il formato M seguito da 2–3 caratteri alfanumerici.'));const upload=el('input',{type:'file',accept:'.csv',class:'field'});card.append(upload,btn('Importa CSV',async()=>{if(!upload.files[0])return;const form=new FormData();form.append('file',upload.files[0]);try{const r=await api('/courses/import',{method:'POST',body:form});msg(`Importate ${r.imported} righe; righe scartate: ${r.rejected_lines.join(', ')||'nessuna'}`);await refresh();render()}catch(e){msg(e.message,true)}},'small'))}card.append(node('p','sub','L’elenco ufficiale non è precaricato: inserire o importare solo codici e denominazioni verificati.'));for(const c of S.courses){card.append(el('div',{class:'rowtask'},[node('div','taskmain',c.code+' — '+c.name+(c.active?'':' (non attivo)')),tag(S.tasks.filter(t=>t.courses.some(x=>x.id===c.id)&&t.status!=='done').length+' attività'),...(S.me.role==='admin'?[btn('Modifica',()=>courseForm(c),'small'),NextDoWorkspace.courseAdminButton(c)]:[])]))}main.append(card)}

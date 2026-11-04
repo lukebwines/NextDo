@@ -31,6 +31,12 @@ def upgrade(db_path:Path,data_path:Path):
     try:db.backup(dest)
     finally:dest.close()
   project_columns={r[1] for r in db.execute('PRAGMA table_info(projects)')}
+  if 'archived_at' not in project_columns:
+   backup=data_path/'nextdo-before-project-archive-migration.sqlite3'
+   if not backup.exists():
+    dst=sqlite3.connect(backup)
+    try:db.backup(dst)
+    finally:dst.close()
   if 'featured' not in project_columns:
    backup=data_path/'nextdo-before-featured-projects-migration.sqlite3'
    if not backup.exists():
@@ -83,9 +89,18 @@ def upgrade(db_path:Path,data_path:Path):
       note TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE INDEX IF NOT EXISTS idx_task_progress_task ON task_progress(task_id,id);
+    CREATE TABLE IF NOT EXISTS external_course_progress (
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK(status IN ('todo','doing','waiting','done')),
+      updated_at TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'Microsoft Lists',
+      PRIMARY KEY(task_id,course_id));
+    CREATE INDEX IF NOT EXISTS idx_external_progress_course ON external_course_progress(course_id,task_id);
    """)
    if 'featured' not in project_columns:
     db.execute('ALTER TABLE projects ADD COLUMN featured INTEGER NOT NULL DEFAULT 1')
+   if 'archived_at' not in project_columns:
+    db.execute('ALTER TABLE projects ADD COLUMN archived_at TEXT')
    if 'scope' not in cols:
     db.execute("ALTER TABLE tasks ADD COLUMN scope TEXT NOT NULL DEFAULT 'personal'")
     db.execute("UPDATE tasks SET scope='cds' WHERE EXISTS (SELECT 1 FROM task_courses tc WHERE tc.task_id=tasks.id)")
@@ -109,6 +124,9 @@ def project_can_view(c,u,p):
  if u['role']=='admin' or p['owner_id']==u['id'] or p['manager_id']==u['id']:return True
  if c.execute('SELECT 1 FROM project_members WHERE project_id=? AND user_id=?',(p['id'],u['id'])).fetchone():return True
  if c.execute('SELECT 1 FROM project_responsibilities WHERE project_id=? AND user_id=? LIMIT 1',(p['id'],u['id'])).fetchone():return True
+ if c.execute("""SELECT 1 FROM project_collaborator_responsibilities pc
+   JOIN collaborators col ON col.id=pc.collaborator_id
+   WHERE pc.project_id=? AND col.linked_user_id=? AND col.active=1 LIMIT 1""",(p['id'],u['id'])).fetchone():return True
  if p['scope']=='common':return True
  if p['scope']=='cds':
   return bool(c.execute("""SELECT 1 FROM project_courses pc
@@ -215,6 +233,10 @@ class ProjectResponsibility(BaseModel):
  course_id:int
  user_id:int
 
+class CollaboratorResponsibility(BaseModel):
+ course_id:int
+ collaborator_id:int
+
 class ProjectIn(BaseModel):
  title:str=Field(min_length=1,max_length=250)
  description:str=Field(default='',max_length=50000)
@@ -223,6 +245,7 @@ class ProjectIn(BaseModel):
  course_ids:list[int]=Field(default_factory=list,max_length=100)
  member_ids:list[int]=Field(default_factory=list,max_length=100)
  responsibilities:list[ProjectResponsibility]=Field(default_factory=list,max_length=500)
+ collaborator_responsibilities:list[CollaboratorResponsibility]=Field(default_factory=list,max_length=500)
  due_at:Optional[str]=None
  status:str='doing'
  featured:bool=True
@@ -249,7 +272,7 @@ def check_password_policy(password,role):
  length=password_minimum(role)
  if len(password)<length:fail('La password deve contenere almeno '+str(length)+' caratteri',400)
 
-def register_routes(app,*,conn,user,csrf,ph,record):
+def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
  def needadmin(req):
   u=user(req)
   if u['role']!='admin':fail()
@@ -304,6 +327,8 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   d['member_ids']=[r[0] for r in c.execute('SELECT user_id FROM project_members WHERE project_id=?',(p['id'],))]
   d['responsibilities']=[dict(r) for r in c.execute(
    'SELECT course_id,user_id FROM project_responsibilities WHERE project_id=? ORDER BY course_id,user_id',(p['id'],))]
+  d['collaborator_responsibilities']=[dict(r) for r in c.execute(
+   'SELECT course_id,collaborator_id FROM project_collaborator_responsibilities WHERE project_id=? ORDER BY course_id,collaborator_id',(p['id'],))]
   d['counts']={r['status']:r['n'] for r in c.execute("SELECT status,COUNT(*) AS n FROM tasks WHERE project_id=? GROUP BY status",(p['id'],))}
   d['can_edit']=project_can_edit(c,current_user,p) if current_user else False
   return d
@@ -314,6 +339,16 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   if b.scope!='cds' and b.course_ids:fail('Questo progetto non richiede CdS',400)
   if b.scope=='common' and u['role']!='admin':fail('Progetti comuni riservati agli amministratori')
   if len(set(b.course_ids))!=len(b.course_ids) or len(set(b.member_ids))!=len(b.member_ids):fail('Assegnazioni duplicate',400)
+  if b.collaborator_responsibilities:
+   if u['role']!='admin':fail('Solo un amministratore può assegnare collaboratori Lists')
+   pairs=[(r.course_id,r.collaborator_id) for r in b.collaborator_responsibilities]
+   if len(pairs)!=len(set(pairs)):fail('Assegnazioni collaboratori duplicate',400)
+   if b.scope=='independent':fail('Associare un CdS prima di assegnare collaboratori Lists',400)
+   if b.scope=='cds' and any(r.course_id not in b.course_ids for r in b.collaborator_responsibilities):
+    fail('Collaboratore associato a CdS escluso dal progetto',400)
+   for r in b.collaborator_responsibilities:
+    if not c.execute('SELECT 1 FROM courses WHERE id=? AND active=1',(r.course_id,)).fetchone():fail('CdS collaboratore non attivo',400)
+    if not c.execute('SELECT 1 FROM collaborators WHERE id=? AND active=1',(r.collaborator_id,)).fetchone():fail('Collaboratore inesistente o inattivo',400)
   if b.scope=='cds':
    for cid in b.course_ids:
     if not c.execute('SELECT 1 FROM courses WHERE id=? AND active=1',(cid,)).fetchone():fail('CdS non attivo',400)
@@ -341,6 +376,11 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   c.executemany(
    'INSERT INTO project_responsibilities(project_id,course_id,user_id) VALUES(?,?,?)',
    [(pid,r.course_id,r.user_id) for r in b.responsibilities])
+ def save_project_collaborators(c,pid,b,u):
+  if u['role']!='admin':return
+  c.execute('DELETE FROM project_collaborator_responsibilities WHERE project_id=?',(pid,))
+  c.executemany('INSERT INTO project_collaborator_responsibilities(project_id,course_id,collaborator_id) VALUES(?,?,?)',
+   [(pid,r.course_id,r.collaborator_id) for r in b.collaborator_responsibilities])
  @app.get('/api/projects')
  def projects(req:Request):
   u=user(req)
@@ -356,6 +396,7 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,u['id'],b.manager_id or u['id'],b)
    project_responsibilities(c,pid,b)
+   save_project_collaborators(c,pid,b,u)
    record(c,u['id'],'create','project',pid)
   return {'id':pid}
  @app.put('/api/projects/{pid}')
@@ -371,8 +412,56 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,p['owner_id'],b.manager_id or p['owner_id'],b)
    project_responsibilities(c,pid,b)
+   save_project_collaborators(c,pid,b,u)
    record(c,u['id'],'update','project',pid)
   return {'ok':True}
+
+ @app.post('/api/projects/{pid}/archive')
+ def archive_project(pid:int,req:Request):
+  u=user(req);csrf(req)
+  with conn() as c:
+   p=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+   if not p:fail('Progetto inesistente',404)
+   if not project_can_edit(c,u,p):fail()
+   c.execute('UPDATE projects SET archived_at=?,updated_at=? WHERE id=?',
+             (datetime.now(timezone.utc).isoformat(),datetime.now(timezone.utc).isoformat(),pid))
+   record(c,u['id'],'archive','project',pid)
+  return {'ok':True}
+
+ @app.post('/api/projects/{pid}/restore')
+ def restore_project(pid:int,req:Request):
+  u=user(req);csrf(req)
+  with conn() as c:
+   p=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+   if not p:fail('Progetto inesistente',404)
+   if not project_can_edit(c,u,p):fail()
+   c.execute('UPDATE projects SET archived_at=NULL,updated_at=? WHERE id=?',
+             (datetime.now(timezone.utc).isoformat(),pid))
+   record(c,u['id'],'restore','project',pid)
+  return {'ok':True}
+
+ @app.delete('/api/projects/{pid}')
+ def delete_project(pid:int,req:Request,confirm:str=''):
+  u=user(req);csrf(req)
+  if u['role']!='admin':fail('Eliminazione riservata agli amministratori')
+  if confirm!='ELIMINA':fail('Conferma ELIMINA mancante',400)
+  if data_path is None:fail('Cartella di backup non configurata',500)
+  with conn() as c:
+   p=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+   if not p:fail('Progetto inesistente',404)
+   count=c.execute('SELECT COUNT(*) FROM tasks WHERE project_id=?',(pid,)).fetchone()[0]
+   attached=c.execute('SELECT COUNT(*) FROM attachments WHERE task_id IN (SELECT id FROM tasks WHERE project_id=?)',(pid,)).fetchone()[0]
+   backup_dir=Path(data_path)/'project-deletion-backups'
+   backup_dir.mkdir(parents=True,exist_ok=True)
+   name='before-delete-project-'+str(pid)+'-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+secrets.token_hex(3)+'.sqlite3'
+   dest=sqlite3.connect(backup_dir/name)
+   try:c.backup(dest)
+   finally:dest.close()
+   # Retain physical attachments for manual restoration, but remove associated database records.
+   c.execute('DELETE FROM tasks WHERE project_id=?',(pid,))
+   c.execute('DELETE FROM projects WHERE id=?',(pid,))
+   record(c,u['id'],'delete','project',pid)
+  return {'ok':True,'deleted_tasks':count,'retained_attachment_files':attached}
  @app.patch('/api/tasks/{tid}/status')
  def task_status(tid:int,b:TaskStatus,req:Request):
   u=user(req);csrf(req)

@@ -10,7 +10,7 @@ const NextDoWorkspace=(()=>{
  function projectLabel(p){return projectScopes[p.scope]||p.scope}
  const projectListFilters={text:'',phase:'active',course:'',manager:''};
  function projectCourseIds(p){
-  return [...new Set([...(p.course_ids||[]),...(p.responsibilities||[]).map(x=>x.course_id)])];
+  return [...new Set([...(p.course_ids||[]),...(p.responsibilities||[]).map(x=>x.course_id),...(p.collaborator_responsibilities||[]).map(x=>x.course_id)])];
  }
  function projectView(main){
   const current=S.projects.find(p=>p.id===S.selectedProject);
@@ -54,8 +54,9 @@ const NextDoWorkspace=(()=>{
     }
     const query=projectListFilters.text.toLocaleLowerCase('it').trim();
     const list=S.projects.filter(p=>{
-     if(projectListFilters.phase==='active'&&p.status==='done')return false;
-     if(projectListFilters.phase==='done'&&p.status!=='done')return false;
+     if(projectListFilters.phase==='active'&&(p.status==='done'||p.archived_at))return false;
+     if(projectListFilters.phase==='done'&&(p.status!=='done'||p.archived_at))return false;
+     if(projectListFilters.phase==='archived'&&!p.archived_at)return false;
      const cids=projectCourseIds(p);
      if(projectListFilters.course&&p.scope!=='common'&&!cids.includes(Number(projectListFilters.course)))return false;
      if(projectListFilters.manager&&String(p.manager_id||p.owner_id)!==projectListFilters.manager)return false;
@@ -86,7 +87,7 @@ const NextDoWorkspace=(()=>{
       node('span','project-list-meta',meta.join(' · '))
      ]);
      const figures=el('div',{class:'project-list-figures'},[
-      tag(statuses[p.status]||p.status,p.status),
+      tag(p.archived_at?'Archiviato':statuses[p.status]||p.status,p.archived_at?'waiting':p.status),
       node('span','project-progress',n?done+' / '+n+' attività completate':'Nessuna attività')
      ]);
      const progress=el('div',{class:'project-list-progress'},[
@@ -101,7 +102,7 @@ const NextDoWorkspace=(()=>{
      results.append(row);
     }
    }
-   for(const [phase,label] of [['active','Attivi'],['done','Completati'],['all','Tutti']]){
+   for(const [phase,label] of [['active','Attivi'],['done','Completati'],['archived','Archiviati'],['all','Tutti']]){
     const button=opt(label,()=>{projectListFilters.phase=phase;showProjects()},'small');
     phaseButtons.push([phase,button]);phases.append(button);
    }
@@ -124,11 +125,32 @@ const NextDoWorkspace=(()=>{
      const link=el('a',{href:'api/projects/'+current.id+'/sharepoint-export',download:''});
      document.body.append(link);link.click();link.remove();
     },'small'),
-    opt('Modifica progetto',()=>projectForm(current),'small')
+    ...(S.me.role==='admin'?[opt('Sincronizza stati da Lists',async()=>{
+     if(!confirm('Importare gli stati delle attività da Microsoft Lists nel Gantt? Verranno letti solo i record NextDo riconosciuti, senza scrivere su SharePoint.'))return;
+     try{
+      const result=await api('/projects/'+current.id+'/sync-lists',{method:'POST'});
+      await refresh();render();
+      msg('Sincronizzati '+result.updated_course_rows+' avanzamenti CdS da Microsoft Lists'+
+       (result.unrecognized_statuses?' · '+result.unrecognized_statuses+' stati non riconosciuti':''));
+     }catch(e){msg(e.message,true)}
+    },'small')]:[]),
+    opt('Modifica progetto',()=>projectForm(current),'small'),
+    opt(current.archived_at?'Ripristina':'Archivia',async()=>{
+     if(!confirm((current.archived_at?'Ripristinare':'Archiviare')+' il progetto «'+current.title+'»?'))return;
+     try{await api('/projects/'+current.id+(current.archived_at?'/restore':'/archive'),{method:'POST'});S.selectedProject=null;await refresh();render();msg('Progetto aggiornato')}
+     catch(e){msg(e.message,true)}
+    },'small'),
+    ...(S.me.role==='admin'?[opt('Elimina progetto',async()=>{
+     const text=prompt('Eliminazione definitiva di «'+current.title+'» e delle sue attività. Scrivi ELIMINA per confermare. Prima viene creato un backup del database. Le righe già inviate a Microsoft Lists non saranno eliminate.');
+     if(text!=='ELIMINA')return;
+     try{const result=await api('/projects/'+current.id+'?confirm=ELIMINA',{method:'DELETE'});S.selectedProject=null;await refresh();render();msg('Progetto eliminato; '+result.deleted_tasks+' attività rimosse. Backup SQLite conservato sul server.')}
+     catch(e){msg(e.message,true)}
+    },'danger')]:[])
    ]:[]),
    opt('+ Attività',()=>taskForm(null,'task',null,{scope:'project',project_id:current.id}),'primary')
   ]);
   panel.append(heading);
+  if(S.me.role==='admin')panel.append(node('p','sub','Sincronizzazione Lists: usa il collegamento Microsoft 365 temporaneo configurato in Impostazioni, poi premi «Sincronizza stati da Lists». Gli aggiornamenti sono manuali finché il flusso automatico non sarà configurato e autorizzato dall’Ateneo. Le attività senza dati ricevuti risultano «Non sincronizzato».'));
   if(current.can_edit)panel.append(node('p','sub','Assegna i colleghi ai CdS nelle impostazioni del progetto. Esporta JSON per Lists genera automaticamente una riga per attività e per CdS, preservando gli avanzamenti già modificati in Microsoft Lists. Prima di caricare file con assegnazioni reali occorre adeguare le colonne e il flusso Power Automate.'));
   if(current.description)panel.append(node('p','sub',current.description));
   if((current.responsibilities||[]).length){
@@ -370,6 +392,52 @@ const NextDoWorkspace=(()=>{
    node('p','sub','Le modifiche qui effettuate non cambiano le associazioni generali in Corsi di Studio. I progetti già salvati mantengono le proprie assegnazioni.')
   );
   responsibilities.append(advanced);
+  const collaboratorPanel=el('div',{class:'full project-responsibilities'});
+  collaboratorPanel.append(node('h3','','Collaboratori solo Microsoft Lists'),
+   node('p','sub','Questi colleghi non hanno password NextDo. Per ogni progetto seleziona solo i CdS pertinenti; le modifiche non cambiano le associazioni predefinite.'));
+  const collabRows=el('div',{class:'project-responsibility-rows'});
+  const collabGroups=[];
+  const collabOptions=[['','Seleziona collaboratore Lists'],...(S.collaborators||[]).filter(x=>x.active).map(x=>[String(x.id),x.display_name+(x.linked_user_id?' · Accesso NextDo abilitato':'')])];
+  function appendCollaborator(collaboratorId='',selectedCourses=null){
+   const group=el('section',{class:'project-colleague-group'});
+   const name=select('responsibility_collaborator',collabOptions,String(collaboratorId||''));
+   const checks=el('div',{class:'project-course-checklist'});
+   const remove=opt('Rimuovi collaboratore',()=>group.remove(),'small');
+   const head=el('div',{class:'project-colleague-header'},[field('Collaboratore',name),remove]);
+   group.append(head,checks);
+   const defaults=cid=>S.courseCollaborators.filter(a=>a.collaborator_id===Number(cid)).map(a=>a.course_id)
+    .filter(cid=>scope.value!=='cds'||courseBox.selected().includes(cid));
+   function draw(ids){
+    checks.replaceChildren();
+    for(const c of activeCourses){
+     const check=el('input',{type:'checkbox',name:'collaborator_course',value:String(c.id),checked:ids.includes(c.id)});
+     checks.append(el('label',{class:'project-course-option'},[check,node('span','',c.code+' — '+c.name)]));
+    }
+    updateAllowed();
+   }
+   function updateAllowed(){
+    const allowed=new Set(courseBox.selected());
+    for(const check of checks.querySelectorAll('input[name="collaborator_course"]')){
+     const out=scope.value==='cds'&&!allowed.has(Number(check.value));
+     check.disabled=out&&!check.checked;
+    }
+   }
+   name.addEventListener('change',()=>draw(defaults(name.value)));
+   draw(selectedCourses===null?defaults(collaboratorId):selectedCourses);
+   collabRows.append(group);
+   const entry={group,updateAllowed};collabGroups.push(entry);return entry;
+  }
+  const storedCollabs=new Map();
+  for(const a of p?.collaborator_responsibilities||[]){
+   if(!storedCollabs.has(a.collaborator_id))storedCollabs.set(a.collaborator_id,[]);
+   storedCollabs.get(a.collaborator_id).push(a.course_id);
+  }
+  for(const [id,ids] of storedCollabs)appendCollaborator(id,ids);
+  const collabAdvanced=el('details',{class:'project-responsibility-advanced'});
+  collabAdvanced.append(node('summary','','Assegnazioni collaboratori Lists per questo progetto'),
+   collabRows,opt('+ Aggiungi collaboratore Lists',()=>appendCollaborator(),'small'));
+  collaboratorPanel.append(collabAdvanced);
+  collaboratorPanel.hidden=S.me.role!=='admin';
   // Apply defaults only to newly selected CdS. Keep saved project assignments unchanged.
   let previousSelected=new Set(courseBox.selected());
   function syncSelectedCourses(){
@@ -377,6 +445,12 @@ const NextDoWorkspace=(()=>{
    const selected=new Set(courseBox.selected());
    for(const cid of previousSelected){
     if(selected.has(cid))continue;
+    for(const item of collabGroups){
+     if(item.group.parentNode!==collabRows)continue;
+     const check=[...item.group.querySelectorAll('input[name="collaborator_course"]')]
+      .find(el=>Number(el.value)===cid);
+     if(check)check.checked=false;
+    }
     for(const item of responsibilityGroups){
      if(item.group.parentNode!==responsibilityRows)continue;
      const check=[...item.group.querySelectorAll('input[name="responsibility_course"]')]
@@ -386,6 +460,14 @@ const NextDoWorkspace=(()=>{
    }
    for(const cid of selected){
     if(previousSelected.has(cid))continue;
+    for(const a of S.courseCollaborators.filter(a=>a.course_id===cid)){
+     let item=collabGroups.find(item=>item.group.parentNode===collabRows&&
+      Number(item.group.querySelector('select[name="responsibility_collaborator"]').value)===a.collaborator_id);
+     if(!item)item=appendCollaborator(a.collaborator_id,[]);
+     const check=[...item.group.querySelectorAll('input[name="collaborator_course"]')]
+      .find(el=>Number(el.value)===cid);
+     if(check)check.checked=true;
+    }
     for(const a of S.courseAssignees.filter(a=>a.course_id===cid)){
      let item=responsibilityGroups.find(item=>item.group.parentNode===responsibilityRows&&
       Number(item.group.querySelector('select[name="responsibility_user"]').value)===a.user_id);
@@ -402,11 +484,13 @@ const NextDoWorkspace=(()=>{
   const update=()=>{
    courseWrap.style.display=scope.value==='cds'?'':'none';
    for(const item of responsibilityGroups)item.updateAllowed();
+   for(const item of collabGroups)item.updateAllowed();
+   collaboratorPanel.hidden=S.me.role!=='admin'||scope.value==='independent';
    updateOverview();
   };
   scope.addEventListener('change',syncSelectedCourses);
   courseBox.outer.addEventListener('change',syncSelectedCourses);
-  f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,responsibilities,memberBox.outer,
+  f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,responsibilities,collaboratorPanel,memberBox.outer,
    el('label',{class:'full project-featured-option'},[featured,' Mostra Gantt nella Dashboard dei partecipanti']));
   update();
   const actions=el('div',{class:'actions full'},[opt('Annulla',()=>back.remove()),el('button',{type:'submit',class:'btn primary',text:p?'Salva progetto':'Crea progetto'})]);
@@ -428,9 +512,23 @@ const NextDoWorkspace=(()=>{
     if(assignments.some(a=>!allowed.has(a.course_id)))
      return msg('Un CdS assegnato non è incluso tra i CdS del progetto: selezionalo sopra o togli la spunta.',true);
    }
+   const collabAssignments=[],usedCollabs=new Set();
+   if(S.me.role==='admin'){
+    for(const group of collabRows.children){
+     const selected=[...group.querySelectorAll('input[name="collaborator_course"]:checked')];
+     if(!selected.length)continue;
+     const collaboratorId=Number(group.querySelector('select[name="responsibility_collaborator"]').value);
+     if(!collaboratorId)return msg('Seleziona il collaboratore Lists per le spunte presenti.',true);
+     if(usedCollabs.has(collaboratorId))return msg('Collaboratore già presente: raggruppa i suoi CdS nello stesso riquadro.',true);
+     usedCollabs.add(collaboratorId);
+     for(const check of selected)collabAssignments.push({course_id:Number(check.value),collaborator_id:collaboratorId});
+    }
+    if(scope.value==='cds'&&collabAssignments.some(a=>!courseBox.selected().includes(a.course_id)))
+     return msg('Un collaboratore è associato a un CdS escluso dal progetto.',true);
+   }
    const data={title:title.value.trim(),description:desc.value,scope:scope.value,status:status.value,featured:featured.checked,
     manager_id:manager.value?Number(manager.value):null,due_at:due.value?new Date(due.value).toISOString():null,
-    course_ids:scope.value==='cds'?courseBox.selected():[],member_ids:memberBox.selected(),responsibilities:assignments};
+    course_ids:scope.value==='cds'?courseBox.selected():[],member_ids:memberBox.selected(),responsibilities:assignments,collaborator_responsibilities:scope.value==='independent'?[]:collabAssignments};
    if(!data.title)return msg('Titolo obbligatorio',true);
    try{
     const r=await api('/projects'+(p?'/'+p.id:''),{method:p?'PUT':'POST',body:JSON.stringify(data)});
@@ -452,10 +550,29 @@ const NextDoWorkspace=(()=>{
     }catch(error){msg(error.message,true)}
    },'primary')]));
  }
+
+ function courseCollaboratorForm(c){
+  const {box,back}=modal('Collaboratori Microsoft Lists — '+c.code);
+  const selected=S.courseCollaborators.filter(x=>x.course_id===c.id).map(x=>x.collaborator_id);
+  const checklist=checkboxes('Collaboratori associati al CdS',
+   S.collaborators.filter(x=>x.active).map(x=>[x.id,x.display_name+(x.linked_user_id?' (NextDo attivo)':' (solo Lists)')]),selected);
+  box.append(node('p','sub','L’associazione è stabile finché non la modifichi. Non assegna un account NextDo e non modifica automaticamente i permessi SharePoint.'),checklist.outer,
+   btn('Salva associazioni',async()=>{
+    try{
+     await api('/courses/'+c.id+'/collaborators',{method:'PUT',
+      body:JSON.stringify({collaborator_ids:checklist.selected()})});
+     back.remove();await refresh();render();msg('Collaboratori associati al CdS');
+    }catch(e){msg(e.message,true)}
+   },'primary'));
+ }
  function courseAdminButton(c){
   if(S.me.role!=='admin')return null;
   const assigned=S.courseAssignees.filter(a=>a.course_id===c.id);
-  return opt('Assegna colleghi ('+assigned.length+')',()=>courseAssignmentForm(c),'small');
+  const onlyLists=S.courseCollaborators.filter(x=>x.course_id===c.id).length;
+  return el('div',{style:'display:flex;flex-wrap:wrap;gap:6px'},[
+   opt('Assegna colleghi ('+assigned.length+')',()=>courseAssignmentForm(c),'small'),
+   opt('Collaboratori Lists ('+onlyLists+')',()=>courseCollaboratorForm(c),'small')
+  ]);
  }
  function settings(main){
   const section=el('section',{class:'card workspace-settings',style:'margin-top:16px'});
@@ -474,6 +591,59 @@ const NextDoWorkspace=(()=>{
    section2.append(line);
   }
   main.append(section2);
+  const section3=el('section',{class:'card workspace-settings',style:'margin-top:16px'});
+  section3.append(node('h2','','Collaboratori Microsoft Lists'),
+   node('p','sub','Queste persone lavorano in Microsoft Lists e non possiedono credenziali NextDo finché non attivi esplicitamente il loro accesso.'),
+   opt('+ Nuovo collaboratore',()=>collaboratorForm(),'primary'));
+  for(const c of S.collaborators){
+   const line=el('div',{class:'rowtask'});
+   const activeUser=c.linked_user_id?S.users.find(u=>u.id===c.linked_user_id&&u.active):null;
+   line.append(node('span','taskmain',c.display_name+' · '+(c.active?'Attivo':'Inattivo')+' · '+
+    (activeUser?'Accesso NextDo attivo':'Solo Microsoft Lists')+
+    (c.microsoft_upn?' · '+c.microsoft_upn:' · UPN [DA VERIFICARE]')),
+    opt('Modifica',()=>collaboratorForm(c),'small'),
+    activeUser?opt('Disattiva accesso',()=>deactivateCollaboratorAccess(c),'small'):
+     opt('Attiva accesso NextDo',()=>activateCollaboratorAccess(c),'small'));
+   section3.append(line);
+  }
+  main.append(section3);
+ }
+ function collaboratorForm(c=null){
+  const {box,back}=modal(c?'Modifica collaboratore':'Nuovo collaboratore Microsoft Lists');
+  const name=input('display_name','Nome e cognome',c?.display_name||'');
+  const upn=input('microsoft_upn','Account Microsoft 365 (UPN), facoltativo',c?.microsoft_upn||'');
+  const active=el('input',{type:'checkbox',checked:c?!!c.active:true});
+  box.append(field('Nome visualizzato',name),field('Account Microsoft 365',upn),
+   node('p','sub','L’identificativo Microsoft deve essere verificato prima di assegnare attività in Lists. Non è una credenziale NextDo.'),
+   el('label',{},[active,' Collaboratore attivo']),
+   opt(c?'Salva collaboratore':'Crea collaboratore',async()=>{
+    if(!name.value.trim())return msg('Nome obbligatorio',true);
+    try{
+     await api('/collaborators'+(c?'/'+c.id:''),{method:c?'PUT':'POST',
+      body:JSON.stringify({display_name:name.value.trim(),microsoft_upn:upn.value.trim(),active:active.checked})});
+     back.remove();await refresh();render();msg('Anagrafica collaboratore salvata');
+    }catch(e){msg(e.message,true)}
+   },'primary'));
+ }
+ function activateCollaboratorAccess(c){
+  const {box,back}=modal('Attiva NextDo — '+c.display_name);
+  const username=input('username','Nome utente NextDo');
+  const password=input('password','Nuova password (almeno 8 caratteri)','','password');
+  box.append(node('p','sub','L’accesso verrà collegato all’anagrafica già esistente: nessuna assegnazione CdS o progetto verrà cancellata.'),
+   field('Nome utente',username),field('Password iniziale',password),
+   opt('Attiva accesso',async()=>{
+    if(!confirm('Attivare l’accesso NextDo per '+c.display_name+'?'))return;
+    try{await api('/collaborators/'+c.id+'/activate-access',{method:'POST',
+     body:JSON.stringify({username:username.value,password:password.value})});
+     back.remove();await refresh();render();msg('Accesso NextDo attivato');
+    }catch(e){msg(e.message,true)}
+   },'primary'));
+ }
+ async function deactivateCollaboratorAccess(c){
+  if(!confirm('Disattivare l’accesso NextDo per '+c.display_name+' mantenendo tutte le sue assegnazioni?'))return;
+  try{await api('/collaborators/'+c.id+'/deactivate-access',{method:'POST'});
+   await refresh();render();msg('Accesso NextDo disattivato; il collaboratore resta in Lists')}
+  catch(e){msg(e.message,true)}
  }
  function changePasswordForm(){
   const {box,back}=modal('Cambia la tua password');

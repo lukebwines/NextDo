@@ -47,12 +47,21 @@ const NextDoGantt=(()=>{
   const tasks=S.tasks.filter(t=>t.project_id===project.id&&t.kind==='task');
   const planned=tasks.map(t=>({task:t,start:utcDay(t.start_at),end:utcDay(t.due_at)})).filter(t=>t.start!==null||t.end!==null);
   const unplanned=tasks.filter(t=>!t.start_at&&!t.due_at);
+  const courseIds=project.scope==='common'?S.courses.filter(c=>c.active).map(c=>c.id):
+   [...new Set([...(project.course_ids||[]),...(project.responsibilities||[]).map(r=>r.course_id),...(project.collaborator_responsibilities||[]).map(r=>r.course_id)])];
+  S.ganttExpanded=S.ganttExpanded||new Set();
+  const detailGroups=[];
   const toolbar=el('div',{class:'gantt-controls'});
   toolbar.append(node('strong','','Cronoprogramma'),node('span','muted',planned.length+' pianificate · '+unplanned.length+' da pianificare'));
   const scale=select('gantt-zoom',[['overview','Panoramica'],['normal','Settimane'],['detail','Dettaglio']],S.ganttZoom||'normal');
   scale.setAttribute('aria-label','Scala temporale Gantt');
   scale.addEventListener('change',()=>{S.ganttZoom=scale.value;localStorage.setItem('nextdo-gantt-zoom',scale.value);renderProjectAgain()});
-  toolbar.append(field('Scala',scale));section.append(toolbar);
+  toolbar.append(field('Scala',scale));
+  if(courseIds.length){
+   toolbar.append(btn('Espandi tutto',()=>detailGroups.forEach(g=>g.toggle(true)),'small'));
+   toolbar.append(btn('Comprimi tutto',()=>detailGroups.forEach(g=>g.toggle(false)),'small'));
+  }
+  section.append(toolbar);
   section.append(legend());
   if(!planned.length&&!project.due_at){
    section.append(node('p','empty','Nessuna attività con date. Apri una scheda e inserisci la data di inizio e/o la scadenza.'));
@@ -98,10 +107,24 @@ const NextDoGantt=(()=>{
    const row=el('div',{class:'gantt-row'});
    const person=S.users.find(u=>u.id===t.assigned_to);
    const subtitle=person?.display_name||'Senza assegnatario';
-   const label=el('button',{type:'button',class:'gantt-name gantt-task-label',onclick:()=>taskForm(t),title:'Apri scheda: '+t.title},[
-    node('strong','',t.title),
-    node('span','gantt-subtitle',subtitle+' · '+(statuses[t.status]||t.status))
+   const external=new Map((t.external_progress||[]).map(x=>[x.course_id,x]));
+   const own=new Map(t.completion_mode==='per_course'?(t.courses||[]).map(x=>[x.id,x]):[]);
+   const known=courseIds.filter(cid=>external.has(cid)||own.has(cid));
+   const completed=courseIds.filter(cid=>external.has(cid)?external.get(cid).status==='done':own.get(cid)?.done===1);
+   const rollup=courseIds.length?(known.length===courseIds.length?
+     completed.length+' / '+courseIds.length+' CdS completati':
+     completed.length+' / '+courseIds.length+' CdS completati · '+(courseIds.length-known.length)+' non sincronizzati'):
+    statuses[t.status]||t.status;
+   const label=el('div',{class:'gantt-name gantt-task-label'});
+   const titleButton=el('button',{type:'button',class:'gantt-open-task',onclick:()=>taskForm(t),title:'Apri scheda: '+t.title},[
+    node('strong','',t.title)
    ]);
+   let expander=null;
+   if(courseIds.length){
+    expander=el('button',{type:'button',class:'gantt-expand',title:'Espandi attività: '+t.title,'aria-label':'Espandi attività: '+t.title,'aria-expanded':'false'},['▸']);
+    label.append(expander);
+   }
+   label.append(titleButton,node('span','gantt-subtitle',subtitle+' · '+rollup));
    const track=el('div',{class:'gantt-track gantt-body-track'});
    if(today!==null&&today>=leftBound&&today<=rightBound)track.append(addTick(track,(today-leftBound)*widthPerDay,'gantt-today','Oggi'));
    if(projectDue!==null&&projectDue>=leftBound&&projectDue<=rightBound)track.append(addTick(track,(projectDue-leftBound)*widthPerDay,'gantt-project-deadline','Scadenza del progetto'));
@@ -116,6 +139,51 @@ const NextDoGantt=(()=>{
    });
    if(!milestone&&last-first>5)bar.append(node('span','',statuses[t.status]||t.status));
    track.append(bar);row.append(label,track);grid.append(row);
+   if(courseIds.length){
+    const rows=[];
+    for(const cid of courseIds){
+     const course=S.courses.find(x=>x.id===cid);
+     if(!course)continue;
+     const names=(project.responsibilities||[]).filter(r=>r.course_id===cid)
+      .map(r=>S.users.find(x=>x.id===r.user_id)?.display_name||'Collega da verificare');
+     for(const r of (project.collaborator_responsibilities||[]).filter(r=>r.course_id===cid)){
+      const collaborator=(S.collaborators||[]).find(x=>x.id===r.collaborator_id);
+      names.push((collaborator?.display_name||'Collaboratore da verificare')+' (Lists)');
+     }
+     const remote=external.get(cid),local=own.get(cid);
+     const state=remote?.status||(local?(local.done?'done':'doing'):null);
+     const source=remote?'Microsoft Lists · '+fmt(remote.updated_at):local?'NextDo':'Non sincronizzato';
+     const item=el('div',{class:'gantt-row gantt-course-row'});
+     item.hidden=true;
+     item.append(el('div',{class:'gantt-name gantt-child-name'},[
+      node('strong','',course.code+' — '+course.name),
+      node('span','gantt-subtitle',(names.length?names.join(', '):'Responsabile da verificare')+' · '+(state?statuses[state]||state:'Non sincronizzato')),
+      node('span','gantt-subtitle',source)
+     ]));
+     const childTrack=el('div',{class:'gantt-track gantt-body-track'});
+     if(today!==null&&today>=leftBound&&today<=rightBound)
+      childTrack.append(addTick(childTrack,(today-leftBound)*widthPerDay,'gantt-today','Oggi'));
+     if(projectDue!==null&&projectDue>=leftBound&&projectDue<=rightBound)
+      childTrack.append(addTick(childTrack,(projectDue-leftBound)*widthPerDay,'gantt-project-deadline','Scadenza progetto'));
+     const child=el('span',{
+      class:'gantt-bar '+(state?'gantt-bar--'+state:'gantt-bar--unsynced')+(milestone?' gantt-milestone':''),
+      style:'left:'+((first-leftBound)*widthPerDay+(milestone?-4:2))+'px;width:'+(milestone?12:Math.max(12,(last-first+1)*widthPerDay-4))+'px',
+      title:course.code+' · '+(state?statuses[state]||state:'Non sincronizzato')+' · '+source
+     });
+     childTrack.append(child);item.append(childTrack);grid.append(item);rows.push(item);
+    }
+    const key=String(project.id)+':'+String(t.id);
+    const toggle=show=>{
+     for(const item of rows)item.hidden=!show;
+     expander.textContent=show?'▾':'▸';
+     expander.setAttribute('aria-expanded',String(show));
+     expander.setAttribute('aria-label',(show?'Comprimi':'Espandi')+' attività: '+t.title);
+     if(show)S.ganttExpanded.add(key);else S.ganttExpanded.delete(key);
+    };
+    expander.addEventListener('click',()=>toggle(!S.ganttExpanded.has(key)));
+    detailGroups.push({toggle});
+    toggle(S.ganttExpanded.has(key));
+   }
   }
   scroller.append(grid);section.append(scroller);
   section.append(node('p','sub','Le barre mostrano il periodo pianificato; i rombi indicano una sola data. I colori rappresentano lo stato, non una percentuale di avanzamento. Seleziona una barra per modificare le date o aprire la scheda.'));
@@ -124,11 +192,39 @@ const NextDoGantt=(()=>{
   function addUnplanned(){
    const summary=el('details',{class:'gantt-unplanned',open:!planned.length});
    summary.append(el('summary',{},['Da pianificare ('+unplanned.length+')']));
-   for(const t of unplanned)summary.append(el('div',{class:'gantt-unplanned-row'},[
-    el('button',{type:'button',class:'gantt-open-task',onclick:()=>taskForm(t)},[t.title]),
-    node('span','muted',statuses[t.status]||t.status),
-    el('button',{type:'button',class:'btn small',onclick:()=>taskForm(t)},['Inserisci date'])
-   ]));
+   for(const t of unplanned){
+    const row=el('div',{class:'gantt-unplanned-row'},[
+     el('button',{type:'button',class:'gantt-open-task',onclick:()=>taskForm(t)},[t.title]),
+     node('span','muted',statuses[t.status]||t.status),
+     el('button',{type:'button',class:'btn small',onclick:()=>taskForm(t)},['Inserisci date'])
+    ]);
+    if(courseIds.length){
+     const detail=el('details',{class:'gantt-unplanned-task'});
+     detail.append(el('summary',{},['Dettaglio CdS e collaboratori — '+t.title]));
+     const external=new Map((t.external_progress||[]).map(x=>[x.course_id,x]));
+     const own=new Map(t.completion_mode==='per_course'?(t.courses||[]).map(x=>[x.id,x]):[]);
+     for(const cid of courseIds){
+      const course=S.courses.find(x=>x.id===cid);
+      if(!course)continue;
+      const names=(project.responsibilities||[]).filter(x=>x.course_id===cid)
+       .map(x=>S.users.find(u=>u.id===x.user_id)?.display_name||'Utente da verificare');
+      for(const x of (project.collaborator_responsibilities||[]).filter(x=>x.course_id===cid)){
+       const col=(S.collaborators||[]).find(p=>p.id===x.collaborator_id);
+       names.push((col?.display_name||'Collaboratore da verificare')+' (Lists)');
+      }
+      const remote=external.get(cid),local=own.get(cid);
+      const state=remote?.status||(local?(local.done?'done':'todo'):null);
+      detail.append(el('div',{class:'gantt-unplanned-row'},[
+       node('strong','',course.code+' — '+course.name),
+       node('span','muted',(names.length?names.join(', '):'Responsabile da verificare')+' · '+
+        (state?statuses[state]||state:'Non sincronizzato')+' · '+
+        (remote?'Microsoft Lists · '+fmt(remote.updated_at):local?'NextDo':'Fonte non disponibile'))
+      ]));
+     }
+     row.append(detail);
+    }
+    summary.append(row);
+   }
    section.append(summary);
   }
  }

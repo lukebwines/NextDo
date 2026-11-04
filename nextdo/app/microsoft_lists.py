@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from datetime import datetime,timezone
 from pathlib import Path
 
 from fastapi import HTTPException, Request
@@ -155,7 +156,7 @@ class MicrosoftListSelection(BaseModel):
  list_id:str=Field(min_length=1,max_length=128)
 
 
-def register_routes(app, *, user, csrf, data_path):
+def register_routes(app, *, user, csrf, data_path, conn=None, record=None):
  def admin(req):
   current=user(req)
   if current["role"]!="admin":reject("Funzione riservata agli amministratori NextDo",403)
@@ -273,3 +274,79 @@ def register_routes(app, *, user, csrf, data_path):
     "needed_for_sync":["NextDoID","NextDoProject","NextDoStatus","NextDoNote"],
     "ready_for_sync":all(x in names for x in ("NextDoID","NextDoProject","NextDoStatus","NextDoNote")),
     "read_only":True,"message":"Verifica completata in sola lettura. Nessuna colonna o attività è stata modificata."}
+
+
+ @app.post("/api/projects/{pid}/sync-lists")
+ def sync_project_from_lists(pid:int,req:Request):
+  """Manual read-only Graph pull; write statuses only into local NextDo."""
+  u=admin(req);csrf(req)
+  if conn is None:reject("Database non disponibile per sincronizzare il Gantt",500)
+  config=read_settings(data_path)
+  if not config.get("list_id"):reject("Selezionare prima l'elenco Microsoft Lists nelle impostazioni")
+  token=active_token(u["id"])
+  site=_site_details(config,token)
+  base="/sites/"+urllib.parse.quote(site["id"],safe=",")+"/lists/"+urllib.parse.quote(config["list_id"],safe="")
+  columns=_all_graph(base+"/columns?$select=name,displayName",token)
+  names={c.get("name") for c in columns}
+  if not {"NextDoID","NextDoStatus"}.issubset(names):
+   reject("Aggiungere le colonne NextDoID e NextDoStatus nella lista Microsoft prima della sincronizzazione")
+  items=_all_graph(base+"/items?$expand=fields&$top=100",token,max_pages=25)
+  if len(items)>2000:reject("Troppi elementi nella lista: eseguire un controllo manuale",413)
+  statuses={"done":"done","completed":"done","completata":"done","completato":"done",
+   "doing":"doing","in progress":"doing","in corso":"doing",
+   "waiting":"waiting","in attesa":"waiting","blocked":"waiting",
+   "todo":"todo","not started":"todo","da fare":"todo"}
+  pattern=re.compile(r"^NEXTDO-T([1-9][0-9]*)-C([1-9][0-9]*)$")
+  extracted=[];unknown=0;seen=set()
+  for item in items:
+   fields=item.get("fields") or {}
+   identifier=str(fields.get("NextDoID") or "").strip()
+   match=pattern.fullmatch(identifier)
+   if not match:continue
+   state=fields.get("NextDoStatus")
+   if isinstance(state,dict):state=state.get("Value") or state.get("value")
+   state=statuses.get(str(state or "").strip().casefold())
+   if not state:
+    unknown+=1;continue
+   if identifier in seen:reject("Identificativo NextDo duplicato nella lista: "+identifier,409)
+   seen.add(identifier)
+   extracted.append((int(match.group(1)),int(match.group(2)),state))
+  synced=0;now=datetime.now(timezone.utc).isoformat()
+  with conn() as c:
+   p=c.execute("SELECT * FROM projects WHERE id=?",(pid,)).fetchone()
+   if not p:reject("Progetto NextDo inesistente",404)
+   course_ids={r[0] for r in c.execute(
+     "SELECT course_id FROM project_courses WHERE project_id=?",(pid,))}
+   course_ids.update(r[0] for r in c.execute(
+     "SELECT course_id FROM project_responsibilities WHERE project_id=?",(pid,)))
+   course_ids.update(r[0] for r in c.execute(
+     "SELECT course_id FROM project_collaborator_responsibilities WHERE project_id=?",(pid,)))
+   if p["scope"]=="common":
+    course_ids.update(r[0] for r in c.execute("SELECT id FROM courses WHERE active=1"))
+   changed=set()
+   for task_id,course_id,status in extracted:
+    if course_id not in course_ids:continue
+    t=c.execute("SELECT id FROM tasks WHERE id=? AND project_id=? AND kind='task'",(task_id,pid)).fetchone()
+    if not t:continue
+    c.execute("""INSERT INTO external_course_progress(task_id,course_id,status,updated_at,source)
+     VALUES(?,?,?,?,'Microsoft Lists') ON CONFLICT(task_id,course_id) DO UPDATE SET
+     status=excluded.status,updated_at=excluded.updated_at,source=excluded.source""",
+     (task_id,course_id,status,now))
+    changed.add(task_id);synced+=1
+   # Update the global Kanban status ONLY when every expected CdS has real data.
+   for tid in changed:
+    known={r["course_id"]:r["status"] for r in c.execute(
+      "SELECT course_id,status FROM external_course_progress WHERE task_id=?",(tid,))}
+    if not course_ids or not course_ids.issubset(known):continue
+    states=[known[cid] for cid in course_ids]
+    new_state="done" if all(x=="done" for x in states) else (
+      "doing" if any(x in ("doing","done") for x in states) else
+      "waiting" if any(x=="waiting" for x in states) else "todo")
+    before=c.execute("SELECT status FROM tasks WHERE id=?",(tid,)).fetchone()
+    if before and before["status"]!=new_state:
+     c.execute("UPDATE tasks SET status=?,updated_at=? WHERE id=?",(new_state,now,tid))
+     c.execute("INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)",
+       (tid,u["id"],before["status"],new_state,"Sincronizzazione Microsoft Lists per tutti i CdS del progetto"))
+   if record:record(c,u["id"],"sync_lists","project",pid)
+  return {"ok":True,"updated_course_rows":synced,"unrecognized_statuses":unknown,
+    "synced_at":now,"source":"Microsoft Lists","read_only_graph":True}
