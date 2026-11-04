@@ -160,7 +160,10 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
    const id=Number(cb.value);
    const inProject=activeProject?.scope!=='cds'||(activeProject.course_ids||[]).includes(id);
    const owns=S.me.role==='admin'||S.myCourseIds.includes(id);
-   cb.disabled=projectMode?(!canChoose||!inProject||!owns):(!owns);
+   // A project manager may deselect an already assigned CdS even if
+   // that course was reassigned or removed from the project's permitted list.
+   const alreadyAssigned=currentRecipientIds.includes(id);
+   cb.disabled=projectMode?(!canChoose||(!inProject&&!alreadyAssigned)||(!owns&&!alreadyAssigned)):(!owns);
    if(projectMode&&activeProject?.scope==='cds'&&!inProject&&!editing)cb.checked=false;
   }
   recipientHelp.textContent=projectMode
