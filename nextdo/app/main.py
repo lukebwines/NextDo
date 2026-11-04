@@ -557,8 +557,12 @@ def recurring_process(req:Request):
     y=dt.year+(dt.month//12 if t['recurrence']=='monthly' else 1)
     m=dt.month%12+1 if t['recurrence']=='monthly' else dt.month
     n=dt.replace(year=y,month=m,day=min(dt.day,calendar.monthrange(y,m)[1]))
-   # Save idempotency via updating original task to next occurrence, audit trail retained.
-   c.execute('UPDATE tasks SET status="todo",due_at=?,updated_at=? WHERE id=?',(n.isoformat(),iso(),t['id']))
+   # Keep the planned duration when advancing recurring activities.
+   shifted_start=None
+   if t['start_at']:
+    try:shifted_start=(datetime.fromisoformat(t['start_at'].replace('Z','+00:00'))+(n-dt)).isoformat()
+    except ValueError:shifted_start=t['start_at']
+   c.execute('UPDATE tasks SET status="todo",due_at=?,start_at=?,updated_at=? WHERE id=?',(n.isoformat(),shifted_start,iso(),t['id']))
    c.execute('UPDATE task_courses SET done=0 WHERE task_id=?',(t['id'],))
    c.execute('UPDATE reminders SET notified_at=NULL WHERE task_id=?',(t['id'],))
    record(c,u['id'],'advance_recurrence','task',t['id']);generated+=1
