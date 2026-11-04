@@ -14,6 +14,8 @@
 .gantt-key--waiting{background:#e0a14e}
 .gantt-key--done{background:#39b997}
 .gantt-key--milestone{background:#e1b366;transform:rotate(45deg);width:9px;height:9px;border-radius:2px;margin:0 3px}
+.gantt-key--today{width:2px;height:12px;background:#e5b94e;margin:0 6px;border-radius:0}
+.gantt-key--deadline{width:2px;height:12px;background:transparent;border-left:2px dashed #dd768b;margin:0 6px;border-radius:0}
 .gantt-scroll{max-height:66vh;min-height:90px;max-width:100%;overflow:auto;overscroll-behavior:contain;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2);scrollbar-width:thin}
 .gantt-scroll:focus-visible{outline:2px solid #57a6ff;outline-offset:2px}
 .gantt-grid{width:calc(250px + var(--gantt-days-width));min-width:100%}
