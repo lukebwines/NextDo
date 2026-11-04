@@ -231,11 +231,12 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    c.executemany('INSERT INTO course_assignees(course_id,user_id) VALUES(?,?)',[(cid,uid) for uid in ids])
    record(c,u['id'],'assign','course',cid)
   return {'ok':True,'user_ids':ids}
- def project_data(c,p):
+ def project_data(c,p,current_user=None):
   d=dict(p)
   d['course_ids']=[r[0] for r in c.execute('SELECT course_id FROM project_courses WHERE project_id=?',(p['id'],))]
   d['member_ids']=[r[0] for r in c.execute('SELECT user_id FROM project_members WHERE project_id=?',(p['id'],))]
   d['counts']={r['status']:r['n'] for r in c.execute("SELECT status,COUNT(*) AS n FROM tasks WHERE project_id=? GROUP BY status",(p['id'],))}
+  d['can_edit']=project_can_edit(c,current_user,p) if current_user else False
   return d
  def validate_project(c,u,b):
   if b.scope not in ('independent','cds','common'):fail('Ambito progetto non valido',400)
@@ -261,13 +262,13 @@ def register_routes(app,*,conn,user,csrf,ph,record):
  def projects(req:Request):
   u=user(req)
   with conn() as c:
-   return [project_data(c,p) for p in c.execute('SELECT * FROM projects ORDER BY updated_at DESC,id DESC') if project_can_view(c,u,p)]
+   return [project_data(c,p,u) for p in c.execute('SELECT * FROM projects ORDER BY updated_at DESC,id DESC') if project_can_view(c,u,p)]
  @app.post('/api/projects')
  def create_project(b:ProjectIn,req:Request):
   u=user(req);csrf(req)
   with conn() as c:
    validate_project(c,u,b)
-   p=c.execute('INSERT INTO projects(title,description,scope,owner_id,manager_id,status,due_at) VALUES(?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.scope,u['id'],b.manager_id or u['id'],b.status,b.due_at))
+   p=c.execute('INSERT INTO projects(title,description,scope,owner_id,manager_id,status,due_at,featured) VALUES(?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.scope,u['id'],b.manager_id or u['id'],b.status,b.due_at,int(b.featured)))
    pid=p.lastrowid
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,u['id'],b.manager_id or u['id'],b)
@@ -281,7 +282,7 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    if not p:fail('Progetto inesistente',404)
    if not project_can_edit(c,u,p):fail()
    validate_project(c,u,b)
-   c.execute('UPDATE projects SET title=?,description=?,scope=?,manager_id=?,status=?,due_at=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.scope,b.manager_id or p['owner_id'],b.status,b.due_at,datetime.now(timezone.utc).isoformat(),pid))
+   c.execute('UPDATE projects SET title=?,description=?,scope=?,manager_id=?,status=?,due_at=?,featured=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.scope,b.manager_id or p['owner_id'],b.status,b.due_at,int(b.featured),datetime.now(timezone.utc).isoformat(),pid))
    c.execute('DELETE FROM project_courses WHERE project_id=?',(pid,))
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,p['owner_id'],b.manager_id or p['owner_id'],b)
