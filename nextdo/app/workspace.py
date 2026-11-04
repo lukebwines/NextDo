@@ -31,6 +31,12 @@ def upgrade(db_path:Path,data_path:Path):
     try:db.backup(dest)
     finally:dest.close()
   project_columns={r[1] for r in db.execute('PRAGMA table_info(projects)')}
+  if 'archived_at' not in project_columns:
+   backup=data_path/'nextdo-before-project-archive-migration.sqlite3'
+   if not backup.exists():
+    dst=sqlite3.connect(backup)
+    try:db.backup(dst)
+    finally:dst.close()
   if 'featured' not in project_columns:
    backup=data_path/'nextdo-before-featured-projects-migration.sqlite3'
    if not backup.exists():
@@ -86,6 +92,8 @@ def upgrade(db_path:Path,data_path:Path):
    """)
    if 'featured' not in project_columns:
     db.execute('ALTER TABLE projects ADD COLUMN featured INTEGER NOT NULL DEFAULT 1')
+   if 'archived_at' not in project_columns:
+    db.execute('ALTER TABLE projects ADD COLUMN archived_at TEXT')
    if 'scope' not in cols:
     db.execute("ALTER TABLE tasks ADD COLUMN scope TEXT NOT NULL DEFAULT 'personal'")
     db.execute("UPDATE tasks SET scope='cds' WHERE EXISTS (SELECT 1 FROM task_courses tc WHERE tc.task_id=tasks.id)")
@@ -249,7 +257,7 @@ def check_password_policy(password,role):
  length=password_minimum(role)
  if len(password)<length:fail('La password deve contenere almeno '+str(length)+' caratteri',400)
 
-def register_routes(app,*,conn,user,csrf,ph,record):
+def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
  def needadmin(req):
   u=user(req)
   if u['role']!='admin':fail()
@@ -373,6 +381,53 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    project_responsibilities(c,pid,b)
    record(c,u['id'],'update','project',pid)
   return {'ok':True}
+
+ @app.post('/api/projects/{pid}/archive')
+ def archive_project(pid:int,req:Request):
+  u=user(req);csrf(req)
+  with conn() as c:
+   p=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+   if not p:fail('Progetto inesistente',404)
+   if not project_can_edit(c,u,p):fail()
+   c.execute('UPDATE projects SET archived_at=?,updated_at=? WHERE id=?',
+             (datetime.now(timezone.utc).isoformat(),datetime.now(timezone.utc).isoformat(),pid))
+   record(c,u['id'],'archive','project',pid)
+  return {'ok':True}
+
+ @app.post('/api/projects/{pid}/restore')
+ def restore_project(pid:int,req:Request):
+  u=user(req);csrf(req)
+  with conn() as c:
+   p=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+   if not p:fail('Progetto inesistente',404)
+   if not project_can_edit(c,u,p):fail()
+   c.execute('UPDATE projects SET archived_at=NULL,updated_at=? WHERE id=?',
+             (datetime.now(timezone.utc).isoformat(),pid))
+   record(c,u['id'],'restore','project',pid)
+  return {'ok':True}
+
+ @app.delete('/api/projects/{pid}')
+ def delete_project(pid:int,req:Request,confirm:str=''):
+  u=user(req);csrf(req)
+  if u['role']!='admin':fail('Eliminazione riservata agli amministratori')
+  if confirm!='ELIMINA':fail('Conferma ELIMINA mancante',400)
+  if data_path is None:fail('Cartella di backup non configurata',500)
+  with conn() as c:
+   p=c.execute('SELECT * FROM projects WHERE id=?',(pid,)).fetchone()
+   if not p:fail('Progetto inesistente',404)
+   count=c.execute('SELECT COUNT(*) FROM tasks WHERE project_id=?',(pid,)).fetchone()[0]
+   attached=c.execute('SELECT COUNT(*) FROM attachments WHERE task_id IN (SELECT id FROM tasks WHERE project_id=?)',(pid,)).fetchone()[0]
+   backup_dir=Path(data_path)/'project-deletion-backups'
+   backup_dir.mkdir(parents=True,exist_ok=True)
+   name='before-delete-project-'+str(pid)+'-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+secrets.token_hex(3)+'.sqlite3'
+   dest=sqlite3.connect(backup_dir/name)
+   try:c.backup(dest)
+   finally:dest.close()
+   # Retain physical attachments for manual restoration, but remove associated database records.
+   c.execute('DELETE FROM tasks WHERE project_id=?',(pid,))
+   c.execute('DELETE FROM projects WHERE id=?',(pid,))
+   record(c,u['id'],'delete','project',pid)
+  return {'ok':True,'deleted_tasks':count,'retained_attachment_files':attached}
  @app.patch('/api/tasks/{tid}/status')
  def task_status(tid:int,b:TaskStatus,req:Request):
   u=user(req);csrf(req)
