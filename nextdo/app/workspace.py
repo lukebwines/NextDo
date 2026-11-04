@@ -259,6 +259,26 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   needadmin(req)
   with conn() as c:
    return [dict(r) for r in c.execute('SELECT ca.course_id,ca.user_id,u.display_name FROM course_assignees ca JOIN users u ON u.id=ca.user_id ORDER BY ca.course_id,u.display_name')]
+ @app.get('/api/course-assignee-defaults')
+ def course_assignee_defaults(req:Request):
+  """Read-only suggestions for new project assignments; never changes projects."""
+  u=user(req)
+  with conn() as c:
+   if u['role']=='admin':
+    rows=c.execute("""SELECT ca.course_id,ca.user_id FROM course_assignees ca
+      JOIN courses cr ON cr.id=ca.course_id
+      JOIN users us ON us.id=ca.user_id
+      WHERE cr.active=1 AND us.active=1 ORDER BY ca.user_id,ca.course_id""")
+   else:
+    # Non-admins see only the default assignments for their own courses.
+    rows=c.execute("""SELECT ca.course_id,ca.user_id FROM course_assignees ca
+      JOIN courses cr ON cr.id=ca.course_id
+      JOIN users us ON us.id=ca.user_id
+      WHERE cr.active=1 AND us.active=1
+      AND EXISTS(SELECT 1 FROM course_assignees own
+                 WHERE own.course_id=ca.course_id AND own.user_id=?)
+      ORDER BY ca.user_id,ca.course_id""",(u['id'],))
+   return [dict(r) for r in rows]
  @app.get('/api/my-courses')
  def my_course_ids(req:Request):
   u=user(req)
