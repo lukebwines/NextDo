@@ -392,7 +392,12 @@ def task_create(b:TaskIn,req:Request):
    err(400,'Completare i singoli CdS prima di chiudere la scadenza')
   r=c.execute('INSERT INTO tasks(title,description,kind,priority,status,due_at,start_at,owner_id,assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.start_at,u['id'],b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id))
   tid=r.lastrowid
-  ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
+  if b.scope=='project' and b.completion_mode=='per_course':
+   ids=[r[0] for r in c.execute('SELECT course_id FROM project_courses WHERE project_id=?',(b.project_id,))]
+   if not ids:
+    p=c.execute('SELECT scope FROM projects WHERE id=?',(b.project_id,)).fetchone()
+    if p and p['scope']=='common':ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')]
+  else:ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
   put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'create','task',tid)
  return {'id':tid}
 
