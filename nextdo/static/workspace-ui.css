@@ -18,6 +18,11 @@
 .kanban-col.kanban-over{border:2px dashed #45aaff;background:#224568}
 .kanban-col h3{display:flex;align-items:center;justify-content:space-between;font-size:13px;margin:0 0 5px;font-weight:700}
 .kanban-task{padding:11px;border:1px solid var(--stroke);border-radius:9px;background:var(--panel);display:flex;flex-direction:column;gap:7px;cursor:grab}
+.kanban-task[draggable="true"]:active{cursor:grabbing}
+.kanban-task.kanban-dragging{opacity:.55;outline:2px dashed #53a2ff}
+.kanban-task-readonly{cursor:default;opacity:.86}
+.kanban-drag-label{align-self:flex-start;font-size:10px;font-weight:700;letter-spacing:.02em;color:var(--muted);cursor:grab;user-select:none}
+.kanban-readonly-hint{font-size:10px;color:var(--muted);line-height:1.4}
 .kanban-task:hover{border-color:var(--blue)}
 .kanban-task strong{font-size:13px;overflow-wrap:anywhere}
 .kanban-task .muted{font-size:11px}
