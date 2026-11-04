@@ -105,6 +105,8 @@ migrate_legacy_database()
 init()
 from . import workspace
 workspace.upgrade(DB,DATA)
+from . import collaborators
+collaborators.upgrade(DB,DATA)
 def ensure_setup_token():
  with conn() as c:
   initial=c.execute('SELECT 1 FROM users LIMIT 1').fetchone() is None
@@ -682,3 +684,4 @@ from . import sharepoint_export
 sharepoint_export.register_routes(app,conn=conn,user=user)
 from . import calendar_import
 calendar_import.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
+collaborators.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record)
