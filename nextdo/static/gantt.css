@@ -67,3 +67,8 @@
 .gantt-child-name .gantt-subtitle{font-size:10px}
 .gantt-bar--unsynced{background:#768090;border:1px dashed #b7c0cb;opacity:.64}
 .light .gantt-child-name{background:#edf3f9}
+
+.gantt-unplanned-task{width:100%;border-top:1px solid var(--stroke);padding:6px 0 0}
+.gantt-unplanned-task summary{padding:6px 0;cursor:pointer;font-size:12px;font-weight:650}
+.gantt-unplanned-task .gantt-unplanned-row{padding-left:16px;flex-wrap:wrap;justify-content:space-between}
+.gantt-unplanned-task .gantt-unplanned-row strong{font-size:11px}
