@@ -42,3 +42,17 @@
  .sidebar .nav:nth-child(n+7){display:flex}
  .sidebar .navtext{display:none}
 }
+
+/* Kanban: draggable work cards vs read-only shared cards. */
+.kanban-movable{cursor:grab;user-select:none;-webkit-user-select:none;position:relative}
+.kanban-movable:active{cursor:grabbing}
+.kanban-readonly{cursor:default;opacity:.86}
+.kanban-dragging{opacity:.45;outline:2px dashed #42a2ff}
+.kanban-drag-handle{font-size:20px;letter-spacing:1px;line-height:1;align-self:flex-end;color:var(--muted);cursor:grab;user-select:none}
+.kanban-movable:hover .kanban-drag-handle{color:var(--ink)}
+.kanban-permission-label{font-size:11px;color:var(--muted);border-top:1px solid var(--stroke);padding-top:7px}
+.kanban-card-tools{display:flex;justify-content:space-between;gap:6px;align-items:center;margin-top:5px}
+.kanban-status-select{width:min(100%,165px);min-width:92px;border:1px solid var(--stroke);border-radius:7px;background:var(--panel2);color:var(--ink);font:inherit;font-size:12px;padding:7px 5px;cursor:pointer}
+.kanban-status-select:focus-visible{outline:2px solid #59a5fa;outline-offset:2px}
+.kanban-over{outline:2px dashed #4d9fff;outline-offset:-2px}
+@media(max-width:700px){.kanban-card-tools{flex-wrap:wrap}.kanban-status-select{min-width:120px;flex:1}}
