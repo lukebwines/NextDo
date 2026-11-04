@@ -179,6 +179,13 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  form.append(attachments);
  const actions=el('div',{class:'actions full'});
  actions.append(btn('Annulla',()=>back.remove()));
+ if(t&&t.kind==='task'&&t.scope!=='project'&&['personal','cds','common'].includes(t.scope)&&t.can_edit!==false){
+  actions.append(btn('Trasforma in progetto',async()=>{
+   if(!confirm('Trasformare questa scadenza in un progetto? Il numero dell’attività, gli allegati e lo storico saranno conservati.'))return;
+   try{const result=await api('/tasks/'+t.id+'/promote-to-project',{method:'POST'});back.remove();await refresh();S.selectedProject=result.project_id;S.projectMode='kanban';changeView('projects','all','',result.project_id);msg('Scadenza trasformata in progetto')}
+   catch(e){msg(e.message,true)}
+  },'small'));
+ }
  if(t&&t.can_edit!==false)actions.append(btn('Elimina',async()=>{
   if(!confirm('Eliminare definitivamente questa attività?'))return;
   try{await api('/tasks/'+t.id,{method:'DELETE'});back.remove();await refresh();render()}catch(e){msg(e.message,true)}
