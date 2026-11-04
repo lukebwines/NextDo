@@ -187,10 +187,6 @@ class ProjectIn(BaseModel):
 class TaskStatus(BaseModel):
  status:str
 
-class ProgressUpdate(BaseModel):
- status:str
- note:str=Field(default='',max_length=1500)
-
 class PasswordChange(BaseModel):
  current_password:str
  new_password:str=Field(min_length=12,max_length=256)
