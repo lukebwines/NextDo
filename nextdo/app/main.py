@@ -48,7 +48,7 @@ def init():
   CREATE TABLE IF NOT EXISTS groups(id INTEGER PRIMARY KEY,name TEXT NOT NULL,created_by INTEGER REFERENCES users(id));
   CREATE TABLE IF NOT EXISTS memberships(group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,role TEXT NOT NULL DEFAULT 'member',PRIMARY KEY(group_id,user_id));
   CREATE TABLE IF NOT EXISTS courses(id INTEGER PRIMARY KEY,code TEXT NOT NULL UNIQUE COLLATE NOCASE,name TEXT NOT NULL,active INTEGER DEFAULT 1);
-  CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY,title TEXT NOT NULL,description TEXT DEFAULT '',kind TEXT DEFAULT 'task',priority TEXT DEFAULT 'normal',status TEXT DEFAULT 'todo',due_at TEXT,owner_id INTEGER NOT NULL REFERENCES users(id),assigned_to INTEGER REFERENCES users(id),group_id INTEGER REFERENCES groups(id),completion_mode TEXT DEFAULT 'global',display_enabled INTEGER DEFAULT 0,recurrence TEXT DEFAULT 'none',labels TEXT DEFAULT '[]',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+  CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY,title TEXT NOT NULL,description TEXT DEFAULT '',kind TEXT DEFAULT 'task',priority TEXT DEFAULT 'normal',status TEXT DEFAULT 'todo',due_at TEXT,start_at TEXT,owner_id INTEGER NOT NULL REFERENCES users(id),assigned_to INTEGER REFERENCES users(id),group_id INTEGER REFERENCES groups(id),completion_mode TEXT DEFAULT 'global',display_enabled INTEGER DEFAULT 0,recurrence TEXT DEFAULT 'none',labels TEXT DEFAULT '[]',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS task_courses(task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,done INTEGER DEFAULT 0,PRIMARY KEY(task_id,course_id));
   CREATE TABLE IF NOT EXISTS attachments(id INTEGER PRIMARY KEY,task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,filename TEXT NOT NULL,stored TEXT NOT NULL,mime TEXT,size INTEGER,uploader INTEGER REFERENCES users(id),created_at TEXT DEFAULT CURRENT_TIMESTAMP);
   CREATE TABLE IF NOT EXISTS reminders(id INTEGER PRIMARY KEY,task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,minutes_before INTEGER NOT NULL,notified_at TEXT,UNIQUE(task_id,minutes_before));
@@ -328,7 +328,7 @@ async def course_import(req:Request,file:UploadFile=File(...)):
 class TaskIn(BaseModel):
  title:str=Field(min_length=1,max_length=250)
  description:str=Field(default='',max_length=50000)
- kind:str='task';priority:str='normal';status:str='todo';due_at:Optional[str]=None
+ kind:str='task';priority:str='normal';status:str='todo';due_at:Optional[str]=None;start_at:Optional[str]=None
  assigned_to:Optional[int]=None;group_id:Optional[int]=None
  completion_mode:str='global';display_enabled:bool=False;recurrence:str='none'
  scope:str='personal';project_id:Optional[int]=None
@@ -337,9 +337,16 @@ def validate_task(c,u,b):
  if b.priority not in ('low','normal','high','critical') or b.status not in ('todo','doing','waiting','done') or b.kind not in ('task','note') or b.completion_mode not in ('global','per_course'):err(400,'Valore non valido')
  if b.recurrence not in ('none','daily','weekly','monthly','yearly'):err(400,'Ricorrenza non valida')
  workspace.validate_scope(c,u,b)
- if b.due_at:
-  try:datetime.fromisoformat(b.due_at.replace('Z','+00:00'))
-  except ValueError:err(400,'Data non valida')
+ parsed={}
+ for key in ('start_at','due_at'):
+  value=getattr(b,key)
+  if value:
+   try:
+    d=datetime.fromisoformat(value.replace('Z','+00:00'))
+    parsed[key]=(d if d.tzinfo else d.replace(tzinfo=TZ)).astimezone(timezone.utc)
+   except (ValueError,OverflowError):err(400,'Data non valida')
+ if 'start_at' in parsed and 'due_at' in parsed and parsed['start_at']>parsed['due_at']:
+  err(400,'La data di inizio non può essere successiva alla scadenza')
  if len(set(b.course_ids))>100 or len(b.labels)>30 or any(len(s)>60 for s in b.labels) or any(n<0 or n>525600 for n in b.reminders):err(400,'Limiti superati')
  if b.group_id:
   if not is_admin(u) and not c.execute('SELECT 1 FROM memberships WHERE group_id=? AND user_id=?',(b.group_id,u['id'])).fetchone():err()
@@ -376,7 +383,7 @@ def task_create(b:TaskIn,req:Request):
   validate_task(c,u,b)
   if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common'):
    err(400,'Completare i singoli CdS prima di chiudere la scadenza')
-  r=c.execute('INSERT INTO tasks(title,description,kind,priority,status,due_at,owner_id,assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,u['id'],b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id))
+  r=c.execute('INSERT INTO tasks(title,description,kind,priority,status,due_at,start_at,owner_id,assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.start_at,u['id'],b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id))
   tid=r.lastrowid
   ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
   put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'create','task',tid)
@@ -404,7 +411,7 @@ def task_update(tid:int,b:TaskIn,req:Request):
   if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common'):
    progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
-  c.execute('UPDATE tasks SET title=?,description=?,kind=?,priority=?,status=?,due_at=?,assigned_to=?,group_id=?,completion_mode=?,display_enabled=?,recurrence=?,labels=?,scope=?,project_id=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id,iso(),tid))
+  c.execute('UPDATE tasks SET title=?,description=?,kind=?,priority=?,status=?,due_at=?,start_at=?,assigned_to=?,group_id=?,completion_mode=?,display_enabled=?,recurrence=?,labels=?,scope=?,project_id=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.start_at,b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id,iso(),tid))
   ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
   put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders);record(c,u['id'],'update','task',tid)
  return {'ok':True}
