@@ -299,8 +299,10 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    if not allowed:fail()
    if b.status=='done' and t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
     fail('Completare separatamente i CdS',400)
-   c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(b.status,datetime.now(timezone.utc).isoformat(),tid))
-   record(c,u['id'],'status','task',tid)
+   if b.status!=t['status']:
+    c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(b.status,datetime.now(timezone.utc).isoformat(),tid))
+    c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],b.status,''))
+    record(c,u['id'],'status','task',tid)
   return {'ok':True}
  @app.get('/api/profile')
  def profile(req:Request):
