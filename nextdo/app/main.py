@@ -362,6 +362,19 @@ def validate_task(c,u,b):
   cnt=c.execute('SELECT COUNT(*) FROM courses WHERE id IN ('+','.join('?'*len(set(b.course_ids)))+')',tuple(set(b.course_ids))).fetchone()[0]
   if cnt!=len(set(b.course_ids)):err(400,'CdS inesistente')
 
+def validate_project_recipients(c,u,b):
+ # Project managers may select course destinations; an admin may select any
+ # active CdS. The project itself is never exported to Microsoft by this check.
+ p=c.execute('SELECT * FROM projects WHERE id=?',(b.project_id,)).fetchone()
+ if not p or not workspace.project_can_edit(c,u,p):
+  err(403,'Solo il responsabile del progetto può modificare i CdS destinatari')
+ if p['scope']=='cds':
+  allowed={r[0] for r in c.execute('SELECT course_id FROM project_courses WHERE project_id=?',(p['id'],))}
+  if not set(b.course_ids).issubset(allowed):
+   err(400,'Selezionare soltanto CdS associati al progetto')
+ if not is_admin(u) and any(not workspace.owns_course(c,u['id'],cid) for cid in b.course_ids):
+  err(403,'Selezionare soltanto CdS assegnati al proprio account')
+
 def put_task_courses(c,tid,ids):
  c.execute('DELETE FROM task_courses WHERE task_id=? AND course_id NOT IN ('+(','.join('?'*len(ids)) or 'NULL')+')',(tid,*ids))
  for cid in dict.fromkeys(ids):c.execute('INSERT OR IGNORE INTO task_courses(task_id,course_id) VALUES(?,?)',(tid,cid))
@@ -386,6 +399,7 @@ def task_create(b:TaskIn,req:Request):
  u=user(req);csrf(req)
  with conn() as c:
   validate_task(c,u,b)
+  if b.scope=='project' and b.course_ids:validate_project_recipients(c,u,b)
   if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common'):
    err(400,'Completare i singoli CdS prima di chiudere la scadenza')
   r=c.execute('INSERT INTO tasks(title,description,kind,priority,status,due_at,start_at,owner_id,assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.start_at,u['id'],b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id))
@@ -410,9 +424,12 @@ def task_update(tid:int,b:TaskIn,req:Request):
   if not can_edit(c,u,t):err()
   if not is_admin(u) and t['owner_id']!=u['id']:
    original={r[0] for r in c.execute('SELECT course_id FROM task_courses WHERE task_id=?',(tid,))}
-   if b.scope!=t['scope'] or b.project_id!=t['project_id'] or b.assigned_to!=t['assigned_to'] or (t['scope']=='cds' and set(b.course_ids)!=original):
+   if b.scope!=t['scope'] or b.project_id!=t['project_id'] or b.assigned_to!=t['assigned_to'] or (t['scope'] in ('cds','project') and set(b.course_ids)!=original):
     err(403,'Solo il proprietario o l’amministratore può cambiare ambito, CdS e responsabili')
   validate_task(c,u,b)
+  original_courses={r[0] for r in c.execute('SELECT course_id FROM task_courses WHERE task_id=?',(tid,))}
+  if b.scope=='project' and (set(b.course_ids)!=original_courses or b.project_id!=t['project_id']):
+   validate_project_recipients(c,u,b)
   if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common'):
    progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
