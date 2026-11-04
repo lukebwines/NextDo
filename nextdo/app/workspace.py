@@ -24,6 +24,12 @@ def upgrade(db_path:Path,data_path:Path):
     dst=sqlite3.connect(backup)
     try:db.backup(dst)
     finally:dst.close()
+  if 'start_at' not in cols:
+   backup=data_path/'nextdo-before-gantt-migration.sqlite3'
+   if not backup.exists():
+    dest=sqlite3.connect(backup)
+    try:db.backup(dest)
+    finally:dest.close()
   with db:
    db.execute('PRAGMA foreign_keys=ON')
    db.executescript("""
@@ -54,6 +60,8 @@ def upgrade(db_path:Path,data_path:Path):
     db.execute("UPDATE tasks SET scope='group' WHERE group_id IS NOT NULL AND scope='personal'")
    if 'project_id' not in cols:
     db.execute('ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id)')
+   if 'start_at' not in cols:
+    db.execute('ALTER TABLE tasks ADD COLUMN start_at TEXT')
    db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)')
    db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_scope ON tasks(scope)')
  finally:db.close()
