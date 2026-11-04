@@ -14,12 +14,16 @@ def test_project_member_can_move_unassigned_task_but_not_colleague_task(tmp_path
  fid=free.json()['id'];rid=reserved.json()['id']
  sign_in(c,h,'alice')
  task=c.get(f'/api/tasks/{fid}').json()
- assert task['can_edit'] is True
+ assert task['can_edit'] is False
+ assert task['can_move'] is True
+ # A participant may move an unassigned card but not delete it or alter its ownership.
+ assert c.delete(f'/api/tasks/{fid}',headers=h).status_code==403
  assert c.patch(f'/api/tasks/{fid}/status',headers=h,json={'status':'doing'}).status_code==200
  assert c.get(f'/api/tasks/{fid}').json()['status']=='doing'
  assert c.post(f'/api/tasks/{fid}/progress',headers=h,json={'status':'waiting','note':'In attesa di riscontro'}).status_code==200
  assert c.get(f'/api/tasks/{fid}').json()['status']=='waiting'
  assert c.get(f'/api/tasks/{rid}').json()['can_edit'] is False
+ assert c.get(f'/api/tasks/{rid}').json()['can_move'] is False
  assert c.patch(f'/api/tasks/{rid}/status',headers=h,json={'status':'doing'}).status_code==403
  assert c.post(f'/api/tasks/{rid}/progress',headers=h,json={'status':'doing','note':'Non autorizzata'}).status_code==403
  sign_in(c,h,'eve')
@@ -41,7 +45,8 @@ def test_cds_colleague_can_advance_unassigned_project_work(tmp_path):
  assert task.status_code==200,task.text
  tid=task.json()['id']
  sign_in(c,h,'alice')
- assert c.get(f'/api/tasks/{tid}').json()['can_edit'] is True
+ assert c.get(f'/api/tasks/{tid}').json()['can_edit'] is False
+ assert c.get(f'/api/tasks/{tid}').json()['can_move'] is True
  assert c.patch(f'/api/tasks/{tid}/status',headers=h,json={'status':'doing'}).status_code==200
  sign_in(c,h,'bob')
  assert c.get(f'/api/tasks/{tid}').status_code==403
@@ -58,8 +63,10 @@ def test_common_project_viewers_cannot_edit_without_membership(tmp_path):
  tid=task.json()['id']
  sign_in(c,h,'bob')
  assert c.get(f'/api/tasks/{tid}').json()['can_edit'] is False
+ assert c.get(f'/api/tasks/{tid}').json()['can_move'] is False
  assert c.patch(f'/api/tasks/{tid}/status',headers=h,json={'status':'doing'}).status_code==403
  sign_in(c,h,'alice')
- assert c.get(f'/api/tasks/{tid}').json()['can_edit'] is True
+ assert c.get(f'/api/tasks/{tid}').json()['can_edit'] is False
+ assert c.get(f'/api/tasks/{tid}').json()['can_move'] is True
  assert c.patch(f'/api/tasks/{tid}/status',headers=h,json={'status':'doing'}).status_code==200
  c.close()
