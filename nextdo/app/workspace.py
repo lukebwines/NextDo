@@ -124,6 +124,9 @@ def project_can_view(c,u,p):
  if u['role']=='admin' or p['owner_id']==u['id'] or p['manager_id']==u['id']:return True
  if c.execute('SELECT 1 FROM project_members WHERE project_id=? AND user_id=?',(p['id'],u['id'])).fetchone():return True
  if c.execute('SELECT 1 FROM project_responsibilities WHERE project_id=? AND user_id=? LIMIT 1',(p['id'],u['id'])).fetchone():return True
+ if c.execute("""SELECT 1 FROM project_collaborator_responsibilities pc
+   JOIN collaborators col ON col.id=pc.collaborator_id
+   WHERE pc.project_id=? AND col.linked_user_id=? AND col.active=1 LIMIT 1""",(p['id'],u['id'])).fetchone():return True
  if p['scope']=='common':return True
  if p['scope']=='cds':
   return bool(c.execute("""SELECT 1 FROM project_courses pc
@@ -230,6 +233,10 @@ class ProjectResponsibility(BaseModel):
  course_id:int
  user_id:int
 
+class CollaboratorResponsibility(BaseModel):
+ course_id:int
+ collaborator_id:int
+
 class ProjectIn(BaseModel):
  title:str=Field(min_length=1,max_length=250)
  description:str=Field(default='',max_length=50000)
@@ -238,6 +245,7 @@ class ProjectIn(BaseModel):
  course_ids:list[int]=Field(default_factory=list,max_length=100)
  member_ids:list[int]=Field(default_factory=list,max_length=100)
  responsibilities:list[ProjectResponsibility]=Field(default_factory=list,max_length=500)
+ collaborator_responsibilities:list[CollaboratorResponsibility]=Field(default_factory=list,max_length=500)
  due_at:Optional[str]=None
  status:str='doing'
  featured:bool=True
@@ -319,6 +327,8 @@ def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
   d['member_ids']=[r[0] for r in c.execute('SELECT user_id FROM project_members WHERE project_id=?',(p['id'],))]
   d['responsibilities']=[dict(r) for r in c.execute(
    'SELECT course_id,user_id FROM project_responsibilities WHERE project_id=? ORDER BY course_id,user_id',(p['id'],))]
+  d['collaborator_responsibilities']=[dict(r) for r in c.execute(
+   'SELECT course_id,collaborator_id FROM project_collaborator_responsibilities WHERE project_id=? ORDER BY course_id,collaborator_id',(p['id'],))]
   d['counts']={r['status']:r['n'] for r in c.execute("SELECT status,COUNT(*) AS n FROM tasks WHERE project_id=? GROUP BY status",(p['id'],))}
   d['can_edit']=project_can_edit(c,current_user,p) if current_user else False
   return d
@@ -329,6 +339,16 @@ def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
   if b.scope!='cds' and b.course_ids:fail('Questo progetto non richiede CdS',400)
   if b.scope=='common' and u['role']!='admin':fail('Progetti comuni riservati agli amministratori')
   if len(set(b.course_ids))!=len(b.course_ids) or len(set(b.member_ids))!=len(b.member_ids):fail('Assegnazioni duplicate',400)
+  if b.collaborator_responsibilities:
+   if u['role']!='admin':fail('Solo un amministratore può assegnare collaboratori Lists')
+   pairs=[(r.course_id,r.collaborator_id) for r in b.collaborator_responsibilities]
+   if len(pairs)!=len(set(pairs)):fail('Assegnazioni collaboratori duplicate',400)
+   if b.scope=='independent':fail('Associare un CdS prima di assegnare collaboratori Lists',400)
+   if b.scope=='cds' and any(r.course_id not in b.course_ids for r in b.collaborator_responsibilities):
+    fail('Collaboratore associato a CdS escluso dal progetto',400)
+   for r in b.collaborator_responsibilities:
+    if not c.execute('SELECT 1 FROM courses WHERE id=? AND active=1',(r.course_id,)).fetchone():fail('CdS collaboratore non attivo',400)
+    if not c.execute('SELECT 1 FROM collaborators WHERE id=? AND active=1',(r.collaborator_id,)).fetchone():fail('Collaboratore inesistente o inattivo',400)
   if b.scope=='cds':
    for cid in b.course_ids:
     if not c.execute('SELECT 1 FROM courses WHERE id=? AND active=1',(cid,)).fetchone():fail('CdS non attivo',400)
@@ -356,6 +376,11 @@ def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
   c.executemany(
    'INSERT INTO project_responsibilities(project_id,course_id,user_id) VALUES(?,?,?)',
    [(pid,r.course_id,r.user_id) for r in b.responsibilities])
+ def save_project_collaborators(c,pid,b,u):
+  if u['role']!='admin':return
+  c.execute('DELETE FROM project_collaborator_responsibilities WHERE project_id=?',(pid,))
+  c.executemany('INSERT INTO project_collaborator_responsibilities(project_id,course_id,collaborator_id) VALUES(?,?,?)',
+   [(pid,r.course_id,r.collaborator_id) for r in b.collaborator_responsibilities])
  @app.get('/api/projects')
  def projects(req:Request):
   u=user(req)
@@ -371,6 +396,7 @@ def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,u['id'],b.manager_id or u['id'],b)
    project_responsibilities(c,pid,b)
+   save_project_collaborators(c,pid,b,u)
    record(c,u['id'],'create','project',pid)
   return {'id':pid}
  @app.put('/api/projects/{pid}')
@@ -386,6 +412,7 @@ def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,p['owner_id'],b.manager_id or p['owner_id'],b)
    project_responsibilities(c,pid,b)
+   save_project_collaborators(c,pid,b,u)
    record(c,u['id'],'update','project',pid)
   return {'ok':True}
 
