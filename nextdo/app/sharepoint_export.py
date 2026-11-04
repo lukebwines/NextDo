@@ -22,6 +22,34 @@ def build_project_export(c, project):
   "SELECT id,title,status,due_at FROM tasks WHERE scope='project' AND project_id=? ORDER BY id",
   (project["id"],)
  ).fetchall()
+ tasks=[]
+ for row in rows:
+  base={
+   "id":"NEXTDO-T"+str(row["id"]),
+   "title":row["title"],
+   "status":row["status"],
+   "due_at":row["due_at"]
+  }
+  recipients=c.execute(
+   """SELECT c.id,c.code,c.name FROM task_courses tc
+      JOIN courses c ON c.id=tc.course_id
+      WHERE tc.task_id=? ORDER BY c.code,c.id""",
+   (row["id"],)
+  ).fetchall()
+  if not recipients:
+   # Backward compatibility for previously exported tasks without course recipients.
+   tasks.append(base)
+  else:
+   # One independent Lists item per task + course. These IDs never change
+   # after a task has been exported, even if task status/title changes.
+   for course in recipients:
+    tasks.append({
+     **base,
+     "id":base["id"]+"-C"+str(course["id"]),
+     "course_code":course["code"],
+     "course_name":course["name"],
+     "project_title":project["title"]
+    })
  return {
   "schema_version":"1.0",
   "source":"NextDo",
@@ -29,12 +57,7 @@ def build_project_export(c, project):
    "id":"NEXTDO-P"+str(project["id"]),
    "title":project["title"]
   },
-  "tasks":[{
-   "id":"NEXTDO-T"+str(row["id"]),
-   "title":row["title"],
-   "status":row["status"],
-   "due_at":row["due_at"]
-  } for row in rows]
+  "tasks":tasks
  }
 
 
