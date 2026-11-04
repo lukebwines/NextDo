@@ -139,15 +139,20 @@ def can_write(c,u,t):
   return assigned_task_course(c,u['id'],t['id']) and t['assigned_to'] in (None,u['id'])
  if scope=='project' and t['project_id']:
   p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
-  if not p:return False
-  if project_can_edit(c,u,p):return True
-  if t['assigned_to'] is not None:
-   return t['assigned_to']==u['id'] and project_can_view(c,u,p)
-  return project_can_contribute(c,u,p)
+  return bool(p and (project_can_edit(c,u,p) or (t['assigned_to']==u['id'] and project_can_view(c,u,p))))
  if t['assigned_to']==u['id'] or t['owner_id']==u['id']:return True
  if t['group_id']:
   member=c.execute("SELECT role FROM memberships WHERE group_id=? AND user_id=?",(t['group_id'],u['id'])).fetchone()
   return bool(member and member['role']=='manager')
+ return False
+
+def can_progress(c,u,t):
+ """Moving a task is not the same permission as editing, assigning or deleting it."""
+ if not can_read(c,u,t):return False
+ if can_write(c,u,t):return True
+ if t['scope']=='project' and t['project_id'] and t['assigned_to'] is None:
+  p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
+  return bool(p and project_can_contribute(c,u,p))
  return False
 
 def can_finish(c,u,t):
@@ -155,7 +160,7 @@ def can_finish(c,u,t):
  scope=t['scope']
  if scope=='common' and t['completion_mode']=='global':
   return u['role']=='admin' or t['owner_id']==u['id'] or t['assigned_to']==u['id']
- return can_write(c,u,t)
+ return can_progress(c,u,t)
 
 def validate_scope(c,u,b):
  scope=b.scope
@@ -306,7 +311,7 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   with conn() as c:
    t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
    if not t:fail('Attività inesistente',404)
-   allowed=can_finish(c,u,t) if b.status=='done' else can_write(c,u,t)
+   allowed=can_finish(c,u,t) if b.status=='done' else can_progress(c,u,t)
    if not allowed:fail()
    if b.status=='done' and t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
     fail('Completare separatamente i CdS',400)
