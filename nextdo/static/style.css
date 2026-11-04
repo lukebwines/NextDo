@@ -12,4 +12,12 @@
 .project-course-option input{margin-top:3px;flex-shrink:0;accent-color:var(--blue)}
 .project-course-option:has(input:disabled){opacity:.55;cursor:not-allowed}
 .project-colleague-group .sub{margin:10px 0 0}
+.project-assignment-overview{display:grid;gap:8px;padding:12px;background:var(--panel2);border:1px solid var(--stroke);border-radius:10px}
+.project-assignment-summary-row{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.project-assignment-summary-row .sub{margin:0}
+.project-assignment-warning{margin:5px 0;color:var(--amber);font-size:12px}
+.project-responsibility-advanced{padding:11px;border:1px solid var(--stroke);border-radius:10px}
+.project-responsibility-advanced summary{font-weight:600;cursor:pointer;margin-bottom:0}
+.project-responsibility-advanced[open] summary{margin-bottom:12px}
+.project-responsibility-advanced .project-responsibility-rows{margin-bottom:10px}
 @media(max-width:550px){.project-course-checklist{grid-template-columns:1fr}.project-colleague-header>div{flex-basis:100%}}
