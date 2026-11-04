@@ -108,6 +108,7 @@ def assigned_task_course(c,uid,tid):
 def project_can_view(c,u,p):
  if u['role']=='admin' or p['owner_id']==u['id'] or p['manager_id']==u['id']:return True
  if c.execute('SELECT 1 FROM project_members WHERE project_id=? AND user_id=?',(p['id'],u['id'])).fetchone():return True
+ if c.execute('SELECT 1 FROM project_responsibilities WHERE project_id=? AND user_id=? LIMIT 1',(p['id'],u['id'])).fetchone():return True
  if p['scope']=='common':return True
  if p['scope']=='cds':
   return bool(c.execute("""SELECT 1 FROM project_courses pc
@@ -312,7 +313,7 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    try:datetime.fromisoformat(b.due_at.replace('Z','+00:00'))
    except ValueError:fail('Data progetto non valida',400)
  def project_participants(c,pid,owner,manager,b):
-  members=set(b.member_ids)|{owner}|({manager} if manager else set())|{r.user_id for r in b.responsibilities}
+  members=set(b.member_ids)|{owner}|({manager} if manager else set())
   c.execute('DELETE FROM project_members WHERE project_id=?',(pid,))
   c.executemany('INSERT INTO project_members(project_id,user_id,role) VALUES(?,?,?)',[(pid,x,'manager' if x in (owner,manager) else 'member') for x in members])
  def project_responsibilities(c,pid,b):
