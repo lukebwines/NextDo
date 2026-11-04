@@ -38,6 +38,20 @@ const NextDoWorkspace=(()=>{
   ]);
   panel.append(heading);
   if(current.description)panel.append(node('p','sub',current.description));
+  const viewbar=el('div',{class:'project-view-toolbar','aria-label':'Visualizzazione progetto'});
+  for(const [mode,label] of [['kanban','Kanban'],['gantt','Gantt']]){
+   const view=opt(label,()=>{
+    S.projectMode=mode;localStorage.setItem('nextdo-project-view',mode);render();
+   },'small'+(S.projectMode===mode?' active':''));
+   view.setAttribute('aria-pressed',String(S.projectMode===mode));
+   viewbar.append(view);
+  }
+  panel.append(viewbar);
+  if(S.projectMode==='gantt'){
+   panel.append(NextDoGantt.render(current));
+   main.append(panel);
+   return;
+  }
   const kanban=el('div',{class:'kanban-board'});
   for(const [status,label] of Object.entries(statuses)){
    const col=el('section',{class:'kanban-col','data-status':status});

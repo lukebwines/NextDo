@@ -19,4 +19,5 @@ jobs:
       - run: node --check nextdo/static/app.js
       - run: node --check nextdo/static/file-tools.js
       - run: node --check nextdo/static/workspace-ui.js
+      - run: node --check nextdo/static/gantt.js
       - run: PYTHONPATH=nextdo pytest -q tests

@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidato: 0.1.7-test.** Aggiunge spazi personali, assegnazione CdS ai colleghi, scadenze comuni e Project Manager Kanban mantenendo tutte le funzioni della 0.1.6-test.
+**Versione candidata: 0.1.8-test.** Aggiunge il diagramma di Gantt ai progetti, accanto al Kanban, con inizio facoltativo, scadenza, responsabile, stato e attività da pianificare. Mantiene tutte le funzioni della 0.1.7-test.
+
+**Versione precedente: 0.1.7-test.** Aggiunge spazi personali, assegnazione CdS ai colleghi, scadenze comuni e Project Manager Kanban.
 
 **Versione precedente: 0.1.6-test.** Dashboard rifinita sulla prima proposta grafica approvata: menu con etichette, quattro contatori cliccabili, aggiunta rapida, scadenze compatte, settimana e riepilogo etichette. Aggiunto il ripristino di archivi ZIP esportati da NextDo.
 
@@ -86,3 +88,20 @@ Prima di modificare il database, la nuova versione crea un backup in `/data/next
 Le autorizzazioni sono applicate lato API: un collega non accede alle scadenze di CdS non assegnati, e chi non è autorizzato non può modificare/completare quelle condivise. Una nuova assegnazione CdS aggiorna dinamicamente le autorizzazioni.
 
 **Limiti:** release ancora sperimentale; collaudo su Home Assistant OS ARM64 e prova d'uso multiutente su dispositivo reale necessari prima di impiegare dati lavorativi o consentire accessi esterni. Cloudflare Access con politiche restrittive resta requisito per accesso remoto dedicato.
+
+
+## Gantt dei progetti (0.1.8-test)
+
+Aprire **Progetti**, selezionare il progetto e usare il selettore **Kanban / Gantt**.
+
+- La vista **Kanban** resta operativa per spostare le attività tra gli stati.
+- La vista **Gantt** dispone le attività in una linea temporale, mostra responsabili, stato, oggi, eventuale scadenza complessiva del progetto e una scala di visualizzazione selezionabile.
+- Aprire una scheda e inserire **Inizio previsto (facoltativo)** e **Data e ora scadenza**. Una data iniziale successiva alla scadenza viene rifiutata sia dall'interfaccia sia dall'API.
+- Le attività con una sola data vengono mostrate come **rombi (milestone)**, senza attribuire loro una durata arbitraria.
+- Le attività senza alcuna data rimangono nella sezione **Da pianificare**. Le date esistenti rimangono inalterate.
+- La barra mostra l'intervallo pianificato e il colore indica lo **stato** della scheda, non una percentuale di avanzamento. Le informazioni sul completamento del progetto rimangono basate sulle attività concluse/totali.
+- Selezionare una barra o una riga per aprire la scheda e aggiornare date, descrizione, assegnatario e stato, nel rispetto dei permessi esistenti.
+
+**Migrazione:** i dati da 0.1.7-test vengono preservati; prima di aggiungere la colonna locale `start_at` viene creata, quando necessaria, la copia SQLite `/data/nextdo-before-gantt-migration.sqlite3`. Non cancellare la copia precedente e creare sempre un backup dell'add-on Home Assistant prima dell'aggiornamento.
+
+**Limiti della prima versione:** la pianificazione si modifica dalle schede, non trascinando le barre; dipendenze tra attività, percorso critico e avanzamento percentuale per singola attività non sono ancora implementati. È necessario collaudare l'interfaccia sull'installazione ARM64 Home Assistant prima dell'uso con i colleghi.
