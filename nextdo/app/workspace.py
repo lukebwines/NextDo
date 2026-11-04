@@ -105,6 +105,17 @@ def project_can_edit(c,u,p):
  if u['role']=='admin' or p['owner_id']==u['id'] or p['manager_id']==u['id']:return True
  return bool(c.execute("SELECT 1 FROM project_members WHERE project_id=? AND user_id=? AND role='manager'",(p['id'],u['id'])).fetchone())
 
+def project_can_contribute(c,u,p):
+ """An explicit project colleague, or a colleague assigned to one of its CdS,
+ can work on unassigned tasks. Viewing a public/common project is not enough."""
+ if project_can_edit(c,u,p):return True
+ if c.execute("SELECT 1 FROM project_members WHERE project_id=? AND user_id=?",(p['id'],u['id'])).fetchone():return True
+ if p['scope']=='cds':
+  return bool(c.execute("""SELECT 1 FROM project_courses pc
+     JOIN course_assignees ca ON ca.course_id=pc.course_id
+     WHERE pc.project_id=? AND ca.user_id=? LIMIT 1""",(p['id'],u['id'])).fetchone())
+ return False
+
 def can_read(c,u,t):
  scope=t['scope'] if 'scope' in t.keys() else 'group'
  if scope=='personal':return t['owner_id']==u['id']
@@ -128,7 +139,11 @@ def can_write(c,u,t):
   return assigned_task_course(c,u['id'],t['id']) and t['assigned_to'] in (None,u['id'])
  if scope=='project' and t['project_id']:
   p=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
-  return bool(p and (project_can_edit(c,u,p) or (t['assigned_to']==u['id'] and project_can_view(c,u,p))))
+  if not p:return False
+  if project_can_edit(c,u,p):return True
+  if t['assigned_to'] is not None:
+   return t['assigned_to']==u['id'] and project_can_view(c,u,p)
+  return project_can_contribute(c,u,p)
  if t['assigned_to']==u['id'] or t['owner_id']==u['id']:return True
  if t['group_id']:
   member=c.execute("SELECT role FROM memberships WHERE group_id=? AND user_id=?",(t['group_id'],u['id'])).fetchone()
