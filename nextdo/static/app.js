@@ -135,20 +135,40 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  const display=el('input',{type:'checkbox',checked:t?.display_enabled});
  const scope=select('scope',NextDoWorkspace.taskScopeOptions(),t?.scope||preferences.scope||'personal');
  const project=select('project_id',[['','Seleziona un progetto'],...S.projects.map(p=>[String(p.id),p.title])],String(t?.project_id||preferences.project_id||''));
- const courses=checkboxes('Corsi di Studio interessati (selezione multipla)',NextDoWorkspace.scopedCourses().filter(c=>c.active).map(c=>[c.id,c.code+' — '+c.name]),(t?.courses||[]).map(c=>c.id));
- const courseWrap=el('div',{class:'full'},[courses.outer]);
+ // Keep existing assigned CdS visible to task editors, even when their account
+ // may not manage those recipients. The server also checks recipient permissions.
+ const currentRecipientIds=(t?.courses||[]).map(c=>c.id);
+ const allowedCourses=S.courses.filter(c=>c.active&&(S.me.role==='admin'||S.myCourseIds.includes(c.id)||currentRecipientIds.includes(c.id)));
+ const courses=checkboxes('CdS destinatari (selezione multipla)',allowedCourses.map(c=>[c.id,c.code+' — '+c.name]),currentRecipientIds);
+ const recipientHelp=node('p','sub','');
+ const courseWrap=el('div',{class:'full'},[courses.outer,recipientHelp]);
  const projectWrap=el('div',{class:'full'},[field('Progetto',project)]);
  const groupWrap=el('div',{class:'full'},[field('Gruppo di condivisione',grp)]);
  const displayWrap=el('label',{class:'full'},[display,' Pubblica esplicitamente su NextDo Display (solo attività di gruppo)']);
  const modeWrap=el('div',{class:'full'},[field('Modalità di completamento',mode)]);
  function updateScope(){
-  courseWrap.hidden=scope.value!=='cds';
-  projectWrap.hidden=scope.value!=='project';
+  const projectMode=scope.value==='project';
+  const courseMode=scope.value==='cds';
+  courseWrap.hidden=!(courseMode||projectMode);
+  projectWrap.hidden=!projectMode;
   groupWrap.hidden=scope.value!=='group';
   displayWrap.hidden=scope.value!=='group';
   modeWrap.hidden=!['cds','common','group'].includes(scope.value);
+  const activeProject=S.projects.find(p=>p.id===Number(project.value));
+  const canChoose=!!activeProject?.can_edit;
+  for(const cb of courseWrap.querySelectorAll('input[type=checkbox]')){
+   const id=Number(cb.value);
+   const inProject=activeProject?.scope!=='cds'||(activeProject.course_ids||[]).includes(id);
+   const owns=S.me.role==='admin'||S.myCourseIds.includes(id);
+   cb.disabled=projectMode?(!canChoose||!inProject||!owns):(!owns);
+   if(projectMode&&activeProject?.scope==='cds'&&!inProject&&!editing)cb.checked=false;
+  }
+  recipientHelp.textContent=projectMode
+   ?'Ogni CdS selezionato genererà una riga autonoma in Microsoft Lists, con stato aggiornabile indipendentemente dagli altri. Senza destinatari, l’attività sarà esportata una volta sola. Solo il responsabile del progetto può cambiare i destinatari.'
+   :'Seleziona i CdS coinvolti nell’attività.';
  }
  scope.addEventListener('change',updateScope);
+ project.addEventListener('change',updateScope);
  form.append(field('Titolo *',title),field('Tipologia',type),el('div',{class:'full'},[field('Descrizione / nota',desc)]),field('Priorità',pr),field('Stato',st),field('Inizio previsto (facoltativo)',start),field('Data e ora scadenza',due),field('Ricorrenza',rec),field('Ambito / visibilità',scope),courseWrap,projectWrap,groupWrap,field('Responsabile',assigned),modeWrap,field('Etichette (separate da virgola)',labels),field('Promemoria in minuti prima della scadenza',reminders),displayWrap);
  updateScope();
  if(t?.completion_mode==='per_course'&&t.courses.length){
@@ -200,7 +220,10 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
    group_id:scope.value==='group'&&grp.value?Number(grp.value):null,assigned_to:scope.value==='personal'?null:assigned.value?Number(assigned.value):null,
    completion_mode:modeWrap.hidden?'global':mode.value,display_enabled:scope.value==='group'&&display.checked,scope:scope.value,project_id:scope.value==='project'&&project.value?Number(project.value):null,
    labels:labels.value.split(',').map(x=>x.trim()).filter(Boolean),
-   course_ids:scope.value==='cds'?courses.selected():[],reminders:mins
+   course_ids:scope.value==='cds'?courses.selected():
+    scope.value==='project'?((S.projects.find(p=>p.id===Number(project.value))?.can_edit)
+      ?courses.selected():(t?.scope==='project'&&t?.project_id===Number(project.value)?currentRecipientIds:[])):[],
+   reminders:mins
   };
   try{
    if(currentId){await api('/tasks/'+currentId,{method:'PUT',body:JSON.stringify(data)})}
