@@ -8,29 +8,113 @@ const NextDoWorkspace=(()=>{
  function taskScopeOptions(){return Object.entries(scopes).map(([k,v])=>[k,k==='common'&&S.me.role!=='admin'?v+' (sola lettura)':v])}
  function scopedCourses(){return S.me.role==='admin'?S.courses:S.courses.filter(x=>S.myCourseIds.includes(x.id))}
  function projectLabel(p){return projectScopes[p.scope]||p.scope}
+ const projectListFilters={text:'',phase:'active',course:'',manager:''};
+ function projectCourseIds(p){
+  return [...new Set([...(p.course_ids||[]),...(p.responsibilities||[]).map(x=>x.course_id)])];
+ }
  function projectView(main){
-  const tools=el('div',{class:'workspace-tools'},[
-   node('p','sub','Gestisci progetti dei CdS, progetti comuni e progetti indipendenti.'),
-   opt('+ Nuovo progetto',()=>projectForm(),'primary')
-  ]);
-  main.append(tools);
-  const projects=el('div',{class:'project-grid'});
-  for(const p of S.projects){
-   const n=Object.values(p.counts||{}).reduce((a,b)=>a+b,0);
-   const done=p.counts?.done||0;
-   const linkedIds=(p.responsibilities||[]).length?Array.from(new Set(p.responsibilities.map(a=>a.course_id))):(p.course_ids||[]);
-    const courseNames=linkedIds.map(id=>S.courses.find(c=>c.id===id)?.code).filter(Boolean).join(', ');
-   projects.append(el('button',{type:'button',class:'project-tile '+(S.selectedProject===p.id?'selected':''),onclick:()=>{S.selectedProject=p.id;render()}},[
-    node('strong','',p.title),tag(projectLabel(p.scope)),node('span','muted',courseNames||'Nessun CdS associato'),
-    node('span','project-progress',n?done+' / '+n+' attività completate':'Nessuna attività'),
-    el('span',{class:'project-bar'},[el('i',{style:'width:'+(n?done/n*100:0)+'%'})])
+  const current=S.projects.find(p=>p.id===S.selectedProject);
+  if(!current){
+   // Overview is the landing page; never expand the first project implicitly.
+   S.selectedProject=null;
+   const tools=el('div',{class:'workspace-tools'},[
+    node('p','sub','Tutti i progetti in una vista compatta. Aprine uno per visualizzare Kanban o Gantt.'),
+    opt('+ Nuovo progetto',()=>projectForm(),'primary')
+   ]);
+   main.append(tools);
+   const filters=el('section',{class:'project-list-filters','aria-label':'Filtri dei progetti'});
+   const phases=el('div',{class:'project-list-tabs'});
+   const phaseButtons=[];
+   const search=input('project-search','Cerca un progetto...',projectListFilters.text);
+   search.setAttribute('aria-label','Cerca progetti');
+   search.setAttribute('autocomplete','off');
+   const availableIds=new Set(S.projects.flatMap(p=>projectCourseIds(p)));
+   const courseOptions=[['','Tutti i CdS'],...S.courses.filter(c=>availableIds.has(c.id))
+    .sort((a,b)=>a.code.localeCompare(b.code,'it')).map(c=>[String(c.id),c.code+' — '+c.name])];
+   const course=select('project-course-filter',courseOptions,projectListFilters.course);
+   course.setAttribute('aria-label','Filtra per CdS');
+   const managerIds=new Set(S.projects.map(p=>p.manager_id||p.owner_id).filter(Boolean));
+   const managerOptions=[['','Tutti i responsabili'],...S.users.filter(u=>managerIds.has(u.id))
+    .sort((a,b)=>a.display_name.localeCompare(b.display_name,'it'))
+    .map(u=>[String(u.id),u.display_name])];
+   const manager=select('project-manager-filter',managerOptions,projectListFilters.manager);
+   manager.setAttribute('aria-label','Filtra per responsabile');
+   filters.append(phases,el('div',{class:'project-list-filter-fields'},[
+    field('Ricerca',search),field('CdS',course),field('Responsabile',manager)
    ]));
+   main.append(filters);
+   const count=node('p','sub project-list-count','');
+   const results=el('div',{class:'project-list-results'});
+   main.append(count,results);
+   function showProjects(){
+    results.replaceChildren();
+    for(const [phase,button] of phaseButtons){
+     button.classList.toggle('active',phase===projectListFilters.phase);
+     button.setAttribute('aria-pressed',String(phase===projectListFilters.phase));
+    }
+    const query=projectListFilters.text.toLocaleLowerCase('it').trim();
+    const list=S.projects.filter(p=>{
+     if(projectListFilters.phase==='active'&&p.status==='done')return false;
+     if(projectListFilters.phase==='done'&&p.status!=='done')return false;
+     const cids=projectCourseIds(p);
+     if(projectListFilters.course&&p.scope!=='common'&&!cids.includes(Number(projectListFilters.course)))return false;
+     if(projectListFilters.manager&&String(p.manager_id||p.owner_id)!==projectListFilters.manager)return false;
+     if(query){
+      const codes=cids.map(cid=>S.courses.find(c=>c.id===cid)?.code||'');
+      const responsible=S.users.find(u=>u.id===(p.manager_id||p.owner_id))?.display_name||'';
+      if(![p.title,projectLabel(p),responsible,...codes].join(' ').toLocaleLowerCase('it').includes(query))return false;
+     }
+     return true;
+    });
+    count.textContent=list.length+' '+(list.length===1?'progetto':'progetti')+' visualizzati';
+    if(!list.length){
+     results.append(node('div','empty',S.projects.length?
+      'Nessun progetto corrisponde ai filtri selezionati.':'Nessun progetto presente. Crea il primo progetto.'));
+     return;
+    }
+    for(const p of list){
+     const n=Object.values(p.counts||{}).reduce((a,b)=>a+b,0),done=p.counts?.done||0;
+     const pct=n?Math.round(done/n*100):0;
+     const codes=projectCourseIds(p).map(cid=>S.courses.find(c=>c.id===cid)?.code)
+      .filter(Boolean).join(', ');
+     const coursesLabel=codes||(p.scope==='common'?'Tutti i CdS':
+      p.scope==='independent'?'Indipendente dai CdS':'Nessun CdS associato');
+     const responsible=S.users.find(u=>u.id===(p.manager_id||p.owner_id))?.display_name;
+     const meta=[projectLabel(p.scope),coursesLabel, ...(responsible?['Responsabile: '+responsible]:[])];
+     const summary=el('div',{class:'project-list-main'},[
+      node('strong','project-list-title',p.title),
+      node('span','project-list-meta',meta.join(' · '))
+     ]);
+     const figures=el('div',{class:'project-list-figures'},[
+      tag(statuses[p.status]||p.status,p.status),
+      node('span','project-progress',n?done+' / '+n+' attività completate':'Nessuna attività')
+     ]);
+     const progress=el('div',{class:'project-list-progress'},[
+      el('span',{class:'project-list-percent',text:pct+'%'}),
+      el('span',{class:'project-bar'},[el('i',{style:'width:'+pct+'%'})])
+     ]);
+     const row=el('button',{type:'button',class:'project-list-row',
+      'aria-label':'Apri progetto: '+p.title,
+      onclick:()=>{S.selectedProject=p.id;render()}},[
+       summary,figures,progress,node('span','project-list-chevron','›')
+      ]);
+     results.append(row);
+    }
+   }
+   for(const [phase,label] of [['active','Attivi'],['done','Completati'],['all','Tutti']]){
+    const button=opt(label,()=>{projectListFilters.phase=phase;showProjects()},'small');
+    phaseButtons.push([phase,button]);phases.append(button);
+   }
+   search.addEventListener('input',()=>{projectListFilters.text=search.value;showProjects()});
+   course.addEventListener('change',()=>{projectListFilters.course=course.value;showProjects()});
+   manager.addEventListener('change',()=>{projectListFilters.manager=manager.value;showProjects()});
+   showProjects();
+   return;
   }
-  if(!S.projects.length)projects.append(node('div','empty','Nessun progetto. Crea il primo progetto in pochi passaggi.'));
-  main.append(projects);
-  const current=S.projects.find(p=>p.id===S.selectedProject)||S.projects[0];
-  if(!current)return;
-  S.selectedProject=current.id;
+  main.append(el('div',{class:'project-detail-nav'},[
+   opt('← Torna ai progetti',()=>{S.selectedProject=null;render()},'small'),
+   node('span','sub','Dettaglio progetto · '+projectLabel(current))
+  ]));
   const panel=el('section',{class:'card project-board'});
   const heading=el('div',{class:'card-head'},[
    node('h2','',current.title),

@@ -45,6 +45,11 @@ def main():
    'title':'Synthetic team project','scope':'independent',
    'member_ids':[ids['alice'],ids['bob']]}))
   pid=project['id']
+  course_id=check(client.post('/api/courses',headers=headers,json={
+   'code':'MZ01','name':'Synthetic course','active':True}))['id']
+  check(client.post('/api/projects',headers=headers,json={
+   'title':'Synthetic course project','scope':'cds',
+   'course_ids':[course_id],'member_ids':[ids['alice']]}))
   unassigned=check(client.post('/api/tasks',headers=headers,json={
    'title':'Unassigned drag test','kind':'task','scope':'project','project_id':pid}))
   assigned=check(client.post('/api/tasks',headers=headers,json={
@@ -76,6 +81,24 @@ def main():
      page.get_by_role('button',name='Accedi').click()
      page.get_by_role('button',name='Progetti',exact=True).wait_for()
      page.get_by_role('button',name='Progetti',exact=True).click()
+     assert page.locator('.project-list-row').count()==2,'Two projects must fit in the compact index'
+     assert page.locator('.kanban-board').count()==0,'Kanban must open only within a project'
+     page.get_by_label('Cerca progetti').fill('Synthetic team project')
+     assert page.locator('.project-list-row').count()==1
+     page.get_by_label('Cerca progetti').fill('')
+     page.get_by_label('Filtra per CdS').select_option(str(course_id))
+     assert page.locator('.project-list-row').count()==1
+     assert 'Synthetic course project' in page.locator('.project-list-row').inner_text()
+     page.get_by_label('Filtra per CdS').select_option('')
+     page.get_by_role('button',name='Completati',exact=True).click()
+     assert page.locator('.project-list-row').count()==0
+     page.get_by_role('button',name='Attivi',exact=True).click()
+     page.locator('.project-list-row',has_text='Synthetic team project').click()
+     assert page.locator('.kanban-board').count()==1
+     page.get_by_role('button',name='Torna ai progetti').click()
+     assert page.locator('.project-list-row').count()==2
+     assert page.locator('.kanban-board').count()==0
+     page.locator('.project-list-row',has_text='Synthetic team project').click()
      card=page.locator('.kanban-task',has_text='Unassigned drag test')
      card.wait_for(timeout=10000)
      assert card.get_attribute('draggable')=='true','Team member must be able to drag unassigned card'

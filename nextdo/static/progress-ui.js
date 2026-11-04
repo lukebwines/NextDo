@@ -48,7 +48,7 @@ const NextDoProgress=(()=>{
     const h=el('div',{class:'dashboard-project-header'},[
      node('h4','',p.title),
      node('span','muted',count?done+' / '+count+' completate':'Nessuna attività'),
-     btn('Apri Kanban',()=>{S.selectedProject=p.id;S.projectMode='kanban';changeView('projects')},'small')
+     btn('Apri Kanban',()=>{S.projectMode='kanban';changeView('projects','all','',p.id)},'small')
     ]);
     wrap.append(h);
     wrap.append(NextDoGantt.render(p));

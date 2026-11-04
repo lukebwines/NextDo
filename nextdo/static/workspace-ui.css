@@ -56,3 +56,28 @@
 .kanban-status-select:focus-visible{outline:2px solid #59a5fa;outline-offset:2px}
 .kanban-over{outline:2px dashed #4d9fff;outline-offset:-2px}
 @media(max-width:700px){.kanban-card-tools{flex-wrap:wrap}.kanban-status-select{min-width:120px;flex:1}}
+
+
+/* 0.1.17-test: compact two-level project navigation. */
+.project-list-filters{display:grid;gap:12px;padding:15px;background:var(--panel);border:1px solid var(--stroke);border-radius:13px;margin-bottom:12px}
+.project-list-tabs{display:flex;flex-wrap:wrap;gap:7px}
+.project-list-tabs .btn.active{background:var(--blue);border-color:var(--blue);color:#06182c}
+.project-list-filter-fields{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(150px,1fr) minmax(150px,1fr);gap:12px}
+.project-list-filter-fields .label{margin-bottom:6px}
+.project-list-count{margin:0 0 9px}
+.project-list-results{display:grid;gap:9px;margin-bottom:20px}
+.project-list-row{display:grid;grid-template-columns:minmax(160px,1.8fr) minmax(145px,.9fr) minmax(120px,.8fr) 16px;align-items:center;gap:14px;width:100%;min-height:82px;padding:13px 17px;text-align:left;color:var(--ink);background:var(--panel);border:1px solid var(--stroke);border-radius:12px;cursor:pointer;transition:border-color .16s,background .16s}
+.project-list-row:hover,.project-list-row:focus-visible{border-color:var(--blue);background:var(--panel2)}
+.project-list-row:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.project-list-main{display:grid;min-width:0;gap:3px}
+.project-list-title{font-size:14px;overflow-wrap:anywhere}
+.project-list-meta{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.project-list-figures{display:flex;align-items:flex-start;flex-direction:column;gap:4px}
+.project-list-figures .pill{margin:0}
+.project-list-progress{display:grid;grid-template-columns:auto minmax(80px,1fr);gap:11px;align-items:center}
+.project-list-percent{font-size:15px;font-weight:700;min-width:38px}
+.project-list-row .project-bar{width:100%}
+.project-list-chevron{font-size:24px;line-height:1;text-align:center;color:var(--muted)}
+.project-detail-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+@media(max-width:950px){.project-list-row{grid-template-columns:minmax(0,1.6fr) minmax(130px,1fr) 16px}.project-list-progress{grid-column:1/3;grid-row:2;max-width:380px}.project-list-chevron{grid-column:3;grid-row:1/3}}
+@media(max-width:650px){.project-list-filter-fields{grid-template-columns:1fr}.project-list-row{grid-template-columns:minmax(0,1fr) 16px;gap:9px;padding:12px}.project-list-main{grid-column:1}.project-list-figures{grid-column:1;flex-direction:row;align-items:center;flex-wrap:wrap}.project-list-progress{grid-column:1;grid-row:auto;max-width:none}.project-list-chevron{grid-column:2;grid-row:1/4}.project-detail-nav{flex-wrap:wrap}}

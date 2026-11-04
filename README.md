@@ -1,5 +1,7 @@
 # NextDo — Home Assistant add-on
 
+**Versione candidata: 0.1.17-test.** Vista Progetti compatta, ricerca e filtri per CdS/responsabile, dettaglio Kanban/Gantt separato. Nessuna modifica al database.
+
 **Versione candidata: 0.1.15-test.** Precompila mediante spunte i CdS gestiti abitualmente da ogni collega nel modulo progetto, lasciando indipendenti le assegnazioni salvate per ciascun progetto.
 
 **Versione precedente: 0.1.14-test.** Permette di assegnare i colleghi a uno o più CdS direttamente nel progetto e genera automaticamente le righe di avanzamento per ciascun CdS nell'esportazione JSON.
@@ -220,3 +222,12 @@ In **Progetti → Nuovo progetto** scegliere l'ambito **Uno o più CdS** e selez
 La sezione **Modifica assegnazioni per questo progetto (facoltativo)** permette eccezioni specifiche: aggiungere o togliere colleghi e CdS senza modificare l'anagrafica generale. Deselezionando un CdS vengono rimosse dalle assegnazioni del progetto le spunte relative a quel corso, senza cancellare i dati dell'anagrafica. Riattivando un CdS vengono riproposti i suoi responsabili generali.
 
 **Tutela dei progetti esistenti:** aprendo un progetto NextDo visualizza la sua fotografia salvata, senza riscriverla quando cambiano le associazioni generali. Le proposte automatiche intervengono soltanto quando un CdS viene aggiunto alla selezione del progetto. Non sono state modificate le tabelle del database né la sincronizzazione Microsoft Lists: rimane l'esportazione manuale in JSON.
+
+
+## NextDo 0.1.17-test — Progetti in due livelli
+
+La pagina **Progetti** mostra come impostazione iniziale un elenco compatto, senza renderizzare sotto di esso il Kanban del primo progetto. Ogni riga riporta titolo, ambito, CdS collegati, responsabile (se disponibile), stato, numero di attività completate e avanzamento. I filtri locali comprendono **Attivi / Completati / Tutti**, ricerca per titolo/ambito/CdS/responsabile, selezione del singolo CdS e del responsabile.
+
+Selezionando una riga si apre **il solo progetto scelto**, con tutte le funzioni precedenti: responsabilità per CdS, esportazione JSON per Lists, modifica, nuove attività, Kanban e Gantt. **← Torna ai progetti** ritorna all'elenco. Anche la navigazione laterale su **Progetti** apre l'elenco, mentre **Apri Kanban** dalla Dashboard continua ad aprire direttamente il progetto corretto.
+
+L'implementazione è soltanto lato interfaccia: non esegue migrazioni SQL, non modifica le assegnazioni e non cancella attività. Gli elenchi/filtri sono limitati ai progetti che l'API dell'utente autorizzato restituisce. La pubblicazione su GitHub non aggiorna automaticamente l'app Home Assistant; usare **Aggiorna** senza disinstallarla e provare il funzionamento con utenti di test.
