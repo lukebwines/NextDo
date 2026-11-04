@@ -1,6 +1,8 @@
 # NextDo — Home Assistant add-on
 
-**Versione candidata: 0.1.13-test.** Esporta ogni progetto NextDo in JSON, con identificativi stabili delle attività e un nome file nuovo a ogni download, compatibile con il flusso Power Automate testato.
+**Versione candidata: 0.1.14-test.** Permette di scegliere i CdS destinatari direttamente in ciascuna attività di progetto ed esporta una riga indipendente per ogni coppia attività–CdS verso Microsoft Lists.
+
+**Versione precedente: 0.1.13-test.** Esporta ogni progetto NextDo in JSON, con identificativi stabili delle attività e un nome file nuovo a ogni download, compatibile con il flusso Power Automate testato.
 
 **Versione precedente: 0.1.12-test.** Avvia un collegamento Microsoft Lists di prova in sola lettura, con autorizzazione delegata temporanea e identificazione degli elenchi SharePoint. Non modifica né pubblica alcun dato sul tenant Microsoft 365.
 
@@ -179,3 +181,18 @@ Il JSON usa lo schema già verificato con il flusso Power Automate: `schema_vers
 **Minimizzazione dei dati:** il file contiene titoli dei progetti e delle attività, stato e scadenza. Non esporta descrizioni, note di avanzamento, dati degli utenti o allegati. Controllare i titoli prima di caricarli sul sito istituzionale. Non esportare attività con contenuti riservati o personali senza autorizzazione.
 
 **Limiti attuali:** l'integrazione è **a senso unico** e richiede l'upload manuale del JSON. Il flusso Microsoft Lists sperimentale crea solo i campi **Titolo** e **NextDoID**, e salta completamente gli elementi esistenti; non aggiorna in SharePoint gli stati, i titoli e le scadenze di attività già importate. Non recupera ancora gli stati aggiornati dai colleghi in NextDo. Nessun collegamento con l'API Microsoft viene effettuato dal pulsante di esportazione. Per una vera sincronizzazione bidirezionale serve una fase ulteriore con autorizzazioni appropriate e regole di ownership dei campi.
+
+
+## Destinatari CdS per attività di progetto (0.1.14-test)
+
+In **Progetti → Attività → Modifica/Nuova attività**, con ambito **Progetto**, la sezione **CdS destinatari** permette di selezionare uno o più corsi. I CdS e le relative denominazioni provengono solo dall'anagrafica locale di NextDo: non sono precaricati dati d'Ateneo. Per i progetti con ambito *Uno o più CdS* la selezione è limitata ai CdS già collegati al progetto. Solo gli amministratori o i responsabili del progetto possono modificare i destinatari. I colleghi possono modificare le attività di competenza senza cambiare le assegnazioni.
+
+Ogni esportazione JSON tramite **Esporta JSON per Lists** contiene per ciascuna attività:
+- **Nessun CdS selezionato:** una sola voce con ID originario `NEXTDO-T{task_id}`, conservando la compatibilità con gli elementi già importati.
+- **Uno o più CdS:** una voce distinta per ciascun corso, con ID stabile `NEXTDO-T{task_id}-C{course_id}` e campi aggiuntivi `course_code`, `course_name` e `project_title`. Titolo originale, stato e scadenza rimangono presenti; descrizioni, note, allegati e nominativi non vengono esportati.
+
+Per esempio, una singola attività per due CdS genera due voci indipendenti. Il flusso Power Automate già configurato tramite `NextDoID` riconosce ciascuna voce e salta quelle esistenti, senza sovrascriverne titolo, avanzamenti o note.
+
+**Configurazione SharePoint da completare prima di caricare il nuovo JSON:** aggiungere alla lista `test` almeno una colonna testuale **CdS** e una colonna testuale **Progetto** e configurare nel passaggio **Crea elemento** di Power Automate le espressioni `item()?['course_name']` e `item()?['project_title']`. Il parse JSON attuale accetta campi extra, ma finché il flusso non viene modificato, le colonne CdS e Progetto rimangono vuote. I responsabili dei singoli CdS e le visualizzazioni filtrate su Microsoft 365 devono ancora essere configurati.
+
+**Limiti di sincronizzazione:** la fase attuale esporta solo da NextDo a Lists tramite upload manuale. Le modifiche di stato effettuate in Lists non tornano automaticamente a NextDo; gli eventuali indicatori di completamento CdS su NextDo non sono ancora sincronizzati. In caso di modifica o rimozione dei CdS destinatari dopo una precedente importazione, il flusso attuale **non cancella** le righe già presenti in Lists. Se a una vecchia attività già importata senza CdS vengono successivamente aggiunti destinatari, la vecchia riga generale rimane nell'elenco e deve essere gestita manualmente durante il collaudo. Non eseguire prove di autorizzazione su dati reali dell'Ateneo.
