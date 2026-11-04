@@ -37,7 +37,9 @@ const NextDoGantt=(()=>{
    el('span',{},[el('i',{class:'gantt-key gantt-key--doing'}),' In corso']),
    el('span',{},[el('i',{class:'gantt-key gantt-key--waiting'}),' In attesa']),
    el('span',{},[el('i',{class:'gantt-key gantt-key--done'}),' Completata']),
-   el('span',{},[el('i',{class:'gantt-key gantt-key--milestone'}),' Scadenza puntuale'])
+   el('span',{},[el('i',{class:'gantt-key gantt-key--milestone'}),' Scadenza puntuale']),
+   el('span',{},[el('i',{class:'gantt-key gantt-key--today'}),' Oggi']),
+   el('span',{},[el('i',{class:'gantt-key gantt-key--deadline'}),' Termine progetto'])
   ]);
  }
  function draw(project){
@@ -62,6 +64,12 @@ const NextDoGantt=(()=>{
   const min=Math.min(...dates),max=Math.max(...dates);
   const leftBound=monday(min-7),rightBound=Math.max(leftBound+35,max+10);
   const days=rightBound-leftBound+1;
+  if(days>3653){
+   section.append(node('p','empty','Il progetto contiene date distanti più di 10 anni: verifica le schede o utilizza la vista Kanban per correggerle. Non sono state modificate le attività.'));
+   for(const {task:t} of planned)section.append(el('button',{type:'button',class:'gantt-open-task',onclick:()=>taskForm(t)},[t.title+' — '+(t.due_at?fmt(t.due_at):'Fine da definire')]));
+   if(unplanned.length)addUnplanned();
+   return section;
+  }
   const widthPerDay={overview:8,normal:14,detail:24}[S.ganttZoom]||14;
   const width=days*widthPerDay;
   const today=utcDay(new Date().toISOString());
