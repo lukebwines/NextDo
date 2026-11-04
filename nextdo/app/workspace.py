@@ -89,6 +89,13 @@ def upgrade(db_path:Path,data_path:Path):
       note TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE INDEX IF NOT EXISTS idx_task_progress_task ON task_progress(task_id,id);
+    CREATE TABLE IF NOT EXISTS external_course_progress (
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK(status IN ('todo','doing','waiting','done')),
+      updated_at TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'Microsoft Lists',
+      PRIMARY KEY(task_id,course_id));
+    CREATE INDEX IF NOT EXISTS idx_external_progress_course ON external_course_progress(course_id,task_id);
    """)
    if 'featured' not in project_columns:
     db.execute('ALTER TABLE projects ADD COLUMN featured INTEGER NOT NULL DEFAULT 1')
