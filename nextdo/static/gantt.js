@@ -192,11 +192,39 @@ const NextDoGantt=(()=>{
   function addUnplanned(){
    const summary=el('details',{class:'gantt-unplanned',open:!planned.length});
    summary.append(el('summary',{},['Da pianificare ('+unplanned.length+')']));
-   for(const t of unplanned)summary.append(el('div',{class:'gantt-unplanned-row'},[
-    el('button',{type:'button',class:'gantt-open-task',onclick:()=>taskForm(t)},[t.title]),
-    node('span','muted',statuses[t.status]||t.status),
-    el('button',{type:'button',class:'btn small',onclick:()=>taskForm(t)},['Inserisci date'])
-   ]));
+   for(const t of unplanned){
+    const row=el('div',{class:'gantt-unplanned-row'},[
+     el('button',{type:'button',class:'gantt-open-task',onclick:()=>taskForm(t)},[t.title]),
+     node('span','muted',statuses[t.status]||t.status),
+     el('button',{type:'button',class:'btn small',onclick:()=>taskForm(t)},['Inserisci date'])
+    ]);
+    if(courseIds.length){
+     const detail=el('details',{class:'gantt-unplanned-task'});
+     detail.append(el('summary',{},['Dettaglio CdS e collaboratori — '+t.title]));
+     const external=new Map((t.external_progress||[]).map(x=>[x.course_id,x]));
+     const own=new Map(t.completion_mode==='per_course'?(t.courses||[]).map(x=>[x.id,x]):[]);
+     for(const cid of courseIds){
+      const course=S.courses.find(x=>x.id===cid);
+      if(!course)continue;
+      const names=(project.responsibilities||[]).filter(x=>x.course_id===cid)
+       .map(x=>S.users.find(u=>u.id===x.user_id)?.display_name||'Utente da verificare');
+      for(const x of (project.collaborator_responsibilities||[]).filter(x=>x.course_id===cid)){
+       const col=(S.collaborators||[]).find(p=>p.id===x.collaborator_id);
+       names.push((col?.display_name||'Collaboratore da verificare')+' (Lists)');
+      }
+      const remote=external.get(cid),local=own.get(cid);
+      const state=remote?.status||(local?(local.done?'done':'todo'):null);
+      detail.append(el('div',{class:'gantt-unplanned-row'},[
+       node('strong','',course.code+' — '+course.name),
+       node('span','muted',(names.length?names.join(', '):'Responsabile da verificare')+' · '+
+        (state?statuses[state]||state:'Non sincronizzato')+' · '+
+        (remote?'Microsoft Lists · '+fmt(remote.updated_at):local?'NextDo':'Fonte non disponibile'))
+      ]));
+     }
+     row.append(detail);
+    }
+    summary.append(row);
+   }
    section.append(summary);
   }
  }
