@@ -140,6 +140,16 @@ def _site_details(config,token):
  return site
 
 
+class MicrosoftConfig(BaseModel):
+ tenant_id:str=Field(min_length=1,max_length=80)
+ client_id:str=Field(min_length=1,max_length=80)
+ site_url:str=Field(min_length=1,max_length=1024)
+
+
+class MicrosoftListSelection(BaseModel):
+ list_id:str=Field(min_length=1,max_length=128)
+
+
 def register_routes(app, *, user, csrf, data_path):
  def admin(req):
   current=user(req)
@@ -153,14 +163,6 @@ def register_routes(app, *, user, csrf, data_path):
    reject("Sessione Microsoft assente o scaduta. Collega nuovamente l'account.",401)
   return token["token"]
 
- class Config(BaseModel):
-  tenant_id:str=Field(min_length=1,max_length=80)
-  client_id:str=Field(min_length=1,max_length=80)
-  site_url:str=Field(min_length=1,max_length=1024)
-
- class SelectList(BaseModel):
-  list_id:str=Field(min_length=1,max_length=128)
-
  @app.get("/api/microsoft/config")
  def current_config(req:Request):
   u=admin(req)
@@ -170,7 +172,7 @@ def register_routes(app, *, user, csrf, data_path):
     "mode":"read_only_pilot","uses_saved_tokens":False}
 
  @app.post("/api/microsoft/config")
- def set_config(b:Config,req:Request):
+ def set_config(b:MicrosoftConfig,req:Request):
   u=admin(req);csrf(req)
   validated=validate_settings(b)
   save_settings(data_path,validated)
@@ -240,7 +242,7 @@ def register_routes(app, *, user, csrf, data_path):
     for x in lists if x.get("id") and x.get("list") is not None]}
 
  @app.post("/api/microsoft/list/select")
- def choose_list(b:SelectList,req:Request):
+ def choose_list(b:MicrosoftListSelection,req:Request):
   u=admin(req);csrf(req)
   config=read_settings(data_path)
   token=active_token(u["id"])
