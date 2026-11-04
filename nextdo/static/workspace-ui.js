@@ -10,7 +10,7 @@ const NextDoWorkspace=(()=>{
  function projectLabel(p){return projectScopes[p.scope]||p.scope}
  const projectListFilters={text:'',phase:'active',course:'',manager:''};
  function projectCourseIds(p){
-  return [...new Set([...(p.course_ids||[]),...(p.responsibilities||[]).map(x=>x.course_id)])];
+  return [...new Set([...(p.course_ids||[]),...(p.responsibilities||[]).map(x=>x.course_id),...(p.collaborator_responsibilities||[]).map(x=>x.course_id)])];
  }
  function projectView(main){
   const current=S.projects.find(p=>p.id===S.selectedProject);
@@ -382,6 +382,52 @@ const NextDoWorkspace=(()=>{
    node('p','sub','Le modifiche qui effettuate non cambiano le associazioni generali in Corsi di Studio. I progetti già salvati mantengono le proprie assegnazioni.')
   );
   responsibilities.append(advanced);
+  const collaboratorPanel=el('div',{class:'full project-responsibilities'});
+  collaboratorPanel.append(node('h3','','Collaboratori solo Microsoft Lists'),
+   node('p','sub','Questi colleghi non hanno password NextDo. Per ogni progetto seleziona solo i CdS pertinenti; le modifiche non cambiano le associazioni predefinite.'));
+  const collabRows=el('div',{class:'project-responsibility-rows'});
+  const collabGroups=[];
+  const collabOptions=[['','Seleziona collaboratore Lists'],...(S.collaborators||[]).filter(x=>x.active).map(x=>[String(x.id),x.display_name+(x.linked_user_id?' · Accesso NextDo abilitato':'')])];
+  function appendCollaborator(collaboratorId='',selectedCourses=null){
+   const group=el('section',{class:'project-colleague-group'});
+   const name=select('responsibility_collaborator',collabOptions,String(collaboratorId||''));
+   const checks=el('div',{class:'project-course-checklist'});
+   const remove=opt('Rimuovi collaboratore',()=>group.remove(),'small');
+   const head=el('div',{class:'project-colleague-header'},[field('Collaboratore',name),remove]);
+   group.append(head,checks);
+   const defaults=cid=>S.courseCollaborators.filter(a=>a.collaborator_id===Number(cid)).map(a=>a.course_id)
+    .filter(cid=>scope.value!=='cds'||courseBox.selected().includes(cid));
+   function draw(ids){
+    checks.replaceChildren();
+    for(const c of activeCourses){
+     const check=el('input',{type:'checkbox',name:'collaborator_course',value:String(c.id),checked:ids.includes(c.id)});
+     checks.append(el('label',{class:'project-course-option'},[check,node('span','',c.code+' — '+c.name)]));
+    }
+    updateAllowed();
+   }
+   function updateAllowed(){
+    const allowed=new Set(courseBox.selected());
+    for(const check of checks.querySelectorAll('input[name="collaborator_course"]')){
+     const out=scope.value==='cds'&&!allowed.has(Number(check.value));
+     check.disabled=out&&!check.checked;
+    }
+   }
+   name.addEventListener('change',()=>draw(defaults(name.value)));
+   draw(selectedCourses===null?defaults(collaboratorId):selectedCourses);
+   collabRows.append(group);
+   const entry={group,updateAllowed};collabGroups.push(entry);return entry;
+  }
+  const storedCollabs=new Map();
+  for(const a of p?.collaborator_responsibilities||[]){
+   if(!storedCollabs.has(a.collaborator_id))storedCollabs.set(a.collaborator_id,[]);
+   storedCollabs.get(a.collaborator_id).push(a.course_id);
+  }
+  for(const [id,ids] of storedCollabs)appendCollaborator(id,ids);
+  const collabAdvanced=el('details',{class:'project-responsibility-advanced'});
+  collabAdvanced.append(node('summary','','Assegnazioni collaboratori Lists per questo progetto'),
+   collabRows,opt('+ Aggiungi collaboratore Lists',()=>appendCollaborator(),'small'));
+  collaboratorPanel.append(collabAdvanced);
+  collaboratorPanel.hidden=S.me.role!=='admin';
   // Apply defaults only to newly selected CdS. Keep saved project assignments unchanged.
   let previousSelected=new Set(courseBox.selected());
   function syncSelectedCourses(){
@@ -389,6 +435,12 @@ const NextDoWorkspace=(()=>{
    const selected=new Set(courseBox.selected());
    for(const cid of previousSelected){
     if(selected.has(cid))continue;
+    for(const item of collabGroups){
+     if(item.group.parentNode!==collabRows)continue;
+     const check=[...item.group.querySelectorAll('input[name="collaborator_course"]')]
+      .find(el=>Number(el.value)===cid);
+     if(check)check.checked=false;
+    }
     for(const item of responsibilityGroups){
      if(item.group.parentNode!==responsibilityRows)continue;
      const check=[...item.group.querySelectorAll('input[name="responsibility_course"]')]
@@ -398,6 +450,14 @@ const NextDoWorkspace=(()=>{
    }
    for(const cid of selected){
     if(previousSelected.has(cid))continue;
+    for(const a of S.courseCollaborators.filter(a=>a.course_id===cid)){
+     let item=collabGroups.find(item=>item.group.parentNode===collabRows&&
+      Number(item.group.querySelector('select[name="responsibility_collaborator"]').value)===a.collaborator_id);
+     if(!item)item=appendCollaborator(a.collaborator_id,[]);
+     const check=[...item.group.querySelectorAll('input[name="collaborator_course"]')]
+      .find(el=>Number(el.value)===cid);
+     if(check)check.checked=true;
+    }
     for(const a of S.courseAssignees.filter(a=>a.course_id===cid)){
      let item=responsibilityGroups.find(item=>item.group.parentNode===responsibilityRows&&
       Number(item.group.querySelector('select[name="responsibility_user"]').value)===a.user_id);
@@ -414,11 +474,13 @@ const NextDoWorkspace=(()=>{
   const update=()=>{
    courseWrap.style.display=scope.value==='cds'?'':'none';
    for(const item of responsibilityGroups)item.updateAllowed();
+   for(const item of collabGroups)item.updateAllowed();
+   collaboratorPanel.hidden=S.me.role!=='admin'||scope.value==='independent';
    updateOverview();
   };
   scope.addEventListener('change',syncSelectedCourses);
   courseBox.outer.addEventListener('change',syncSelectedCourses);
-  f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,responsibilities,memberBox.outer,
+  f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,responsibilities,collaboratorPanel,memberBox.outer,
    el('label',{class:'full project-featured-option'},[featured,' Mostra Gantt nella Dashboard dei partecipanti']));
   update();
   const actions=el('div',{class:'actions full'},[opt('Annulla',()=>back.remove()),el('button',{type:'submit',class:'btn primary',text:p?'Salva progetto':'Crea progetto'})]);
@@ -440,9 +502,23 @@ const NextDoWorkspace=(()=>{
     if(assignments.some(a=>!allowed.has(a.course_id)))
      return msg('Un CdS assegnato non è incluso tra i CdS del progetto: selezionalo sopra o togli la spunta.',true);
    }
+   const collabAssignments=[],usedCollabs=new Set();
+   if(S.me.role==='admin'){
+    for(const group of collabRows.children){
+     const selected=[...group.querySelectorAll('input[name="collaborator_course"]:checked')];
+     if(!selected.length)continue;
+     const collaboratorId=Number(group.querySelector('select[name="responsibility_collaborator"]').value);
+     if(!collaboratorId)return msg('Seleziona il collaboratore Lists per le spunte presenti.',true);
+     if(usedCollabs.has(collaboratorId))return msg('Collaboratore già presente: raggruppa i suoi CdS nello stesso riquadro.',true);
+     usedCollabs.add(collaboratorId);
+     for(const check of selected)collabAssignments.push({course_id:Number(check.value),collaborator_id:collaboratorId});
+    }
+    if(scope.value==='cds'&&collabAssignments.some(a=>!courseBox.selected().includes(a.course_id)))
+     return msg('Un collaboratore è associato a un CdS escluso dal progetto.',true);
+   }
    const data={title:title.value.trim(),description:desc.value,scope:scope.value,status:status.value,featured:featured.checked,
     manager_id:manager.value?Number(manager.value):null,due_at:due.value?new Date(due.value).toISOString():null,
-    course_ids:scope.value==='cds'?courseBox.selected():[],member_ids:memberBox.selected(),responsibilities:assignments};
+    course_ids:scope.value==='cds'?courseBox.selected():[],member_ids:memberBox.selected(),responsibilities:assignments,collaborator_responsibilities:scope.value==='independent'?[]:collabAssignments};
    if(!data.title)return msg('Titolo obbligatorio',true);
    try{
     const r=await api('/projects'+(p?'/'+p.id:''),{method:p?'PUT':'POST',body:JSON.stringify(data)});
