@@ -177,9 +177,11 @@ def setup():
  return {'needs_setup':count==0}
 class Credentials(BaseModel):
  username:str=Field(min_length=3,max_length=64)
- password:str=Field(min_length=12,max_length=256)
+ # Login must accept existing passwords irrespective of the policy for new accounts.
+ password:str=Field(min_length=1,max_length=256)
  display_name:str=Field(default='',max_length=100)
 class SetupCredentials(Credentials):
+ password:str=Field(min_length=12,max_length=256)
  setup_token:str=Field(min_length=16,max_length=256)
 
 @app.post('/api/setup')
@@ -222,7 +224,9 @@ def csrf_token(req:Request):
 @app.get('/api/me')
 def me(req:Request):return user(req)
 
-class NewUser(Credentials):role:str='user'
+class NewUser(Credentials):
+ password:str=Field(min_length=8,max_length=256)
+ role:str='user'
 @app.get('/api/users')
 def users(req:Request):
  u=user(req)
@@ -232,6 +236,7 @@ def create_user(b:NewUser,req:Request):
  u=user(req);csrf(req)
  if not is_admin(u):err()
  if b.role not in ('admin','user'):err(400,'Ruolo non valido')
+ if b.role=='admin' and len(b.password)<12:err(400,'La password amministratore deve contenere almeno 12 caratteri')
  with conn() as c:
   try:r=c.execute('INSERT INTO users(username,password,display_name,role) VALUES(?,?,?,?)',(b.username.strip(),PH.hash(b.password),b.display_name.strip() or b.username,b.role))
   except sqlite3.IntegrityError:err(409,'Utente già esistente')
