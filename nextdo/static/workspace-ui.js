@@ -33,10 +33,18 @@ const NextDoWorkspace=(()=>{
   const panel=el('section',{class:'card project-board'});
   const heading=el('div',{class:'card-head'},[
    node('h2','',current.title),
-   ...(current.can_edit?[opt('Modifica progetto',()=>projectForm(current),'small')]:[]),
+   ...(current.can_edit?[
+    opt('Esporta JSON per Lists',()=>{
+     // Direct download of a single project; nothing is uploaded to SharePoint.
+     const link=el('a',{href:'api/projects/'+current.id+'/sharepoint-export',download:''});
+     document.body.append(link);link.click();link.remove();
+    },'small'),
+    opt('Modifica progetto',()=>projectForm(current),'small')
+   ]:[]),
    opt('+ Attività',()=>taskForm(null,'task',null,{scope:'project',project_id:current.id}),'primary')
   ]);
   panel.append(heading);
+  if(current.can_edit)panel.append(node('p','sub','Esporta JSON per Lists scarica soltanto gli ID, i titoli, gli stati e le scadenze delle attività del progetto. Carica il file nella cartella SharePoint NextDo_Sync. Nessun documento, descrizione o dato dei colleghi viene esportato. Gli stati eventualmente già modificati su Lists non vengono aggiornati dal flusso attuale.'));
   if(current.description)panel.append(node('p','sub',current.description));
   const viewbar=el('div',{class:'project-view-toolbar','aria-label':'Visualizzazione progetto'});
   for(const [mode,label] of [['kanban','Kanban'],['gantt','Gantt']]){
