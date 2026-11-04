@@ -179,29 +179,71 @@ const NextDoWorkspace=(()=>{
   const memberBox=checkboxes('Altri partecipanti con accesso al progetto',S.users.filter(u=>u.active&&u.id!==S.me.id).map(u=>[u.id,u.display_name]),p?.member_ids||[]);
   const responsibilities=el('div',{class:'full project-responsibilities'});
   responsibilities.append(
-   node('h3','','Responsabili dei singoli CdS'),
-   node('p','sub','Assegna uno o più CdS a ciascun collega. Ogni attività del progetto sarà disponibile per tutti i CdS qui indicati, senza selezionare nuovamente i destinatari nelle attività.')
+   node('h3','','Colleghi coinvolti'),
+   node('p','sub','Seleziona sopra i CdS tramite spunte: NextDo propone automaticamente i colleghi associati in Corsi di Studio. Puoi modificare le proposte solo per questo progetto.')
   );
+  const assignmentOverview=el('div',{class:'project-assignment-overview'});
+  responsibilities.append(assignmentOverview);
   const responsibilityRows=el('div',{class:'project-responsibility-rows'});
-  const activeCourses=S.courses.filter(c=>c.active);
+  const activeCourses=scopedCourses().filter(c=>c.active);
   const colleagueOptions=[['','Seleziona collega'],...S.users.filter(u=>u.active).map(u=>[String(u.id),u.display_name])];
-  // Global defaults suggest only; project assignments are saved separately.
   const defaultCoursesFor=uid=>S.courseAssignees
    .filter(a=>a.user_id===Number(uid)).map(a=>a.course_id);
+  const scopedDefaultsFor=uid=>defaultCoursesFor(uid)
+   .filter(cid=>scope.value!=='cds'||courseBox.selected().includes(cid));
+  function updateOverview(){
+   assignmentOverview.replaceChildren();
+   const selected=scope.value==='cds'?new Set(courseBox.selected()):null;
+   if(selected&&!selected.size){
+    assignmentOverview.append(node('p','sub','Seleziona almeno un CdS per vedere i colleghi proposti.'));
+    return;
+   }
+   const byUser=new Map(),covered=new Set();
+   for(const row of responsibilityRows.children){
+    const uid=Number(row.querySelector('select[name="responsibility_user"]').value);
+    if(!uid)continue;
+    for(const check of row.querySelectorAll('input[name="responsibility_course"]:checked')){
+     const cid=Number(check.value);
+     if(selected&&!selected.has(cid))continue;
+     if(!byUser.has(uid))byUser.set(uid,[]);
+     if(!byUser.get(uid).includes(cid))byUser.get(uid).push(cid);
+     covered.add(cid);
+    }
+   }
+   if(!byUser.size)assignmentOverview.append(node('p','sub','Nessun collega ancora associato ai CdS selezionati.'));
+   for(const [uid,cids] of byUser){
+    const person=S.users.find(u=>u.id===uid);
+    const names=cids.map(cid=>{
+     const course=S.courses.find(c=>c.id===cid);
+     return course?.code||String(cid);
+    });
+    assignmentOverview.append(el('div',{class:'project-assignment-summary-row'},[
+     node('strong','',person?.display_name||'Utente non disponibile'),
+     node('span','sub',names.join(', '))
+    ]));
+   }
+   if(selected){
+    const missing=[...selected].filter(cid=>!covered.has(cid));
+    if(missing.length){
+     const names=missing.map(cid=>S.courses.find(c=>c.id===cid)?.code||String(cid));
+     assignmentOverview.append(node('p','project-assignment-warning',
+      'Nessun collega predefinito per: '+names.join(', ')+'. Puoi indicarlo in “Modifica assegnazioni”.'));
+    }
+   }
+  }
   function addResponsibilityGroup(userId='',savedCourses=null){
    const group=el('section',{class:'project-colleague-group'});
    const head=el('div',{class:'project-colleague-header'});
    const colleague=select('responsibility_user',colleagueOptions,String(userId||''));
    const checks=el('div',{class:'project-course-checklist'});
    const hint=node('p','sub','');
-   const reset=opt('Ripristina predefiniti',()=>drawChecks(defaultCoursesFor(colleague.value)),'small');
-   const remove=opt('Rimuovi collega',()=>group.remove(),'small');
+   const reset=opt('Ripristina predefiniti',()=>{drawChecks(scopedDefaultsFor(colleague.value));updateOverview()},'small');
+   const remove=opt('Rimuovi collega',()=>{group.remove();updateOverview()},'small');
    head.append(field('Collega responsabile',colleague),reset,remove);
    group.append(head,checks,hint);
    function updateAllowed(){
     const allowed=new Set(courseBox.selected());
     for(const check of checks.querySelectorAll('input[name="responsibility_course"]')){
-     // Keep existing selections editable, including when a scope changes.
      const outOfScope=scope.value==='cds'&&!allowed.has(Number(check.value));
      check.disabled=outOfScope&&!check.checked;
     }
@@ -213,37 +255,73 @@ const NextDoWorkspace=(()=>{
     for(const c of activeCourses){
      const check=el('input',{type:'checkbox',name:'responsibility_course',
       value:String(c.id),checked:selectedIds.includes(c.id)});
-     check.addEventListener('change',updateAllowed);
+     check.addEventListener('change',()=>{updateAllowed();updateOverview()});
      checks.append(el('label',{class:'project-course-option'},[check,
       node('span','',c.code+' — '+c.name)]));
     }
     updateAllowed();
    }
-   colleague.addEventListener('change',()=>drawChecks(defaultCoursesFor(colleague.value)));
-   drawChecks(savedCourses===null?defaultCoursesFor(userId):savedCourses);
+   colleague.addEventListener('change',()=>{drawChecks(scopedDefaultsFor(colleague.value));updateOverview()});
+   drawChecks(savedCourses===null?scopedDefaultsFor(userId):savedCourses);
    responsibilityRows.append(group);
    return {group,updateAllowed};
   }
-  // On edit, restore the project's saved snapshot, not the current global defaults.
   const existingByUser=new Map();
   for(const a of p?.responsibilities||[]){
    if(!existingByUser.has(a.user_id))existingByUser.set(a.user_id,[]);
    existingByUser.get(a.user_id).push(a.course_id);
   }
   const responsibilityGroups=[];
-  for(const [uid,ids] of existingByUser)
-   responsibilityGroups.push(addResponsibilityGroup(uid,ids));
-  function appendColleague(){responsibilityGroups.push(addResponsibilityGroup())}
-  responsibilities.append(responsibilityRows,
-   opt('+ Aggiungi collega',appendColleague,'small'),
-   node('p','sub','Le caselle preselezionate provengono dall’anagrafica CdS; togli o aggiungi spunte per questo progetto. I progetti salvati non cambiano quando modifichi l’anagrafica generale.'));
+  function appendColleague(uid='',ids=null){
+   const group=addResponsibilityGroup(uid,ids);
+   responsibilityGroups.push(group);
+   return group;
+  }
+  for(const [uid,ids] of existingByUser)appendColleague(uid,ids);
+  const advanced=el('details',{class:'project-responsibility-advanced'});
+  advanced.append(
+   node('summary','','Modifica assegnazioni per questo progetto (facoltativo)'),
+   responsibilityRows,
+   opt('+ Aggiungi collega',()=>{appendColleague();updateOverview()},'small'),
+   node('p','sub','Le modifiche qui effettuate non cambiano le associazioni generali in Corsi di Studio. I progetti già salvati mantengono le proprie assegnazioni.')
+  );
+  responsibilities.append(advanced);
+  // Apply defaults only to newly selected CdS. Keep saved project assignments unchanged.
+  let previousSelected=new Set(courseBox.selected());
+  function syncSelectedCourses(){
+   if(scope.value!=='cds'){update();return}
+   const selected=new Set(courseBox.selected());
+   for(const cid of previousSelected){
+    if(selected.has(cid))continue;
+    for(const item of responsibilityGroups){
+     if(item.group.parentNode!==responsibilityRows)continue;
+     const check=[...item.group.querySelectorAll('input[name="responsibility_course"]')]
+      .find(el=>Number(el.value)===cid);
+     if(check)check.checked=false;
+    }
+   }
+   for(const cid of selected){
+    if(previousSelected.has(cid))continue;
+    for(const a of S.courseAssignees.filter(a=>a.course_id===cid)){
+     let item=responsibilityGroups.find(item=>item.group.parentNode===responsibilityRows&&
+      Number(item.group.querySelector('select[name="responsibility_user"]').value)===a.user_id);
+     if(!item)item=appendColleague(a.user_id,[]);
+     const check=[...item.group.querySelectorAll('input[name="responsibility_course"]')]
+      .find(el=>Number(el.value)===cid);
+     if(check)check.checked=true;
+    }
+   }
+   previousSelected=selected;
+   update();
+  }
   const courseWrap=el('div',{class:'full'},[courseBox.outer]);
   const update=()=>{
    courseWrap.style.display=scope.value==='cds'?'':'none';
    for(const item of responsibilityGroups)item.updateAllowed();
+   updateOverview();
   };
-  scope.addEventListener('change',update);
-  courseBox.outer.addEventListener('change',update);
+  scope.addEventListener('change',syncSelectedCourses);
+  courseBox.outer.addEventListener('change',syncSelectedCourses);
   f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,responsibilities,memberBox.outer,
    el('label',{class:'full project-featured-option'},[featured,' Mostra Gantt nella Dashboard dei partecipanti']));
   update();
@@ -253,12 +331,12 @@ const NextDoWorkspace=(()=>{
    e.preventDefault();
    const assignments=[],seenColleagues=new Set();
    for(const group of responsibilityRows.children){
+    const chosen=[...group.querySelectorAll('input[name="responsibility_course"]:checked')];
+    if(!chosen.length)continue;
     const userId=Number(group.querySelector('select[name="responsibility_user"]').value);
-    if(!userId)return msg('Seleziona il collega oppure rimuovi il riquadro vuoto.',true);
+    if(!userId)return msg('Seleziona il collega per le spunte presenti.',true);
     if(seenColleagues.has(userId))return msg('Il collega è già presente: seleziona tutti i suoi CdS nello stesso riquadro.',true);
     seenColleagues.add(userId);
-    const chosen=[...group.querySelectorAll('input[name="responsibility_course"]:checked')];
-    if(!chosen.length)return msg('Seleziona almeno un CdS per ogni collega.',true);
     for(const check of chosen)assignments.push({course_id:Number(check.value),user_id:userId});
    }
    if(scope.value==='cds'){
