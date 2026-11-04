@@ -680,3 +680,5 @@ from . import microsoft_lists
 microsoft_lists.register_routes(app,user=user,csrf=csrf,data_path=DATA)
 from . import sharepoint_export
 sharepoint_export.register_routes(app,conn=conn,user=user)
+from . import calendar_import
+calendar_import.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
