@@ -368,6 +368,10 @@ def validate_project_recipients(c,u,b):
  p=c.execute('SELECT * FROM projects WHERE id=?',(b.project_id,)).fetchone()
  if not p or not workspace.project_can_edit(c,u,p):
   err(403,'Solo il responsabile del progetto può modificare i CdS destinatari')
+ if b.course_ids:
+  active={r[0] for r in c.execute('SELECT id FROM courses WHERE active=1 AND id IN ('+','.join('?'*len(b.course_ids))+')',tuple(b.course_ids))}
+  if not set(b.course_ids).issubset(active):
+   err(400,'Selezionare soltanto CdS attivi')
  if p['scope']=='cds':
   allowed={r[0] for r in c.execute('SELECT course_id FROM project_courses WHERE project_id=?',(p['id'],))}
   if not set(b.course_ids).issubset(allowed):
@@ -424,8 +428,12 @@ def task_update(tid:int,b:TaskIn,req:Request):
   if not can_edit(c,u,t):err()
   if not is_admin(u) and t['owner_id']!=u['id']:
    original={r[0] for r in c.execute('SELECT course_id FROM task_courses WHERE task_id=?',(tid,))}
-   if b.scope!=t['scope'] or b.project_id!=t['project_id'] or b.assigned_to!=t['assigned_to'] or (t['scope'] in ('cds','project') and set(b.course_ids)!=original):
+   if b.scope!=t['scope'] or b.project_id!=t['project_id'] or b.assigned_to!=t['assigned_to'] or (t['scope']=='cds' and set(b.course_ids)!=original):
     err(403,'Solo il proprietario o l’amministratore può cambiare ambito, CdS e responsabili')
+   if t['scope']=='project' and set(b.course_ids)!=original:
+    existing_project=c.execute('SELECT * FROM projects WHERE id=?',(t['project_id'],)).fetchone()
+    if not existing_project or not workspace.project_can_edit(c,u,existing_project):
+     err(403,'Solo il responsabile del progetto può cambiare i CdS destinatari')
   validate_task(c,u,b)
   original_courses={r[0] for r in c.execute('SELECT course_id FROM task_courses WHERE task_id=?',(tid,))}
   if b.scope=='project' and (set(b.course_ids)!=original_courses or b.project_id!=t['project_id']):
