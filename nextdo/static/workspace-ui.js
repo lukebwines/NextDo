@@ -54,8 +54,9 @@ const NextDoWorkspace=(()=>{
     }
     const query=projectListFilters.text.toLocaleLowerCase('it').trim();
     const list=S.projects.filter(p=>{
-     if(projectListFilters.phase==='active'&&p.status==='done')return false;
-     if(projectListFilters.phase==='done'&&p.status!=='done')return false;
+     if(projectListFilters.phase==='active'&&(p.status==='done'||p.archived_at))return false;
+     if(projectListFilters.phase==='done'&&(p.status!=='done'||p.archived_at))return false;
+     if(projectListFilters.phase==='archived'&&!p.archived_at)return false;
      const cids=projectCourseIds(p);
      if(projectListFilters.course&&p.scope!=='common'&&!cids.includes(Number(projectListFilters.course)))return false;
      if(projectListFilters.manager&&String(p.manager_id||p.owner_id)!==projectListFilters.manager)return false;
@@ -86,7 +87,7 @@ const NextDoWorkspace=(()=>{
       node('span','project-list-meta',meta.join(' · '))
      ]);
      const figures=el('div',{class:'project-list-figures'},[
-      tag(statuses[p.status]||p.status,p.status),
+      tag(p.archived_at?'Archiviato':statuses[p.status]||p.status,p.archived_at?'waiting':p.status),
       node('span','project-progress',n?done+' / '+n+' attività completate':'Nessuna attività')
      ]);
      const progress=el('div',{class:'project-list-progress'},[
@@ -101,7 +102,7 @@ const NextDoWorkspace=(()=>{
      results.append(row);
     }
    }
-   for(const [phase,label] of [['active','Attivi'],['done','Completati'],['all','Tutti']]){
+   for(const [phase,label] of [['active','Attivi'],['done','Completati'],['archived','Archiviati'],['all','Tutti']]){
     const button=opt(label,()=>{projectListFilters.phase=phase;showProjects()},'small');
     phaseButtons.push([phase,button]);phases.append(button);
    }
@@ -124,7 +125,18 @@ const NextDoWorkspace=(()=>{
      const link=el('a',{href:'api/projects/'+current.id+'/sharepoint-export',download:''});
      document.body.append(link);link.click();link.remove();
     },'small'),
-    opt('Modifica progetto',()=>projectForm(current),'small')
+    opt('Modifica progetto',()=>projectForm(current),'small'),
+    opt(current.archived_at?'Ripristina':'Archivia',async()=>{
+     if(!confirm((current.archived_at?'Ripristinare':'Archiviare')+' il progetto «'+current.title+'»?'))return;
+     try{await api('/projects/'+current.id+(current.archived_at?'/restore':'/archive'),{method:'POST'});S.selectedProject=null;await refresh();render();msg('Progetto aggiornato')}
+     catch(e){msg(e.message,true)}
+    },'small'),
+    ...(S.me.role==='admin'?[opt('Elimina progetto',async()=>{
+     const text=prompt('Eliminazione definitiva di «'+current.title+'» e delle sue attività. Scrivi ELIMINA per confermare. Prima viene creato un backup del database. Le righe già inviate a Microsoft Lists non saranno eliminate.');
+     if(text!=='ELIMINA')return;
+     try{const result=await api('/projects/'+current.id+'?confirm=ELIMINA',{method:'DELETE'});S.selectedProject=null;await refresh();render();msg('Progetto eliminato; '+result.deleted_tasks+' attività rimosse. Backup SQLite conservato sul server.')}
+     catch(e){msg(e.message,true)}
+    },'danger')]:[])
    ]:[]),
    opt('+ Attività',()=>taskForm(null,'task',null,{scope:'project',project_id:current.id}),'primary')
   ]);
