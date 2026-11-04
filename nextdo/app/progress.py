@@ -2,7 +2,7 @@
 from datetime import datetime,timezone
 from fastapi import Request
 from pydantic import BaseModel,Field
-from .workspace import can_read,can_write,can_finish,fail
+from .workspace import can_read,can_progress,can_finish,fail
 
 class ProgressUpdate(BaseModel):
  status:str
@@ -17,7 +17,7 @@ def register_routes(app,conn,user,csrf,record):
   with conn() as c:
    t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
    if not t:fail('Attività non trovata',404)
-   allowed=can_finish(c,u,t) if b.status=='done' else can_write(c,u,t)
+   allowed=can_finish(c,u,t) if b.status=='done' else can_progress(c,u,t)
    if not allowed:fail('Non puoi aggiornare questa attività')
    if t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
     if (b.status=='done')!=(t['status']=='done'):
