@@ -37,6 +37,13 @@ def upgrade(db_path:Path,data_path:Path):
     target=sqlite3.connect(backup)
     try:db.backup(target)
     finally:target.close()
+  tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+  if 'project_responsibilities' not in tables:
+   backup=data_path/'nextdo-before-project-responsibilities-migration.sqlite3'
+   if not backup.exists():
+    dest=sqlite3.connect(backup)
+    try:db.backup(dest)
+    finally:dest.close()
   with db:
    db.execute('PRAGMA foreign_keys=ON')
    db.executescript("""
@@ -60,6 +67,13 @@ def upgrade(db_path:Path,data_path:Path):
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member','manager')),
       PRIMARY KEY(project_id,user_id));
+    CREATE TABLE IF NOT EXISTS project_responsibilities (
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY(project_id,course_id,user_id));
+    CREATE INDEX IF NOT EXISTS idx_project_responsibilities_user
+      ON project_responsibilities(user_id,project_id);
     CREATE TABLE IF NOT EXISTS task_progress (
       id INTEGER PRIMARY KEY,
       task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -196,6 +210,10 @@ def validate_scope(c,u,b):
 class Assignment(BaseModel):
  user_ids:list[int]=Field(default_factory=list,max_length=100)
 
+class ProjectResponsibility(BaseModel):
+ course_id:int
+ user_id:int
+
 class ProjectIn(BaseModel):
  title:str=Field(min_length=1,max_length=250)
  description:str=Field(default='',max_length=50000)
@@ -203,6 +221,7 @@ class ProjectIn(BaseModel):
  manager_id:Optional[int]=None
  course_ids:list[int]=Field(default_factory=list,max_length=100)
  member_ids:list[int]=Field(default_factory=list,max_length=100)
+ responsibilities:list[ProjectResponsibility]=Field(default_factory=list,max_length=500)
  due_at:Optional[str]=None
  status:str='doing'
  featured:bool=True
@@ -262,6 +281,8 @@ def register_routes(app,*,conn,user,csrf,ph,record):
   d=dict(p)
   d['course_ids']=[r[0] for r in c.execute('SELECT course_id FROM project_courses WHERE project_id=?',(p['id'],))]
   d['member_ids']=[r[0] for r in c.execute('SELECT user_id FROM project_members WHERE project_id=?',(p['id'],))]
+  d['responsibilities']=[dict(r) for r in c.execute(
+   'SELECT course_id,user_id FROM project_responsibilities WHERE project_id=? ORDER BY course_id,user_id',(p['id'],))]
   d['counts']={r['status']:r['n'] for r in c.execute("SELECT status,COUNT(*) AS n FROM tasks WHERE project_id=? GROUP BY status",(p['id'],))}
   d['can_edit']=project_can_edit(c,current_user,p) if current_user else False
   return d
@@ -276,15 +297,29 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    for cid in b.course_ids:
     if not c.execute('SELECT 1 FROM courses WHERE id=? AND active=1',(cid,)).fetchone():fail('CdS non attivo',400)
     if u['role']!='admin' and not owns_course(c,u['id'],cid):fail('CdS non assegnato')
+  pairs=[(r.course_id,r.user_id) for r in b.responsibilities]
+  if len(pairs)!=len(set(pairs)):fail('Ogni coppia collega–CdS deve essere unica',400)
+  if b.scope=='cds' and any(r.course_id not in b.course_ids for r in b.responsibilities):
+   fail('I CdS dei responsabili devono appartenere al progetto',400)
+  for r in b.responsibilities:
+   if not c.execute('SELECT id FROM courses WHERE id=? AND active=1',(r.course_id,)).fetchone():
+    fail('CdS destinatario non attivo o inesistente',400)
+   if not c.execute('SELECT id FROM users WHERE id=? AND active=1',(r.user_id,)).fetchone():
+    fail('Collega responsabile non attivo o inesistente',400)
   for uid in [*b.member_ids,*([b.manager_id] if b.manager_id else [])]:
    if not c.execute('SELECT 1 FROM users WHERE id=? AND active=1',(uid,)).fetchone():fail('Partecipante inesistente o disattivato',400)
   if b.due_at:
    try:datetime.fromisoformat(b.due_at.replace('Z','+00:00'))
    except ValueError:fail('Data progetto non valida',400)
  def project_participants(c,pid,owner,manager,b):
-  members=set(b.member_ids)|{owner}|({manager} if manager else set())
+  members=set(b.member_ids)|{owner}|({manager} if manager else set())|{r.user_id for r in b.responsibilities}
   c.execute('DELETE FROM project_members WHERE project_id=?',(pid,))
   c.executemany('INSERT INTO project_members(project_id,user_id,role) VALUES(?,?,?)',[(pid,x,'manager' if x in (owner,manager) else 'member') for x in members])
+ def project_responsibilities(c,pid,b):
+  c.execute('DELETE FROM project_responsibilities WHERE project_id=?',(pid,))
+  c.executemany(
+   'INSERT INTO project_responsibilities(project_id,course_id,user_id) VALUES(?,?,?)',
+   [(pid,r.course_id,r.user_id) for r in b.responsibilities])
  @app.get('/api/projects')
  def projects(req:Request):
   u=user(req)
@@ -299,6 +334,7 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    pid=p.lastrowid
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,u['id'],b.manager_id or u['id'],b)
+   project_responsibilities(c,pid,b)
    record(c,u['id'],'create','project',pid)
   return {'id':pid}
  @app.put('/api/projects/{pid}')
@@ -313,6 +349,7 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    c.execute('DELETE FROM project_courses WHERE project_id=?',(pid,))
    c.executemany('INSERT INTO project_courses(project_id,course_id) VALUES(?,?)',[(pid,cid) for cid in b.course_ids])
    project_participants(c,pid,p['owner_id'],b.manager_id or p['owner_id'],b)
+   project_responsibilities(c,pid,b)
    record(c,u['id'],'update','project',pid)
   return {'ok':True}
  @app.patch('/api/tasks/{tid}/status')
