@@ -183,21 +183,67 @@ const NextDoWorkspace=(()=>{
    node('p','sub','Assegna uno o più CdS a ciascun collega. Ogni attività del progetto sarà disponibile per tutti i CdS qui indicati, senza selezionare nuovamente i destinatari nelle attività.')
   );
   const responsibilityRows=el('div',{class:'project-responsibility-rows'});
-  const courseOptions=[['','Seleziona CdS'],...S.courses.filter(c=>c.active).map(c=>[String(c.id),c.code+' — '+c.name])];
+  const activeCourses=S.courses.filter(c=>c.active);
   const colleagueOptions=[['','Seleziona collega'],...S.users.filter(u=>u.active).map(u=>[String(u.id),u.display_name])];
-  function addResponsibility(courseId='',userId=''){
-   const row=el('div',{class:'rowtask'});
-   const courseSelect=select('responsibility_course',courseOptions,String(courseId||''));
-   const userSelect=select('responsibility_user',colleagueOptions,String(userId||''));
-   row.append(field('CdS',courseSelect),field('Collega responsabile',userSelect),
-    opt('Rimuovi',()=>row.remove(),'small'));
-   responsibilityRows.append(row);
+  // Global defaults suggest only; project assignments are saved separately.
+  const defaultCoursesFor=uid=>S.courseAssignees
+   .filter(a=>a.user_id===Number(uid)).map(a=>a.course_id);
+  function addResponsibilityGroup(userId='',savedCourses=null){
+   const group=el('section',{class:'project-colleague-group'});
+   const head=el('div',{class:'project-colleague-header'});
+   const colleague=select('responsibility_user',colleagueOptions,String(userId||''));
+   const checks=el('div',{class:'project-course-checklist'});
+   const hint=node('p','sub','');
+   const reset=opt('Ripristina predefiniti',()=>drawChecks(defaultCoursesFor(colleague.value)),'small');
+   const remove=opt('Rimuovi collega',()=>group.remove(),'small');
+   head.append(field('Collega responsabile',colleague),reset,remove);
+   group.append(head,checks,hint);
+   function updateAllowed(){
+    const allowed=new Set(courseBox.selected());
+    for(const check of checks.querySelectorAll('input[name="responsibility_course"]')){
+     // Keep existing selections editable, including when a scope changes.
+     const outOfScope=scope.value==='cds'&&!allowed.has(Number(check.value));
+     check.disabled=outOfScope&&!check.checked;
+    }
+    const chosen=checks.querySelectorAll('input[name="responsibility_course"]:checked').length;
+    hint.textContent=chosen+' CdS selezionati per questo progetto';
+   }
+   function drawChecks(selectedIds=[]){
+    checks.replaceChildren();
+    for(const c of activeCourses){
+     const check=el('input',{type:'checkbox',name:'responsibility_course',
+      value:String(c.id),checked:selectedIds.includes(c.id)});
+     check.addEventListener('change',updateAllowed);
+     checks.append(el('label',{class:'project-course-option'},[check,
+      node('span','',c.code+' — '+c.name)]));
+    }
+    updateAllowed();
+   }
+   colleague.addEventListener('change',()=>drawChecks(defaultCoursesFor(colleague.value)));
+   drawChecks(savedCourses===null?defaultCoursesFor(userId):savedCourses);
+   responsibilityRows.append(group);
+   return {group,updateAllowed};
   }
-  for(const r of p?.responsibilities||[])addResponsibility(r.course_id,r.user_id);
-  responsibilities.append(responsibilityRows,opt('+ Assegna collega a CdS',()=>addResponsibility(),'small'));
+  // On edit, restore the project's saved snapshot, not the current global defaults.
+  const existingByUser=new Map();
+  for(const a of p?.responsibilities||[]){
+   if(!existingByUser.has(a.user_id))existingByUser.set(a.user_id,[]);
+   existingByUser.get(a.user_id).push(a.course_id);
+  }
+  const responsibilityGroups=[];
+  for(const [uid,ids] of existingByUser)
+   responsibilityGroups.push(addResponsibilityGroup(uid,ids));
+  function appendColleague(){responsibilityGroups.push(addResponsibilityGroup())}
+  responsibilities.append(responsibilityRows,
+   opt('+ Aggiungi collega',appendColleague,'small'),
+   node('p','sub','Le caselle preselezionate provengono dall’anagrafica CdS; togli o aggiungi spunte per questo progetto. I progetti salvati non cambiano quando modifichi l’anagrafica generale.'));
   const courseWrap=el('div',{class:'full'},[courseBox.outer]);
-  const update=()=>{courseWrap.style.display=scope.value==='cds'?'':'none'};
+  const update=()=>{
+   courseWrap.style.display=scope.value==='cds'?'':'none';
+   for(const item of responsibilityGroups)item.updateAllowed();
+  };
   scope.addEventListener('change',update);
+  courseBox.outer.addEventListener('change',update);
   f.append(field('Titolo',title),field('Ambito',scope),el('div',{class:'full'},[field('Descrizione',desc)]),field('Stato',status),field('Responsabile',manager),field('Scadenza facoltativa',due),courseWrap,responsibilities,memberBox.outer,
    el('label',{class:'full project-featured-option'},[featured,' Mostra Gantt nella Dashboard dei partecipanti']));
   update();
@@ -205,15 +251,21 @@ const NextDoWorkspace=(()=>{
   f.append(actions);
   f.addEventListener('submit',async e=>{
    e.preventDefault();
-   const assignments=[];
-   for(const row of responsibilityRows.children){
-    const courseId=Number(row.querySelector('select[name="responsibility_course"]').value);
-    const userId=Number(row.querySelector('select[name="responsibility_user"]').value);
-    if(!courseId||!userId)return msg('Per ogni assegnazione scegli sia il CdS sia il collega.',true);
-    assignments.push({course_id:courseId,user_id:userId});
+   const assignments=[],seenColleagues=new Set();
+   for(const group of responsibilityRows.children){
+    const userId=Number(group.querySelector('select[name="responsibility_user"]').value);
+    if(!userId)return msg('Seleziona il collega oppure rimuovi il riquadro vuoto.',true);
+    if(seenColleagues.has(userId))return msg('Il collega è già presente: seleziona tutti i suoi CdS nello stesso riquadro.',true);
+    seenColleagues.add(userId);
+    const chosen=[...group.querySelectorAll('input[name="responsibility_course"]:checked')];
+    if(!chosen.length)return msg('Seleziona almeno un CdS per ogni collega.',true);
+    for(const check of chosen)assignments.push({course_id:Number(check.value),user_id:userId});
    }
-   const distinct=new Set(assignments.map(a=>a.course_id+':'+a.user_id));
-   if(distinct.size!==assignments.length)return msg('La stessa coppia collega–CdS è stata inserita due volte.',true);
+   if(scope.value==='cds'){
+    const allowed=new Set(courseBox.selected());
+    if(assignments.some(a=>!allowed.has(a.course_id)))
+     return msg('Un CdS assegnato non è incluso tra i CdS del progetto: selezionalo sopra o togli la spunta.',true);
+   }
    const data={title:title.value.trim(),description:desc.value,scope:scope.value,status:status.value,featured:featured.checked,
     manager_id:manager.value?Number(manager.value):null,due_at:due.value?new Date(due.value).toISOString():null,
     course_ids:scope.value==='cds'?courseBox.selected():[],member_ids:memberBox.selected(),responsibilities:assignments};

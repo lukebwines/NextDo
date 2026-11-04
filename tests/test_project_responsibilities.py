@@ -127,3 +127,83 @@ def test_legacy_projects_keep_previous_json_shape(tmp_path):
  assert result.json()['tasks']==[{
   'id':f"NEXTDO-T{t.json()['id']}",'title':'Legacy task','status':'todo','due_at':None}]
  client.close()
+
+
+def test_global_colleague_course_defaults_are_readonly_and_scoped(tmp_path):
+ client,headers=init(tmp_path)
+ c1=create_course(client,headers,'MZ1')
+ c2=create_course(client,headers,'MZ2')
+ alice=create_user(client,headers,'alice')
+ bob=create_user(client,headers,'bob')
+ assert client.put(f'/api/courses/{c1}/assignees',headers=headers,
+  json={'user_ids':[alice,bob]}).status_code==200
+ assert client.put(f'/api/courses/{c2}/assignees',headers=headers,
+  json={'user_ids':[bob]}).status_code==200
+ all_defaults=client.get('/api/course-assignee-defaults')
+ assert all_defaults.status_code==200
+ assert {(a['course_id'],a['user_id']) for a in all_defaults.json()}=={
+  (c1,alice),(c1,bob),(c2,bob)}
+ sign_in(client,headers,'alice')
+ own_defaults=client.get('/api/course-assignee-defaults')
+ assert own_defaults.status_code==200
+ assert {(a['course_id'],a['user_id']) for a in own_defaults.json()}=={
+  (c1,alice),(c1,bob)}
+ assert client.get('/api/course-assignees').status_code==403
+ sign_in(client,headers,'admin')
+ client.close()
+
+
+def test_editing_default_cdss_never_alters_existing_project_snapshot(tmp_path):
+ client,headers=init(tmp_path)
+ c1=create_course(client,headers,'MZ1')
+ c2=create_course(client,headers,'MZ2')
+ c3=create_course(client,headers,'MZ3')
+ colleague=create_user(client,headers,'colleague')
+ assert client.put(f'/api/courses/{c1}/assignees',headers=headers,
+  json={'user_ids':[colleague]}).status_code==200
+ assert client.put(f'/api/courses/{c2}/assignees',headers=headers,
+  json={'user_ids':[colleague]}).status_code==200
+ assert client.put(f'/api/courses/{c3}/assignees',headers=headers,
+  json={'user_ids':[colleague]}).status_code==200
+ # User decides this particular project concerns only two of three courses.
+ original=[{'user_id':colleague,'course_id':c1},{'user_id':colleague,'course_id':c2}]
+ p=client.post('/api/projects',headers=headers,json={
+  'title':'Synthetic two-course project','scope':'independent',
+  'responsibilities':original})
+ assert p.status_code==200,p.text
+ pid=p.json()['id']
+ t=client.post('/api/tasks',headers=headers,json={
+  'title':'Single source activity','scope':'project','project_id':pid})
+ assert t.status_code==200,t.text
+ task_id=t.json()['id']
+ # Later global assignments change, but the project keeps its saved subset.
+ assert client.put(f'/api/courses/{c1}/assignees',headers=headers,
+  json={'user_ids':[]}).status_code==200
+ assert client.put(f'/api/courses/{c3}/assignees',headers=headers,
+  json={'user_ids':[]}).status_code==200
+ actual=next(x for x in client.get('/api/projects').json() if x['id']==pid)
+ assert {(x['user_id'],x['course_id']) for x in actual['responsibilities']}=={
+  (colleague,c1),(colleague,c2)}
+ exported=client.get(f'/api/projects/{pid}/sharepoint-export').json()['tasks']
+ assert len(exported)==2
+ assert {x['id'] for x in exported}=={
+  f'NEXTDO-T{task_id}-C{c1}',f'NEXTDO-T{task_id}-C{c2}'}
+ assert all(x['title']=='Single source activity' for x in exported)
+ client.close()
+
+
+def test_project_form_defaults_and_checkbox_contract(tmp_path):
+ client,headers=init(tmp_path)
+ script=client.get('/assets/workspace-ui.js')
+ assert script.status_code==200
+ body=script.text
+ for expected in (
+  'defaultCoursesFor=uid=>S.courseAssignees',
+  "colleague.addEventListener('change'",
+  'savedCourses===null?defaultCoursesFor(userId):savedCourses',
+  'responsibility_course',
+  'project-colleague-group',
+  'seenColleagues',
+  'project_id'):
+  assert expected in body
+ client.close()
