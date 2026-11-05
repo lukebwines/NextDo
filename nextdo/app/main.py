@@ -688,6 +688,8 @@ register_restore_routes(app,user=user,csrf=csrf,db_path=DB,attachments_path=FILE
 
 # Workspaces, course ownership, Kanban projects and user account management.
 workspace.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record,data_path=DATA)
+from . import user_deletion
+user_deletion.register_routes(app,conn=conn,user=user,csrf=csrf,record=record,data_path=DATA)
 from . import progress
 progress.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
 from . import microsoft_lists
