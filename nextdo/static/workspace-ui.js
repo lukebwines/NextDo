@@ -586,7 +586,8 @@ const NextDoWorkspace=(()=>{
    const line=el('div',{class:'rowtask'},[
     node('span','taskmain',u.display_name+' · '+u.username+(u.active?'':' · Disattivato')),
     opt('Ruolo / Stato',()=>editAccount(u),'small'),
-    opt('Reimposta password',()=>resetPassword(u),'small')
+    opt('Reimposta password',()=>resetPassword(u),'small'),
+    ...(u.id!==S.me.id?[opt('Elimina',()=>deleteRegisteredUser(u),'danger')]:[])
    ]);
    section2.append(line);
   }
@@ -699,6 +700,42 @@ const NextDoWorkspace=(()=>{
    if(!confirm('Reimpostare la password per '+u.display_name+'?'))return;
    try{await api('/admin/users/'+u.id+'/password',{method:'POST',body:JSON.stringify({new_password:pw.value})});back.remove();msg('Password reimpostata')}catch(e){msg(e.message,true)}
   },'primary'));
+ }
+ async function deleteRegisteredUser(account){
+  let impact;
+  try{impact=await api('/admin/users/'+account.id+'/deletion-impact')}
+  catch(e){msg(e.message,true);return}
+  const {box,back}=modal('Elimina utente — '+account.display_name);
+  box.append(node('p','sub','Controllo preventivo dei collegamenti. La cancellazione non elimina progetti, attività o relativi avanzamenti. Viene eseguito un backup prima di ogni eliminazione consentita.'));
+  const info=el('div',{class:'card'},[
+   node('strong','','Account: '+impact.display_name+' · '+impact.username),
+   node('p','sub','Ruolo: '+(impact.role==='admin'?'Amministratore':'Utente registrato')+
+     ' · Stato: '+(impact.active?'Attivo':'Disattivato')),
+   node('p','sub','CdS associati: '+(impact.removable_links['CdS associati']||0)+
+     ' · Gruppi: '+(impact.removable_links['Gruppi di cui è membro']||0)+
+     ' · Partecipazioni progetti: '+(impact.removable_links['Partecipazioni ai progetti']||0))
+  ]);
+  box.append(info);
+  if(!impact.can_delete){
+   box.append(node('p','project-assignment-warning','Non eliminabile finché esistono queste condizioni:'));
+   const reasons=el('div',{class:'full'});
+   for(const r of impact.reasons)reasons.append(node('p','sub','• '+r));
+   box.append(reasons,btn('Chiudi',()=>back.remove(),'small'));
+   return;
+  }
+  box.append(node('p','sub','L’eliminazione rimuoverà l’account e le sue associazioni amministrative. Il registro delle operazioni conserverà un riferimento minimo all’identità eliminata; eventuali attività in Microsoft Lists non saranno toccate.'));
+  const confirmField=input('confirmation','Scrivi ELIMINA per confermare');
+  const remove=btn('Elimina definitivamente',async()=>{
+   if(confirmField.value!=='ELIMINA')return msg('Scrivi ELIMINA per confermare',true);
+   remove.disabled=true;
+   try{
+    await api('/admin/users/'+account.id+'?confirm=ELIMINA',{method:'DELETE'});
+    back.remove();await refresh();render();
+    msg('Utente eliminato. Backup preventivo conservato nel server NextDo.');
+   }catch(e){msg(e.message,true);remove.disabled=false}
+  },'danger');
+  box.append(field('Conferma eliminazione',confirmField),
+   el('div',{class:'actions'},[btn('Annulla',()=>back.remove(),'small'),remove]));
  }
  function editAccount(u){
   const {box,back}=modal('Gestisci account — '+u.display_name);
