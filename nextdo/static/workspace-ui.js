@@ -603,7 +603,8 @@ const NextDoWorkspace=(()=>{
     (c.microsoft_upn?' · '+c.microsoft_upn:' · UPN [DA VERIFICARE]')),
     opt('Modifica',()=>collaboratorForm(c),'small'),
     activeUser?opt('Disattiva accesso',()=>deactivateCollaboratorAccess(c),'small'):
-     opt('Attiva accesso NextDo',()=>activateCollaboratorAccess(c),'small'));
+     opt('Attiva accesso NextDo',()=>activateCollaboratorAccess(c),'small'),
+    opt('Elimina',()=>deleteCollaborator(c),'danger'));
    section3.append(line);
   }
   main.append(section3);
@@ -624,6 +625,36 @@ const NextDoWorkspace=(()=>{
      back.remove();await refresh();render();msg('Anagrafica collaboratore salvata');
     }catch(e){msg(e.message,true)}
    },'primary'));
+ }
+ async function deleteCollaborator(c){
+  let impact;
+  try{impact=await api('/collaborators/'+c.id+'/deletion-impact')}
+  catch(e){msg(e.message,true);return}
+  const {box,back}=modal('Elimina collaboratore — '+c.display_name);
+  box.append(
+   node('p','sub','Eliminazione definitiva dell’anagrafica locale. Il sistema crea prima una copia di sicurezza del database. Le attività già presenti in Microsoft Lists non saranno cancellate.'),
+   node('p','sub','Associazioni a CdS: '+impact.course_assignments+' · Associazioni a progetti: '+impact.project_assignments+
+    ' · Account NextDo collegato: '+(impact.linked_account?'Sì':'No'))
+  );
+  if(!impact.can_delete){
+   box.append(node('p','project-assignment-warning',impact.linked_account?
+    'Non eliminabile: esiste un account NextDo collegato, anche se disattivato. L’anagrafica deve essere conservata.':
+    'Non eliminabile: rimuovere prima il collaboratore dalle assegnazioni dei progetti.'));
+   box.append(btn('Chiudi',()=>back.remove(),'small'));
+   return;
+  }
+  const confirmation=input('confirm','Scrivi ELIMINA per confermare');
+  const remove=btn('Elimina definitivamente',async()=>{
+   if(confirmation.value!=='ELIMINA')return msg('Scrivi ELIMINA per confermare',true);
+   remove.disabled=true;
+   try{
+    const result=await api('/collaborators/'+c.id+'?confirm=ELIMINA',{method:'DELETE'});
+    back.remove();await refresh();render();
+    msg('Collaboratore eliminato. Associazioni CdS rimosse: '+result.removed_course_assignments+'. Backup locale creato.');
+   }catch(e){msg(e.message,true);remove.disabled=false}
+  },'danger');
+  box.append(field('Conferma eliminazione',confirmation),
+   el('div',{class:'actions'},[btn('Annulla',()=>back.remove(),'small'),remove]));
  }
  function activateCollaboratorAccess(c){
   const {box,back}=modal('Attiva NextDo — '+c.display_name);

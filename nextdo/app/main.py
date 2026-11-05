@@ -172,7 +172,7 @@ def home():
 @app.get('/api/build')
 def build_details(req:Request):
  user(req)
- return {'version':'0.1.19-test','assets':asset_versions()}
+ return {'version':'0.1.20-test','assets':asset_versions()}
 @app.get('/api/setup')
 def setup():
  with conn() as c:count=c.execute('SELECT COUNT(*) FROM users').fetchone()[0]
@@ -696,4 +696,4 @@ from . import sharepoint_export
 sharepoint_export.register_routes(app,conn=conn,user=user)
 from . import calendar_import
 calendar_import.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
-collaborators.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record)
+collaborators.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record,data_path=DATA)

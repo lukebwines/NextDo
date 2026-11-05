@@ -1,6 +1,7 @@
 """Lists-only collaborator directory, independent from password-bearing NextDo accounts."""
 from __future__ import annotations
-import re,sqlite3
+import re,sqlite3,secrets
+from datetime import datetime,timezone
 from pathlib import Path
 from fastapi import Request
 from pydantic import BaseModel,Field
@@ -55,7 +56,7 @@ def normalize_upn(raw):
   workspace.fail("UPN Microsoft 365 non valido: verificare l'identificativo",400)
  return value
 
-def register_routes(app,*,conn,user,csrf,ph,record):
+def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
  def admin(req):
   u=user(req)
   if u["role"]!="admin":workspace.fail("Operazione riservata all'amministratore")
@@ -158,3 +159,41 @@ def register_routes(app,*,conn,user,csrf,ph,record):
    c.execute("DELETE FROM sessions WHERE user_id=?",(uid,))
    record(c,u["id"],"deactivate_access","collaborator",cid)
   return {"ok":True}
+
+ @app.get("/api/collaborators/{cid}/deletion-impact")
+ def collaborator_deletion_impact(cid:int,req:Request):
+  admin(req)
+  with conn() as c:
+   person=c.execute("SELECT id,display_name,linked_user_id FROM collaborators WHERE id=?",(cid,)).fetchone()
+   if not person:workspace.fail("Collaboratore inesistente",404)
+   courses=c.execute("SELECT COUNT(*) FROM course_collaborators WHERE collaborator_id=?",(cid,)).fetchone()[0]
+   projects=c.execute("SELECT COUNT(*) FROM project_collaborator_responsibilities WHERE collaborator_id=?",(cid,)).fetchone()[0]
+   return {"id":cid,"display_name":person["display_name"],"course_assignments":courses,
+    "project_assignments":projects,"linked_account":person["linked_user_id"] is not None,
+    "can_delete":person["linked_user_id"] is None and projects==0}
+
+ @app.delete("/api/collaborators/{cid}")
+ def delete_collaborator(cid:int,req:Request,confirm:str=""):
+  u=admin(req);csrf(req)
+  if confirm!="ELIMINA":workspace.fail("Digitare ELIMINA per confermare la cancellazione",400)
+  if data_path is None:workspace.fail("Percorso per il backup non configurato",500)
+  with conn() as c:
+   person=c.execute("SELECT id,linked_user_id FROM collaborators WHERE id=?",(cid,)).fetchone()
+   if not person:workspace.fail("Collaboratore inesistente",404)
+   if person["linked_user_id"] is not None:
+    workspace.fail("Collaboratore collegato a un account NextDo: l'anagrafica non può essere eliminata. Disattivare l'accesso non elimina lo storico.",409)
+   projects=c.execute("SELECT COUNT(*) FROM project_collaborator_responsibilities WHERE collaborator_id=?",(cid,)).fetchone()[0]
+   if projects:
+    workspace.fail("Collaboratore assegnato a progetti: rimuovere prima le sue responsabilità dai progetti, poi ripetere l'eliminazione.",409)
+   courses=c.execute("SELECT COUNT(*) FROM course_collaborators WHERE collaborator_id=?",(cid,)).fetchone()[0]
+   directory=Path(data_path)/"collaborator-deletion-backups"
+   directory.mkdir(parents=True,exist_ok=True)
+   filename="before-delete-collaborator-"+str(cid)+"-"+datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")+"-"+secrets.token_hex(4)+".sqlite3"
+   backup=sqlite3.connect(directory/filename)
+   try:c.backup(backup)
+   finally:backup.close()
+   # ON DELETE CASCADE removes any default CdS associations.
+   # Projects and NextDo accounts are protected above; no Microsoft List item is touched.
+   c.execute("DELETE FROM collaborators WHERE id=?",(cid,))
+   record(c,u["id"],"delete","collaborator",cid)
+  return {"ok":True,"removed_course_assignments":courses,"backup_created":True}
