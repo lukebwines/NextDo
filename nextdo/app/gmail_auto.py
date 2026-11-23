@@ -227,7 +227,7 @@ def _list_ids(token, enabled_at=None):
  for _ in range(MAX_PAGES):
   query = {"labelIds": match, "maxResults": 100}
   if enabled_at:
-   query["q"] = "after:" + datetime.fromtimestamp(enabled_at / 1000, timezone.utc).strftime("%Y/%m/%d")
+   query["q"] = "after:" + datetime.fromtimestamp((enabled_at - 86400000) / 1000, timezone.utc).strftime("%Y/%m/%d")
   if page:
    query["pageToken"] = page
   result = _gmail_get(token, "messages", query)
