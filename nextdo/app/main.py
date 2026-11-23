@@ -447,6 +447,11 @@ def task_update(tid:int,b:TaskIn,req:Request):
    if b.scope!=t['scope'] or b.project_id!=t['project_id'] or b.assigned_to!=t['assigned_to'] or (t['scope']=='cds' and set(b.course_ids)!=original):
     err(403,'Solo il proprietario o l’amministratore può cambiare ambito, CdS e responsabili')
   validate_task(c,u,b)
+  if t['status']=='review' and b.status=='done':err(400,'Confermare la scadenza in stato Da fare prima di completarla')
+  if t['status']=='review' and b.status!='review':
+   b.labels=[x for x in b.labels if x!='Da verificare']
+   b.description=b.description.replace('DA VERIFICARE - scadenza proposta automaticamente da email, non convalidata.',
+    'Scadenza confermata manualmente (origine: email Gmail NextDo).',1)
   if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common','project'):
    progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
