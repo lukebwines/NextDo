@@ -227,6 +227,9 @@ def analyze(cfg,source):
   if isinstance(stated,str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}",stated):
    try:due=date.fromisoformat(stated).isoformat()
    except ValueError:pass
+  # Administrative dates must be evidenced, not inferred from an assumed year.
+  if due and due[:4] not in evidence:
+   due=""
   description=("Origine: email selezionata dall'utente, oggetto: "+source["subject"]+
     "\nRiferimento messaggio: "+source["source_hash"]+
     "\nFrase originale: "+evidence+
