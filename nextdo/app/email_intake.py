@@ -23,6 +23,7 @@ from pathlib import Path
 from fastapi import File,HTTPException,Request,UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel,Field
+from cryptography.fernet import Fernet, InvalidToken
 
 MAX_MAIL=6_000_000
 MAX_TEXT=14_000
@@ -38,10 +39,40 @@ def reject(message,status=400):
 def config_path(data):
  return Path(data)/"email-intake-local.json"
 
+def _cipher(data):
+ key_path=Path(data)/"email-intake.key"
+ try:
+  if not key_path.exists():
+   try:
+    fd=os.open(key_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+    with os.fdopen(fd,"wb") as stream:stream.write(Fernet.generate_key())
+   except FileExistsError:pass
+  if key_path.is_symlink():reject("Chiave locale non valida",500)
+  return Fernet(key_path.read_bytes())
+ except (OSError,ValueError):reject("Impossibile caricare la chiave di cifratura",500)
+
 def load_config(data):
  path=config_path(data)
- try:return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
- except (OSError,ValueError):reject("Configurazione acquisizione email danneggiata",500)
+ if not path.exists():return {}
+ try:
+  raw=json.loads(path.read_text(encoding="utf-8"))
+  if not isinstance(raw,dict):raise ValueError("invalid config")
+  cipher=_cipher(data)
+  for name in ("imap_password","groq_api_key"):
+   value=raw.get(name,"")
+   if isinstance(value,str) and value.startswith("enc:"):
+    raw[name]=cipher.decrypt(value[4:].encode("ascii")).decode("utf-8")
+  return raw
+ except (OSError,ValueError,InvalidToken,UnicodeDecodeError):
+  reject("Configurazione email non leggibile: verificare la chiave di cifratura",500)
+
+def _encrypt_settings(data,settings):
+ cipher=_cipher(data)
+ result=dict(settings)
+ for name in ("imap_password","groq_api_key"):
+  if result.get(name):
+   result[name]="enc:"+cipher.encrypt(result[name].encode("utf-8")).decode("ascii")
+ return result
 
 def redacted(cfg):
  return {"imap_host":cfg.get("imap_host",""),"imap_port":cfg.get("imap_port",993),
@@ -260,7 +291,7 @@ def register_routes(app,*,user,csrf,data_path):
   try:
    fd=os.open(tmp,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
    with os.fdopen(fd,"w",encoding="utf-8") as stream:
-    json.dump(settings,stream,ensure_ascii=False)
+    json.dump(_encrypt_settings(data_path,settings),stream,ensure_ascii=False)
    os.replace(tmp,target)
   finally:tmp.unlink(missing_ok=True)
   return redacted(settings)
