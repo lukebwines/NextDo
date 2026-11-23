@@ -201,8 +201,9 @@ def worker_loop(conn,data):
    if not cfg.get("enabled"):continue
    # Requeue stale processing claims after interrupted launches.
    with conn() as c:
-    c.execute("UPDATE cloudflare_mail_inbox SET status='retry',next_attempt_epoch=? WHERE status='processing' AND started_at<?",
-     (sec(),datetime.fromtimestamp(time.time()-180,timezone.utc).isoformat()))
+    c.execute("UPDATE cloudflare_mail_inbox SET status=CASE WHEN attempt_count>=? THEN 'failed' ELSE 'retry' END,next_attempt_epoch=?,completed_at=CASE WHEN attempt_count>=? THEN ? ELSE NULL END WHERE status='processing' AND started_at<?",
+     (RETRY_LIMIT,sec(),RETRY_LIMIT,stamp(),datetime.fromtimestamp(time.time()-180,timezone.utc).isoformat()))
+    c.execute("UPDATE cloudflare_mail_inbox SET payload_encrypted=NULL WHERE status='failed' AND received_at<datetime('now','-7 days')")
    run_queue(conn,data)
   except Exception:LOG.warning("NextDo Cloudflare email queue retry deferred")
 
@@ -256,6 +257,12 @@ def register_routes(app,*,conn,user,csrf,data_path):
  @app.post("/api/cloudflare-mail/process")
  def process(req:Request):
   admin(req);csrf(req);return run_queue(conn,data_path)
+ @app.post("/api/cloudflare-mail/retry-failed")
+ def retry_failed(req:Request):
+  admin(req);csrf(req)
+  with conn() as c:
+   result=c.execute("UPDATE cloudflare_mail_inbox SET status='retry',attempt_count=0,next_attempt_epoch=0,error=NULL,completed_at=NULL WHERE status='failed' AND payload_encrypted IS NOT NULL")
+   return {"queued":result.rowcount}
  @app.get("/api/cloudflare-mail/history")
  def history(req:Request):
   admin(req)
