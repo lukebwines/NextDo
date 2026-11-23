@@ -452,6 +452,8 @@ def task_update(tid:int,b:TaskIn,req:Request):
    b.labels=[x for x in b.labels if x!='Da verificare']
    b.description=b.description.replace('DA VERIFICARE - scadenza proposta automaticamente da email, non convalidata.',
     'Scadenza confermata manualmente (origine: email Gmail NextDo).',1)
+   b.description=b.description.replace('[DA VERIFICARE] Scadenza generata automaticamente, non convalidata.',
+    'Scadenza confermata manualmente (origine: Cloudflare Email Routing).',1)
   if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common','project'):
    progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
@@ -709,4 +711,7 @@ email_intake.register_routes(app,user=user,csrf=csrf,data_path=DATA)
 from . import gmail_auto
 gmail_auto.upgrade(DB,DATA)
 gmail_auto.register_routes(app,conn=conn,user=user,csrf=csrf,data_path=DATA)
+from . import cloudflare_mail
+cloudflare_mail.upgrade(DB)
+cloudflare_mail.register_routes(app,conn=conn,user=user,csrf=csrf,data_path=DATA)
 collaborators.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record,data_path=DATA)

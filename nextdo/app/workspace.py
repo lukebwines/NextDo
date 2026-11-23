@@ -470,7 +470,7 @@ def register_routes(app,*,conn,user,csrf,ph,record,data_path=None):
    t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
    if not t:fail('Attività inesistente',404)
    if not (can_finish(c,u,t) if b.status=='done' else can_move(c,u,t)):fail()
-   if t['status']=='review' and b.status=='done':fail('Confermare prima la scadenza in stato Da verificare',400)
+   if t['status']=='review':fail('Verificare la scadenza dalla scheda e salvarla prima di cambiare il Kanban',400)
    if (b.status=='done' or t['status']=='done') and b.status!=t['status'] and t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
     fail('Completare o riaprire separatamente i CdS',400)
    if b.status!=t['status']:

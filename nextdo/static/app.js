@@ -524,7 +524,102 @@ function gmailAutoSettings(main){
  load();
 }
 
-function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);gmailAutoSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
+function cloudflareMailSettings(main){
+ if(S.me.role!=='admin')return;
+ const card=el('section',{class:'card',style:'margin-top:15px'});
+ card.append(node('h2','','Posta in arrivo Cloudflare → Scadenze'),
+  node('p','sub','Ricezione diretta delle email senza Gmail, OAuth Google o password della posta. Cloudflare inoltra le sole comunicazioni autorizzate a NextDo tramite un Worker firmato. GroqCloud elabora il testo su server esterni: verificare le autorizzazioni prima di inoltrare comunicazioni istituzionali.'),
+  node('p','sub','Per evitare conflitti DNS, usare un sottodominio dedicato alle email. Esempio non attivo: scadenze@posta.archis.uk.'),
+  node('p','sub','La ricezione va abilitata solo dopo la configurazione del Worker su Cloudflare. Ogni scadenza sarà privata dell’Admin e contrassegnata «Da verificare».'));
+ const grid=el('div',{class:'formgrid'}),secretArea=el('div',{class:'full'}),
+  historyArea=el('div',{class:'full'});
+ card.append(grid,secretArea,historyArea);
+ main.append(card);
+ async function showHistory(){
+  historyArea.replaceChildren(node('h3','','Registro email ricevute'));
+  try{
+   const history=await api('/cloudflare-mail/history');
+   if(!history.length){historyArea.append(node('p','sub','Nessun messaggio ricevuto.'));return}
+   for(const e of history.slice(0,20)){
+    const names={queued:'In coda',processing:'In analisi',processed:'Elaborata',
+     duplicate:'Duplicata',retry:'Da ritentare',failed:'Errore definitivo'};
+    const meta=(names[e.status]||e.status)+' · '+(e.received_at||'')+
+       ' · attività create: '+e.tasks_created+
+       (e.error?' · '+e.error:'');
+    historyArea.append(el('div',{class:'rowtask'},[
+      node('span','taskmain',meta),
+      node('span','sub',e.message_hash.slice(0,12))
+    ]));
+   }
+  }catch(e){historyArea.append(node('p','sub','Registro non disponibile: '+e.message))}
+ }
+ async function load(){
+  try{
+   const cfg=await api('/cloudflare-mail/config');
+   grid.replaceChildren();
+   const recipient=input('recipient','Esempio: scadenze@posta.archis.uk',cfg.recipient||'');
+   const sender=input('allowed_sender','Email da cui inoltri i messaggi',cfg.allowed_sender||'');
+   const active=el('input',{type:'checkbox',checked:cfg.enabled});
+   const url=el('input',{class:'field',readOnly:true,value:location.origin+cfg.ingest_path});
+   grid.append(node('p','sub','Segreto Worker: '+(cfg.secret_configured?'configurato':'non configurato')+
+      ' · Ricezione: '+(cfg.enabled?'attiva':'disattivata')),
+    field('Indirizzo email dedicato (da creare in Cloudflare)',recipient),
+    field('Mittente autorizzato per gli inoltri',sender),
+    field('Endpoint HTTPS NextDo per il Worker',url),
+    el('label',{class:'full'},[active,' Abilita la ricezione automatica']));
+   const actions=el('div',{class:'actions full'});
+   actions.append(btn('Salva impostazioni Cloudflare',async()=>{
+    try{
+     await api('/cloudflare-mail/config',{method:'POST',body:JSON.stringify({
+      recipient:recipient.value,allowed_sender:sender.value,enabled:active.checked
+     })});
+     msg('Impostazioni Cloudflare salvate');await load();
+    }catch(e){msg(e.message,true)}
+   },'primary'));
+   actions.append(btn('Genera / rigenera segreto Worker',async()=>{
+    if(!confirm('Il segreto precedente, se presente, cesserà di funzionare. NextDo disattiverà la ricezione finché non avrai aggiornato il Worker. Continuare?'))return;
+    try{
+     const result=await api('/cloudflare-mail/secret',{method:'POST'});
+     secretArea.replaceChildren();
+     const box=el('textarea',{class:'field',readOnly:true,rows:'3'});
+     box.value=result.secret;
+     const copy=btn('Copia segreto',async()=>{
+      try{await navigator.clipboard.writeText(box.value);msg('Segreto copiato')}catch(e){box.select();msg('Seleziona e copia il segreto mostrato',true)}
+     },'small');
+     secretArea.append(node('p','sub','Copia ora questo segreto nelle variabili protette del Worker Cloudflare come NEXTDO_SIGNING_SECRET. Non comparirà più dopo aver lasciato questa schermata.'),box,copy);
+     msg('Segreto generato. Ricezione disattivata fino a nuova conferma.');
+     active.checked=false;
+    }catch(e){msg(e.message,true)}
+   },'small'));
+   actions.append(btn('Ritenta email fallite',async()=>{
+    if(!confirm('Rimettere in coda i messaggi non elaborati per errori? Non verranno creati duplicati.'))return;
+    try{
+     const r=await api('/cloudflare-mail/retry-failed',{method:'POST'});
+     msg('Email rimesse in coda: '+r.queued);
+     await showHistory();
+    }catch(e){msg(e.message,true)}
+   },'small'));
+   actions.append(btn('Elabora la coda adesso',async()=>{
+    try{
+     const result=await api('/cloudflare-mail/process',{method:'POST'});
+     msg('Elaborate: '+result.processed+' · scadenze create: '+result.created+
+       ' · errori: '+result.errors);
+     await refresh();await showHistory();
+    }catch(e){msg(e.message,true)}
+   },'small'));
+   grid.append(actions,
+    el('div',{class:'full'},[el('a',{
+      href:'https://github.com/lukebwines/NextDo/blob/main/docs/cloudflare-mail.md',
+      target:'_blank',rel:'noopener noreferrer',
+      text:'Guida alla configurazione del Worker Cloudflare'
+    })]));
+   await showHistory();
+  }catch(e){grid.replaceChildren(node('p','sub','Impostazioni Cloudflare non disponibili: '+e.message))}
+ }
+ load();
+}
+
+function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);cloudflareMailSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
 
 function restoreForm(){
  const {box,back}=modal('Ripristina un backup NextDo');
