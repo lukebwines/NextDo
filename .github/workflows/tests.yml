@@ -17,6 +17,8 @@ jobs:
         with:
           node-version: '22'
       - run: node --check nextdo/static/app.js
+      - run: node --check cloudflare/nextdo-email-worker.js
+      - run: node tests/worker-email-smoke.mjs
       - run: node --check nextdo/static/file-tools.js
       - run: node --check nextdo/static/workspace-ui.js
       - run: node --check nextdo/static/gantt.js
