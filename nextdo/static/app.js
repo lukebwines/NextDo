@@ -332,7 +332,7 @@ async function emailIntakeForm(){
  buttons.append(analyzeFile,analyzePaste);
  methods.append(field('Carica una email .eml',eml),
    node('p','sub','In alternativa, incolla soltanto il messaggio da analizzare:'),subject,pasted,buttons);
- box.append(configBox,methods,imapPanel,analyzeNotice,preview);
+ box.append(configBox,methods,imapPanel,analyzeNotice,preview,btn('Chiudi',()=>back.remove(),'small'));
  let currentConfig;
  async function settings(){
   try{currentConfig=await api('/email-intake/config')}catch(e){msg(e.message,true);return}
@@ -408,7 +408,6 @@ async function emailIntakeForm(){
      node('p','sub','Scadenza proposta: '+(p.due_date||'[DA VERIFICARE]')+' · Data sempre da confermare'),
      node('p','sub','Frase originale: “'+p.evidence+'”'));
     row.append(btn('Prepara scadenza',()=>{
-     back.remove();
      taskForm(null,'task',{title:p.title,description:p.description,
       due_at:p.due_date?p.due_date+'T12:00:00':''},{scope:'personal',focus:p.due_date?'due':undefined});
     },'primary'));
