@@ -3,6 +3,7 @@
 const NextDoWorkspace=(()=>{
  const scopes={personal:'Il mio spazio',cds:'Corsi di Studio',common:'Comune a tutti i CdS',project:'Progetto',group:'Gruppo'};
  const projectScopes={independent:'Indipendente dai CdS',cds:'Uno o più CdS',common:'Tutti i CdS'};
+ const projectStatuses={todo:'Da fare',doing:'In corso',waiting:'In attesa',done:'Completata'};
  const set=(...nodes)=>el('div',{},nodes);
  const opt=(label,fn,kind='')=>btn(label,fn,kind);
  function taskScopeOptions(){return Object.entries(scopes).map(([k,v])=>[k,k==='common'&&S.me.role!=='admin'?v+' (sola lettura)':v])}
@@ -193,7 +194,7 @@ const NextDoWorkspace=(()=>{
     await refresh();render();
    }catch(error){msg('Impossibile aggiornare «'+t.title+'»: '+error.message,true);await refresh();render()}
   };
-  for(const [status,label] of Object.entries(statuses)){
+  for(const [status,label] of Object.entries(projectStatuses)){
    const col=el('section',{class:'kanban-col','data-status':status});
    const cards=S.tasks.filter(t=>t.project_id===current.id&&t.status===status);
    col.append(el('h3',{},[label,tag(String(cards.length))]));
@@ -211,7 +212,7 @@ const NextDoWorkspace=(()=>{
     );
     if(movable){
      const controls=el('div',{class:'kanban-card-tools'});
-     const newStatus=select('task_status',Object.entries(statuses),t.status);
+     const newStatus=select('task_status',Object.entries(projectStatuses),t.status);
      newStatus.classList.add('kanban-status-select');
      newStatus.setAttribute('aria-label','Cambia stato: '+t.title);
      if(t.completion_mode==='per_course'&&(t.courses||[]).length){
@@ -277,7 +278,7 @@ const NextDoWorkspace=(()=>{
   const title=input('title','Titolo del progetto',p?.title||'');
   const desc=el('textarea',{class:'field',rows:'4'});desc.value=p?.description||'';
   const scope=select('scope',Object.entries(projectScopes),p?.scope||'independent');
-  const status=select('status',Object.entries(statuses),p?.status||'doing');
+  const status=select('status',Object.entries(projectStatuses),p?.status||'doing');
   const manager=select('manager_id',[['','Me stesso'],...S.users.map(u=>[String(u.id),u.display_name])],String(p?.manager_id||''));
   const due=input('due','',dtLocal(p?.due_at),'datetime-local');
   const featured=el('input',{type:'checkbox',checked:p?p.featured!==0:true});
