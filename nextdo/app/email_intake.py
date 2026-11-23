@@ -26,7 +26,7 @@ from fastapi import File,HTTPException,Request,UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel,Field
 
-MAX_MAIL=1_500_000
+MAX_MAIL=6_000_000
 MAX_TEXT=14_000
 MAX_RESULTS=8
 MODEL_PATTERN=re.compile(r"^[A-Za-z0-9._:/-]{1,100}$")
@@ -142,6 +142,14 @@ def _mail_login(cfg):
 
 def _fetch(client,uid,header=False):
  if not UID_PATTERN.fullmatch(uid):reject("Identificativo email non valido")
+ if not header:
+  typ,sizes=client.uid("fetch",uid,"(RFC822.SIZE)")
+  if typ!="OK":reject("Impossibile verificare le dimensioni del messaggio",502)
+  metadata=b" ".join((p[0] if isinstance(p,tuple) else p)
+    for p in sizes or [] if isinstance(p,(tuple,bytes)))
+  match=re.search(rb"RFC822\.SIZE\s+(\d+)",metadata)
+  if match and int(match.group(1))>MAX_MAIL:
+   reject("Il messaggio supera il limite di 6 MB; utilizzare un testo senza allegati",413)
  item="(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID)])" if header else "(BODY.PEEK[])"
  typ,data=client.uid("fetch",uid,item)
  if typ!="OK":reject("Messaggio IMAP non disponibile",502)
