@@ -452,6 +452,8 @@ def task_update(tid:int,b:TaskIn,req:Request):
    b.labels=[x for x in b.labels if x!='Da verificare']
    b.description=b.description.replace('DA VERIFICARE - scadenza proposta automaticamente da email, non convalidata.',
     'Scadenza confermata manualmente (origine: email Gmail NextDo).',1)
+   b.description=b.description.replace('[DA VERIFICARE] Scadenza generata automaticamente, non convalidata.',
+    'Scadenza confermata manualmente (origine: Cloudflare Email Routing).',1)
   if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common','project'):
    progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
