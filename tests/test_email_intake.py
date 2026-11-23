@@ -23,7 +23,7 @@ def configure(c,h):
  result=c.post("/api/email-intake/config",headers=h,json={
   "imap_host":"mail.example.org","imap_port":993,
   "imap_user":"dedicated@example.org","imap_password":"synthetic-app-secret",
-  "ollama_url":"http://127.0.0.1:11434","ollama_model":"synthetic-local:latest"})
+  "groq_model":"openai/gpt-oss-120b","groq_api_key":"gsk_synthetic_test"})
  assert result.status_code==200,result.text
  return result.json()
 
@@ -34,22 +34,24 @@ def test_email_config_is_admin_only_and_redacts_password(tmp_path):
  assert details["password_configured"] is True
  assert details["imap_configured"] is True
  assert details["microsoft_365"] is False
- assert details["external_ai"] is False
+ assert details["external_ai"] is True
  assert "synthetic-app-secret" not in str(details)
  assert "synthetic-app-secret" not in str(c.get("/api/email-intake/config").json())
  cfg_path=tmp_path/"email-intake-local.json"
  assert cfg_path.exists()
  assert stat.S_IMODE(cfg_path.stat().st_mode)==0o600
- assert "synthetic-app-secret" in cfg_path.read_text()
+ assert "synthetic-app-secret" not in cfg_path.read_text()
+ assert "gsk_synthetic_test" not in cfg_path.read_text()
+ assert (tmp_path/"email-intake.key").exists()
  updated=c.post("/api/email-intake/config",headers=h,json={
   "imap_host":"mail.example.org","imap_port":993,
   "imap_user":"dedicated@example.org","imap_password":"",
-  "ollama_url":"http://127.0.0.1:11434","ollama_model":"synthetic-local:latest"})
+  "groq_model":"openai/gpt-oss-120b","groq_api_key":"gsk_synthetic_test"})
  assert updated.status_code==200
  assert updated.json()["password_configured"] is True
- assert "synthetic-app-secret" in cfg_path.read_text()
+ assert "synthetic-app-secret" not in cfg_path.read_text()
  assert c.post("/api/email-intake/config",headers=h,json={
-  "ollama_url":"https://public.example.org:443","ollama_model":"x"}).status_code==400
+  "groq_api_key":"invalid key","groq_model":"x"}).status_code==400
  create_user(c,h,"colleague")
  sign_in(c,h,"colleague")
  assert c.get("/api/email-intake/config").status_code==403
@@ -62,8 +64,8 @@ def test_upload_ai_returns_editable_proposals_never_creates_tasks(tmp_path,monke
  c,h=init(tmp_path)
  configure(c,h)
  from app import email_intake as intake
- def fake_ollama(cfg,source):
-  assert cfg["ollama_model"]=="synthetic-local:latest"
+ def fake_groq(cfg,source):
+  assert cfg["groq_model"]=="openai/gpt-oss-120b"
   assert "private attachment data" not in source["text"]
   return {"proposals":[
    {"title":"Inviare documentazione","date":"2026-12-12",
@@ -72,7 +74,7 @@ def test_upload_ai_returns_editable_proposals_never_creates_tasks(tmp_path,monke
    {"title":"Invented item","date":"2026-12-20",
     "evidence":"Questa frase non compare nella email e va scartata",
     "notes":"Non attendibile"}]}
- monkeypatch.setattr(intake,"_call_ollama",fake_ollama)
+ monkeypatch.setattr(intake,"_call_groq",fake_groq)
  before=c.get("/api/tasks").json()
  assert before==[]
  response=c.post("/api/email-intake/analyze-upload",headers=h,files={
@@ -102,7 +104,7 @@ def test_pasted_content_and_missing_date_stay_unconfirmed(tmp_path,monkeypatch):
  c,h=init(tmp_path)
  configure(c,h)
  from app import email_intake as intake
- monkeypatch.setattr(intake,"_call_ollama",lambda cfg,source:{"proposals":[{
+ monkeypatch.setattr(intake,"_call_groq",lambda cfg,source:{"proposals":[{
   "title":"Verificare l'adempimento","date":None,
   "evidence":"Si richiede la verifica del documento.",
   "notes":"Data non indicata nell'email."}]})
@@ -120,7 +122,7 @@ def test_ambiguous_year_is_not_invented_from_email_date(tmp_path,monkeypatch):
  c,h=init(tmp_path)
  configure(c,h)
  from app import email_intake as intake
- monkeypatch.setattr(intake,"_call_ollama",lambda cfg,source:{"proposals":[{
+ monkeypatch.setattr(intake,"_call_groq",lambda cfg,source:{"proposals":[{
   "title":"Inviare relazione","date":"2026-12-14",
   "evidence":"Inviare la relazione entro il 14 dicembre.",
   "notes":"La frase non specifica l'anno."}]})
@@ -148,7 +150,7 @@ def test_mailbox_metadata_and_selected_uid_are_manual(tmp_path,monkeypatch):
   return intake.parse_mail(sample_eml())
  monkeypatch.setattr(intake,"list_mail",fake_messages)
  monkeypatch.setattr(intake,"get_mail",fake_read)
- monkeypatch.setattr(intake,"_call_ollama",lambda cfg,source:{"proposals":[]})
+ monkeypatch.setattr(intake,"_call_groq",lambda cfg,source:{"proposals":[]})
  listing=c.get("/api/email-intake/messages")
  assert listing.status_code==200
  assert listing.json()["messages"][0]["uid"]=="14"
