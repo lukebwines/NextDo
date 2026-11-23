@@ -110,6 +110,23 @@ def test_signed_delivery_encrypted_queue_review_and_dedup(tmp_path,monkeypatch):
  assert c.post("/api/tasks/"+str(task["id"])+"/toggle",headers=h).status_code==400
  assert c.patch("/api/tasks/"+str(task["id"])+"/status",headers=h,
                 json={"status":"done"}).status_code==400
+ assert c.patch("/api/tasks/"+str(task["id"])+"/status",headers=h,
+                json={"status":"todo"}).status_code==400
+ assert c.post("/api/tasks/"+str(task["id"])+"/progress",headers=h,
+               json={"status":"doing","note":"Try to bypass review"}).status_code==400
+ payload={
+  "title":task["title"],"description":task["description"],
+  "kind":"task","status":"todo","priority":task["priority"],"scope":"personal",
+  "labels":task["labels"],"due_at":task["due_at"],
+  "assigned_to":None,"group_id":None,"completion_mode":"global",
+  "display_enabled":False,"recurrence":"none","course_ids":[],"reminders":[]
+ }
+ confirmation=c.put("/api/tasks/"+str(task["id"]),headers=h,json=payload)
+ assert confirmation.status_code==200,confirmation.text
+ confirmed=c.get("/api/tasks/"+str(task["id"])).json()
+ assert confirmed["status"]=="todo"
+ assert "Da verificare" not in confirmed["labels"]
+ assert "Scadenza confermata manualmente" in confirmed["description"]
  duplicate=deliver(c,secret,raw)
  assert duplicate.status_code==202 and duplicate.json()["duplicate"] is True
  # Forwarding headers can differ without changing the actual email text.
@@ -148,4 +165,18 @@ def test_retries_do_not_create_tasks_on_ai_errors(tmp_path,monkeypatch):
  history=c.get("/api/cloudflare-mail/history").json()
  assert history[0]["status"]=="retry"
  assert "GroqCloud" in history[0]["error"]
+ c.close()
+
+
+def test_admin_can_retry_failed_import_and_retains_queue(tmp_path,monkeypatch):
+ c,h=init(tmp_path);secret=setup(c,h)
+ assert deliver(c,secret,sample()).status_code==202
+ import sqlite3
+ with sqlite3.connect(tmp_path/"nextdo.sqlite3") as db:
+  db.execute("UPDATE cloudflare_mail_inbox SET status='failed',attempt_count=3")
+ result=c.post("/api/cloudflare-mail/retry-failed",headers=h)
+ assert result.status_code==200 and result.json()["queued"]==1
+ with sqlite3.connect(tmp_path/"nextdo.sqlite3") as db:
+  state=db.execute("SELECT status,attempt_count FROM cloudflare_mail_inbox").fetchone()
+ assert state==("retry",0)
  c.close()
