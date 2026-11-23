@@ -304,11 +304,7 @@ function calendarImportForm(){
 async function emailIntakeForm(){
  if(S.me.role!=='admin')return msg('Funzione riservata all’amministratore',true);
  const {box,back}=modal('Email selezionate → Scadenze AI');
- box.append(node('p','sub','Nessun collegamento a Microsoft 365. Puoi caricare un file .eml, incollare il testo di una email, oppure leggere una casella dedicata IMAP. Ollama opera sulla rete locale. Nessuna scadenza viene salvata automaticamente.'));
- const configBox=el('details',{class:'full'});
- configBox.append(el('summary',{},['Configurazione email dedicata e Ollama']));
- const configContent=el('div',{class:'formgrid'});
- configBox.append(configContent);
+ box.append(node('p','sub','Nessun collegamento a Microsoft 365. Puoi caricare un file .eml, incollare il testo di una email, oppure leggere una casella dedicata IMAP. GroqCloud elabora i testi su server esterni: usare solo contenuti autorizzati. Nessuna scadenza viene salvata automaticamente.'));
  const imapPanel=el('div',{class:'full card'});
  const mailbox=el('div',{class:'full'});
  const emailList=el('div',{style:'max-height:260px;overflow:auto'});
@@ -332,33 +328,10 @@ async function emailIntakeForm(){
  buttons.append(analyzeFile,analyzePaste);
  methods.append(field('Carica una email .eml',eml),
    node('p','sub','In alternativa, incolla soltanto il messaggio da analizzare:'),subject,pasted,buttons);
- box.append(configBox,methods,imapPanel,analyzeNotice,preview,btn('Chiudi',()=>back.remove(),'small'));
+ box.append(methods,imapPanel,analyzeNotice,preview,btn('Chiudi',()=>back.remove(),'small'));
  let currentConfig;
  async function settings(){
   try{currentConfig=await api('/email-intake/config')}catch(e){msg(e.message,true);return}
-  configContent.replaceChildren();
-  const host=input('imap_host','Es. imap.provider.it',currentConfig.imap_host);
-  const port=input('imap_port','Porta IMAP SSL',String(currentConfig.imap_port||993),'number');
-  const user=input('imap_user','Indirizzo casella dedicata',currentConfig.imap_user);
-  const password=input('imap_password','Password applicativa (lascia vuoto per mantenere quella configurata)','','password');
-  const url=input('ollama_url','http://192.168.1.10:11434',currentConfig.ollama_url);
-  const model=input('ollama_model','Modello Ollama già installato',currentConfig.ollama_model);
-  configContent.append(
-   node('p','sub','Configura soltanto una casella dedicata non Microsoft 365, alla quale inoltrerai manualmente le email selezionate. La password tecnica viene salvata in un file locale protetto; non compare nelle schermate successive.'),
-   field('Server IMAP',host),field('Porta SSL/TLS',port),
-   field('Utente casella',user),field('Password tecnica / applicativa',password),
-   field('Server Ollama locale (porta 11434)',url),field('Modello Ollama',model));
-  configContent.append(btn('Salva configurazione',async()=>{
-   try{
-    currentConfig=await api('/email-intake/config',{method:'POST',
-     body:JSON.stringify({imap_host:host.value,imap_port:Number(port.value),
-      imap_user:user.value,imap_password:password.value,ollama_url:url.value,
-      ollama_model:model.value})});
-    password.value='';
-    msg('Impostazioni email e Ollama salvate localmente');
-    renderMailbox();
-   }catch(e){msg(e.message,true)}
-  },'primary'));
   renderMailbox();
  }
  function renderMailbox(){
@@ -366,7 +339,7 @@ async function emailIntakeForm(){
   imapPanel.append(node('h3','','Casella dedicata IMAP'),
    node('p','sub',currentConfig?.imap_configured?
     'Lettura manuale in sola lettura: NextDo non sposta, non elimina e non contrassegna come letti i messaggi.':
-    'Casella non configurata. Puoi già analizzare file .eml o testo incollato dopo aver configurato Ollama.'));
+    'Casella non configurata. Puoi già analizzare file .eml o testo incollato dopo aver configurato GroqCloud in Impostazioni.'));
   if(currentConfig?.imap_configured){
    const load=btn('Controlla le ultime 25 email',async()=>{
     load.disabled=true;emailList.replaceChildren(node('p','sub','Lettura messaggi...'));
@@ -393,7 +366,7 @@ async function emailIntakeForm(){
  }
  async function review(path,options){
   preview.replaceChildren();
-  analyzeNotice.textContent='Analisi locale in corso: viene richiesto a Ollama di estrarre soltanto attività verificabili.';
+  analyzeNotice.textContent='Analisi GroqCloud in corso: verranno estratte soltanto proposte da confermare.';
   for(const b of [analyzeFile,analyzePaste])b.disabled=true;
   try{
    const result=await api(path,options);
@@ -441,7 +414,37 @@ function groupsView(main){
 }
 
 function membersForm(g){const {box}=modal('Membri — '+g.name);const list=el('div');box.append(list);async function show(){const members=await api(`/groups/${g.id}/members`);list.replaceChildren(...members.map(m=>el('div',{class:'rowtask'},[node('span','taskmain',m.display_name),tag(m.role)])))}show().catch(e=>msg(e.message,true));const memberSelect=select('user_id',S.users.map(u=>[String(u.id),u.display_name])),role=select('role',[['member','Membro'],['manager','Responsabile']]);box.append(field('Aggiungi utente',memberSelect),field('Ruolo',role),btn('Aggiungi / aggiorna',async()=>{try{await api(`/groups/${g.id}/members`,{method:'POST',body:JSON.stringify({user_id:Number(memberSelect.value),role:role.value})});await show()}catch(e){msg(e.message,true)}},'primary'))}
-function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
+function emailIntakeSettings(main){
+ if(S.me.role!=='admin')return;
+ const card=el('section',{class:'card',style:'margin-top:15px'});
+ card.append(node('h2','','Email e intelligenza artificiale'),
+  node('p','sub','GroqCloud elabora il testo su server esterni. Non inviare comunicazioni istituzionali senza autorizzazione. Nessuna integrazione Microsoft 365.'));
+ const grid=el('div',{class:'formgrid'});card.append(grid);main.append(card);
+ api('/email-intake/config').then(cfg=>{
+  const host=input('imap_host','Es. imap.gmail.com',cfg.imap_host);
+  const port=input('imap_port','993',String(cfg.imap_port||993),'number');
+  const user=input('imap_user','Casella dedicata',cfg.imap_user);
+  const password=input('imap_password','Lascia vuoto per mantenere quella salvata','','password');
+  const model=input('groq_model','Modello GroqCloud',cfg.groq_model||'openai/gpt-oss-120b');
+  const key=input('groq_api_key','Lascia vuoto per mantenere la chiave salvata','','password');
+  key.setAttribute('autocomplete','new-password');password.setAttribute('autocomplete','new-password');
+  grid.append(node('p','sub','Chiave GroqCloud: '+(cfg.groq_key_configured?'già configurata':'non configurata')+'. Per il test con testo incollato non occorre configurare IMAP.'),
+   field('Modello GroqCloud',model),field('API key GroqCloud',key),
+   node('h3','full','Casella IMAP facoltativa'),
+   field('Server IMAP',host),field('Porta SSL/TLS',port),
+   field('Utente casella',user),field('Password casella dedicata',password));
+  grid.append(btn('Salva impostazioni email e AI',async()=>{
+   try{
+    const result=await api('/email-intake/config',{method:'POST',body:JSON.stringify({
+     imap_host:host.value,imap_port:Number(port.value),imap_user:user.value,
+     imap_password:password.value,groq_model:model.value,groq_api_key:key.value})});
+    key.value='';password.value='';
+    msg('Configurazione salvata. Chiave GroqCloud: '+(result.groq_key_configured?'configurata':'non configurata'));
+   }catch(e){msg(e.message,true)}
+  },'primary'));
+ }).catch(e=>msg(e.message,true));
+}
+function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
 
 function restoreForm(){
  const {box,back}=modal('Ripristina un backup NextDo');
