@@ -17,6 +17,7 @@ def register_routes(app,conn,user,csrf,record):
   with conn() as c:
    t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
    if not t:fail('Attività non trovata',404)
+   if t['status']=='review':fail('Verificare la scadenza nella scheda prima di aggiornarla',400)
    allowed=can_finish(c,u,t) if b.status=='done' else can_move(c,u,t)
    if not allowed:fail('Non puoi aggiornare questa attività')
    if t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():
