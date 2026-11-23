@@ -386,7 +386,7 @@ async function emailIntakeForm(){
     },'primary'));
     preview.append(row);
    }
-  }catch(e){analyzeNotice.textContent='Analisi non completata';msg(e.message,true)}
+  }catch(e){analyzeNotice.textContent='Analisi non completata: '+e.message;msg(e.message,true)}
   finally{for(const b of [analyzeFile,analyzePaste])b.disabled=false}
  }
  await settings();

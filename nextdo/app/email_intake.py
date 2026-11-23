@@ -221,14 +221,32 @@ def _call_groq(cfg,source):
  opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
  try:
   req=urllib.request.Request("https://api.groq.com/openai/v1/chat/completions",
-   data=data,headers={"Content-Type":"application/json","Authorization":"Bearer "+key},method="POST")
+   data=data,headers={"Content-Type":"application/json","Accept":"application/json",
+     "User-Agent":"NextDo/0.1.24","Authorization":"Bearer "+key},method="POST")
   with opener.open(req,timeout=40) as r:
    payload=r.read(400_000)
   result=json.loads(payload)
   content=result["choices"][0]["message"]["content"]
-  return json.loads(content) if isinstance(content,str) else content
- except (OSError,ValueError,IndexError,KeyError,TypeError,urllib.error.HTTPError):
-  reject("Analisi GroqCloud non riuscita. Verificare connessione, chiave API e modello.",502)
+  parsed=json.loads(content) if isinstance(content,str) else content
+  if not isinstance(parsed,dict):reject("GroqCloud ha restituito un formato inatteso",502)
+  return parsed
+ except urllib.error.HTTPError as exc:
+  # Never include the remote response body or credentials in errors shown to users.
+  status=exc.code
+  if status==401:reject("GroqCloud HTTP 401: chiave API non valida, revocata o non autorizzata",502)
+  if status==403:reject("GroqCloud HTTP 403: accesso rifiutato; verificare permessi del modello o blocco di rete/Cloudflare",502)
+  if status==404:reject("GroqCloud HTTP 404: modello non disponibile; controllare il nome del modello",502)
+  if status in (400,422):reject("GroqCloud HTTP "+str(status)+": richiesta non accettata; verificare modello e parametri",502)
+  if status==429:
+   retry=exc.headers.get("Retry-After","") if exc.headers else ""
+   delay=("; riprovare fra "+retry+" secondi") if re.fullmatch(r"[0-9]{1,5}",retry) else ""
+   reject("GroqCloud HTTP 429: limite di utilizzo raggiunto"+delay,502)
+  if status>=500:reject("GroqCloud HTTP "+str(status)+": servizio temporaneamente non disponibile",502)
+  reject("GroqCloud HTTP "+str(status)+": richiesta rifiutata",502)
+ except (OSError,urllib.error.URLError,TimeoutError):
+  reject("Impossibile collegarsi a GroqCloud: controllare connettività Internet e DNS del Raspberry",502)
+ except (ValueError,IndexError,KeyError,TypeError):
+  reject("Risposta GroqCloud non interpretabile come JSON: riprovare o verificare il modello",502)
 
 def analyze(cfg,source):
  raw=_call_groq(cfg,source)
