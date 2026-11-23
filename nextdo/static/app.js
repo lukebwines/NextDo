@@ -111,7 +111,7 @@ function dashboard(main){
  const legend=el('div',{class:'chart-legend'});count.forEach(([name,num],i)=>legend.append(el('div',{class:'legend-row'},[el('span',{class:'legend-dot',style:'background:'+colors[i]}),node('span','',name),node('strong','',String(num))])));if(!count.length)legend.append(node('span','muted','Nessuna etichetta assegnata'));chart.append(ring,legend);breakdown.append(chart);lower.append(week,breakdown);main.append(lower);
  NextDoProgress.dashboard(main);
 }
-function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['urgent','Urgenti'],['overdue','Scadute'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';tools.append(search,csel,gsel,status,preset);if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':t.kind==='task'&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&(preset.value==='all'||(preset.value==='urgent'&&['high','critical'].includes(t.priority)&&t.status!=='done')||(preset.value==='overdue'&&t.due_at&&new Date(t.due_at)<new Date()&&t.status!=='done')||(preset.value==='done'&&t.status==='done')));panel.append(node('h2','',`${tasks.length} elementi`));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.forEach(t=>panel.append(taskrow(t)))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
+function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['urgent','Urgenti'],['overdue','Scadute'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';tools.append(search,csel,gsel,status,preset);if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Email → Scadenze AI',emailIntakeForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':t.kind==='task'&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&(preset.value==='all'||(preset.value==='urgent'&&['high','critical'].includes(t.priority)&&t.status!=='done')||(preset.value==='overdue'&&t.due_at&&new Date(t.due_at)<new Date()&&t.status!=='done')||(preset.value==='done'&&t.status==='done')));panel.append(node('h2','',`${tasks.length} elementi`));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.forEach(t=>panel.append(taskrow(t)))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
 function modal(title){const back=el('div',{class:'modalback'}),box=el('div',{class:'modal'});box.append(node('h2','',title));back.append(box);back.addEventListener('click',e=>{if(e.target===back)back.remove()});document.body.append(back);return {back,box}}
 function checkboxes(title,values,selected=[]){const outer=el('div',{class:'full'}),region=el('div',{class:'checkboxes'});outer.append(node('label','label',title),region);for(const [v,l] of values){const cb=el('input',{type:'checkbox',value:String(v),checked:selected.includes(Number(v))});region.append(el('label',{},[cb,' '+l]))}return {outer,selected:()=>[...region.querySelectorAll('input:checked')].map(e=>Number(e.value))}}
 function taskForm(t=null,kind='task',suggestion=null,preferences={}){
@@ -298,6 +298,125 @@ function calendarImportForm(){
   }
   applyButton.disabled=false;
  }
+}
+
+
+async function emailIntakeForm(){
+ if(S.me.role!=='admin')return msg('Funzione riservata all’amministratore',true);
+ const {box,back}=modal('Email selezionate → Scadenze AI');
+ box.append(node('p','sub','Nessun collegamento a Microsoft 365. Puoi caricare un file .eml, incollare il testo di una email, oppure leggere una casella dedicata IMAP. Ollama opera sulla rete locale. Nessuna scadenza viene salvata automaticamente.'));
+ const configBox=el('details',{class:'full'});
+ configBox.append(el('summary',{},['Configurazione email dedicata e Ollama']));
+ const configContent=el('div',{class:'formgrid'});
+ configBox.append(configContent);
+ const imapPanel=el('div',{class:'full card'});
+ const mailbox=el('div',{class:'full'});
+ const emailList=el('div',{style:'max-height:260px;overflow:auto'});
+ const preview=el('div',{class:'full',style:'max-height:45vh;overflow:auto'});
+ const analyzeNotice=node('p','sub','');
+ const methods=el('section',{class:'full',style:'display:flex;flex-direction:column;gap:10px'});
+ const eml=el('input',{type:'file',accept:'.eml',class:'field'});
+ const subject=input('mail_subject','Oggetto (facoltativo)');
+ const pasted=el('textarea',{class:'field',rows:'6',placeholder:'Incolla solo il testo dell’email selezionata. Non includere dati non necessari.'});
+ const buttons=el('div',{class:'actions'});
+ const analyzeFile=btn('Analizza file .eml',async()=>{
+  if(!eml.files?.length)return msg('Seleziona un messaggio .eml',true);
+  const fd=new FormData();fd.append('file',eml.files[0]);
+  await review('/email-intake/analyze-upload',{method:'POST',body:fd});
+ },'small');
+ const analyzePaste=btn('Analizza testo selezionato',async()=>{
+  if(!pasted.value.trim())return msg('Incolla prima il testo',true);
+  await review('/email-intake/analyze-text',{method:'POST',
+    body:JSON.stringify({subject:subject.value,text:pasted.value})});
+ },'primary');
+ buttons.append(analyzeFile,analyzePaste);
+ methods.append(field('Carica una email .eml',eml),
+   node('p','sub','In alternativa, incolla soltanto il messaggio da analizzare:'),subject,pasted,buttons);
+ box.append(configBox,methods,imapPanel,analyzeNotice,preview,btn('Chiudi',()=>back.remove(),'small'));
+ let currentConfig;
+ async function settings(){
+  try{currentConfig=await api('/email-intake/config')}catch(e){msg(e.message,true);return}
+  configContent.replaceChildren();
+  const host=input('imap_host','Es. imap.provider.it',currentConfig.imap_host);
+  const port=input('imap_port','Porta IMAP SSL',String(currentConfig.imap_port||993),'number');
+  const user=input('imap_user','Indirizzo casella dedicata',currentConfig.imap_user);
+  const password=input('imap_password','Password applicativa (lascia vuoto per mantenere quella configurata)','','password');
+  const url=input('ollama_url','http://192.168.1.10:11434',currentConfig.ollama_url);
+  const model=input('ollama_model','Modello Ollama già installato',currentConfig.ollama_model);
+  configContent.append(
+   node('p','sub','Configura soltanto una casella dedicata non Microsoft 365, alla quale inoltrerai manualmente le email selezionate. La password tecnica viene salvata in un file locale protetto; non compare nelle schermate successive.'),
+   field('Server IMAP',host),field('Porta SSL/TLS',port),
+   field('Utente casella',user),field('Password tecnica / applicativa',password),
+   field('Server Ollama locale (porta 11434)',url),field('Modello Ollama',model));
+  configContent.append(btn('Salva configurazione',async()=>{
+   try{
+    currentConfig=await api('/email-intake/config',{method:'POST',
+     body:JSON.stringify({imap_host:host.value,imap_port:Number(port.value),
+      imap_user:user.value,imap_password:password.value,ollama_url:url.value,
+      ollama_model:model.value})});
+    password.value='';
+    msg('Impostazioni email e Ollama salvate localmente');
+    renderMailbox();
+   }catch(e){msg(e.message,true)}
+  },'primary'));
+  renderMailbox();
+ }
+ function renderMailbox(){
+  imapPanel.replaceChildren();
+  imapPanel.append(node('h3','','Casella dedicata IMAP'),
+   node('p','sub',currentConfig?.imap_configured?
+    'Lettura manuale in sola lettura: NextDo non sposta, non elimina e non contrassegna come letti i messaggi.':
+    'Casella non configurata. Puoi già analizzare file .eml o testo incollato dopo aver configurato Ollama.'));
+  if(currentConfig?.imap_configured){
+   const load=btn('Controlla le ultime 25 email',async()=>{
+    load.disabled=true;emailList.replaceChildren(node('p','sub','Lettura messaggi...'));
+    try{
+     const result=await api('/email-intake/messages');
+     emailList.replaceChildren();
+     if(!result.messages?.length)emailList.append(node('p','sub','Casella vuota.'));
+     for(const mail of result.messages||[]){
+      const item=el('div',{class:'rowtask'},[
+       el('div',{class:'taskmain'},[
+        node('strong','',mail.subject||'Senza oggetto'),
+        node('p','sub',mail.sender+' · '+mail.date)
+       ]),
+       btn('Analizza',()=>review('/email-intake/analyze-message',
+        {method:'POST',body:JSON.stringify({uid:mail.uid})}),'small')
+      ]);
+      emailList.append(item);
+     }
+    }catch(e){emailList.replaceChildren();msg(e.message,true)}
+    finally{load.disabled=false}
+   },'small');
+   imapPanel.append(load,emailList);
+  }
+ }
+ async function review(path,options){
+  preview.replaceChildren();
+  analyzeNotice.textContent='Analisi locale in corso: viene richiesto a Ollama di estrarre soltanto attività verificabili.';
+  for(const b of [analyzeFile,analyzePaste])b.disabled=true;
+  try{
+   const result=await api(path,options);
+   analyzeNotice.textContent='Analisi completata. Nessun dato salvato. Verifica oggetto, frase originale e data di ogni proposta.';
+   preview.append(node('h3','','Proposte dall’email: '+(result.source?.subject||'senza oggetto')));
+   const already=S.tasks.some(t=>t.description?.includes(result.source?.source_hash||'@@@'));
+   if(already)preview.append(node('p','project-assignment-warning','Attenzione: un’attività derivata da questa email risulta già presente tra le scadenze visibili.'));
+   if(!result.proposals?.length)preview.append(node('p','sub','Nessuna attività verificabile individuata. È possibile inserire manualmente una scadenza.'));
+   for(const p of result.proposals||[]){
+    const row=el('section',{class:'card',style:'margin-bottom:10px'});
+    row.append(node('strong','',p.title),
+     node('p','sub','Scadenza proposta: '+(p.due_date||'[DA VERIFICARE]')+' · Data sempre da confermare'),
+     node('p','sub','Frase originale: “'+p.evidence+'”'));
+    row.append(btn('Prepara scadenza',()=>{
+     taskForm(null,'task',{title:p.title,description:p.description,
+      due_at:p.due_date?p.due_date+'T12:00:00':''},{scope:'personal',focus:p.due_date?'due':undefined});
+    },'primary'));
+    preview.append(row);
+   }
+  }catch(e){analyzeNotice.textContent='Analisi non completata';msg(e.message,true)}
+  finally{for(const b of [analyzeFile,analyzePaste])b.disabled=false}
+ }
+ await settings();
 }
 
 function pasteForm(){const {box,back}=modal('Incolla nota e rileva scadenze');const txt=el('textarea',{class:'field',rows:'10',placeholder:'Incolla una comunicazione o una nota…'});box.append(field('Testo originale',txt));box.append(el('p',{class:'sub',text:'Il rilevamento è locale e non utilizza servizi di AI esterni. Le date e le priorità devono sempre essere confermate.'}),el('div',{class:'actions'},[btn('Annulla',()=>back.remove()),btn('Analizza testo',async()=>{try{const suggestion=await api('/extract',{method:'POST',body:JSON.stringify({text:txt.value})});if(suggestion.detected_dates.length>1)msg('Rilevate più date: verificare quelle aggiuntive nella descrizione.');suggestion.due_at=suggestion.detected_dates[0]?suggestion.detected_dates[0]+'T12:00:00':'';back.remove();taskForm(null,'task',suggestion)}catch(e){msg(e.message,true)}},'primary')]))}
