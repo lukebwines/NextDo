@@ -591,6 +591,14 @@ function cloudflareMailSettings(main){
      active.checked=false;
     }catch(e){msg(e.message,true)}
    },'small'));
+   actions.append(btn('Ritenta email fallite',async()=>{
+    if(!confirm('Rimettere in coda i messaggi non elaborati per errori? Non verranno creati duplicati.'))return;
+    try{
+     const r=await api('/cloudflare-mail/retry-failed',{method:'POST'});
+     msg('Email rimesse in coda: '+r.queued);
+     await showHistory();
+    }catch(e){msg(e.message,true)}
+   },'small'));
    actions.append(btn('Elabora la coda adesso',async()=>{
     try{
      const result=await api('/cloudflare-mail/process',{method:'POST'});
