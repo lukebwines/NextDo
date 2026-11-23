@@ -54,9 +54,13 @@ def redacted(cfg):
    "mode":"manual_read_only","external_ai":False,"microsoft_365":False}
 
 def local_ollama(url):
- parsed=urlparse(url)
+ try:
+  parsed=urlparse(url)
+  port=parsed.port
+ except ValueError:
+  reject("Indirizzo Ollama locale non valido")
  if (parsed.scheme!="http" or parsed.username or parsed.password or parsed.path not in ("","/")
-     or parsed.query or parsed.fragment or not parsed.hostname or parsed.port!=11434):
+     or parsed.query or parsed.fragment or not parsed.hostname or port!=11434):
   reject("Ollama: usare l'indirizzo HTTP del server locale sulla porta 11434")
  host=parsed.hostname.lower()
  try:
