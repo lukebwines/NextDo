@@ -23,6 +23,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 from fastapi import File,HTTPException,Request,UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel,Field
 
 MAX_MAIL=1_500_000
@@ -60,7 +61,9 @@ def local_ollama(url):
  host=parsed.hostname.lower()
  try:
   address=ipaddress.ip_address(host)
-  if address.is_global:reject("Ollama deve essere accessibile solo sulla rete locale")
+  if (not (address.is_private or address.is_loopback) or address.is_link_local
+      or address.is_unspecified or address.is_multicast):
+   reject("Ollama deve essere accessibile solo sulla rete locale")
  except ValueError:
   if not (HOST_PATTERN.fullmatch(host) and (host.endswith(".local") or "." not in host)):
    reject("Ollama: indicare un nome host della rete locale o un indirizzo IP privato")
@@ -287,7 +290,7 @@ def register_routes(app,*,user,csrf,data_path):
   if not (file.filename or "").lower().endswith(".eml"):
    reject("Caricare un messaggio email in formato .eml")
   raw=await file.read(MAX_MAIL+1)
-  return analyze(load_config(data_path),parse_mail(raw))
+  return await run_in_threadpool(analyze,load_config(data_path),parse_mail(raw))
 
  @app.post("/api/email-intake/analyze-text")
  def analyze_text(b:EmailText,req:Request):
