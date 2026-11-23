@@ -216,7 +216,7 @@ def _gmail_get(token, endpoint, params=None):
  return _json_request(url, token=token)
 
 
-def _list_ids(token):
+def _list_ids(token, enabled_at=None):
  labels = _gmail_get(token, "labels").get("labels", [])
  match = next((item.get("id") for item in labels
                if isinstance(item, dict) and item.get("name") == LABEL), None)
@@ -226,6 +226,8 @@ def _list_ids(token):
  page = None
  for _ in range(MAX_PAGES):
   query = {"labelIds": match, "maxResults": 100}
+  if enabled_at:
+   query["q"] = "after:" + datetime.fromtimestamp(enabled_at / 1000, timezone.utc).strftime("%Y/%m/%d")
   if page:
    query["pageToken"] = page
   result = _gmail_get(token, "messages", query)
@@ -355,9 +357,9 @@ def run_once(conn, data_path, *, force=False):
   if not owner:
    fail("Amministratore Gmail non più attivo. Ricollegare l'account.")
   token = _access_token(cfg)
-  label_id, ids = _list_ids(token)
+  label_id, ids = _list_ids(token, cfg.get("enabled_at"))
   counters = {"busy": False, "created": 0, "processed": 0, "duplicates": 0, "errors": 0}
-  for gmail_id in reversed(ids):
+  for gmail_id in ids:
    if counters["processed"] >= BATCH_LIMIT:
     break
    try:
