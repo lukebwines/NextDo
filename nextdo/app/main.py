@@ -698,4 +698,6 @@ from . import sharepoint_export
 sharepoint_export.register_routes(app,conn=conn,user=user)
 from . import calendar_import
 calendar_import.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
+from . import email_intake
+email_intake.register_routes(app,user=user,csrf=csrf,data_path=DATA)
 collaborators.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record,data_path=DATA)
