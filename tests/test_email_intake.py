@@ -115,6 +115,25 @@ def test_pasted_content_and_missing_date_stay_unconfirmed(tmp_path,monkeypatch):
  c.close()
 
 
+
+def test_ambiguous_year_is_not_invented_from_email_date(tmp_path,monkeypatch):
+ c,h=init(tmp_path)
+ configure(c,h)
+ from app import email_intake as intake
+ monkeypatch.setattr(intake,"_call_ollama",lambda cfg,source:{"proposals":[{
+  "title":"Inviare relazione","date":"2026-12-14",
+  "evidence":"Inviare la relazione entro il 14 dicembre.",
+  "notes":"La frase non specifica l'anno."}]})
+ result=c.post("/api/email-intake/analyze-text",headers=h,json={
+  "subject":"Email selezionata","text":"Inviare la relazione entro il 14 dicembre."})
+ assert result.status_code==200,result.text
+ item=result.json()["proposals"][0]
+ assert item["due_date"]=="", "Il modello non deve inventare l'anno della scadenza"
+ assert item["date_needs_confirmation"] is True
+ assert c.get("/api/tasks").json()==[]
+ c.close()
+
+
 def test_mailbox_metadata_and_selected_uid_are_manual(tmp_path,monkeypatch):
  c,h=init(tmp_path)
  configure(c,h)
