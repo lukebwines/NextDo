@@ -1,6 +1,6 @@
 'use strict';
 const S={me:null,csrf:'',tasks:[],courses:[],groups:[],users:[],view:'dashboard',editing:null,month:new Date(),light:localStorage.getItem('nextdo-light')==='1',listPreset:'all',labelFilter:'',searchTerm:'',projects:[],courseAssignees:[],collaborators:[],courseCollaborators:[],myCourseIds:[],selectedProject:null,projectMode:localStorage.getItem('nextdo-project-view')==='gantt'?'gantt':'kanban',ganttZoom:localStorage.getItem('nextdo-gantt-zoom')||'normal'};
-const $=id=>document.getElementById(id), priority={low:'Bassa',normal:'Normale',high:'Alta',critical:'Critica'}, statuses={todo:'Da fare',doing:'In corso',waiting:'In attesa',done:'Completata'};
+const $=id=>document.getElementById(id), priority={low:'Bassa',normal:'Normale',high:'Alta',critical:'Critica'}, statuses={review:'Da verificare',todo:'Da fare',doing:'In corso',waiting:'In attesa',done:'Completata'};
 function el(tag,attrs={},children=[]){const n=document.createElement(tag);for(const [k,v] of Object.entries(attrs)){if(k==='class')n.className=v;else if(k==='text')n.textContent=v;else if(k==='html')throw Error('Unsafe HTML');else if(k.startsWith('on'))n.addEventListener(k.slice(2),v);else if(k==='value')n.value=v;else if(k==='checked')n.checked=!!v;else if(k==='style')n.setAttribute('style',v);else n.setAttribute(k,v)}for(const c of (Array.isArray(children)?children:[children]))if(c!=null)n.append(typeof c==='string'?document.createTextNode(c):c);return n}
 function node(tag,cls,txt){return el(tag,{class:cls,text:txt})}
 function msg(t,error=false){const d=el('div',{class:'notice'+(error?' error':'')},[t]);document.body.append(d);setTimeout(()=>d.remove(),5000)}
@@ -9,11 +9,11 @@ const opt=(v,t)=>el('option',{value:v,text:t});const input=(name,placeholder='',
 const field=(title,control)=>el('div',{},[node('label','label',title),control]);
 const select=(name,options,value='')=>{const s=el('select',{class:'field',name});for(const [v,t] of options)s.append(opt(v,t));s.value=value??'';return s};
 const wrap=(...x)=>el('div',{},x);const btn=(text,fn,cls='')=>el('button',{type:'button',class:'btn '+cls,onclick:fn,text});
-function fmt(d){if(!d)return 'Senza data';const dt=new Date(d);return isNaN(dt)?d:dt.toLocaleString('it-IT',{dateStyle:'medium',timeStyle:'short'})}
+function fmt(d){if(!d)return 'Senza data';if(/^\d{4}-\d{2}-\d{2}$/.test(d)){const [y,m,day]=d.split('-').map(Number);return new Date(y,m-1,day).toLocaleDateString('it-IT',{dateStyle:'medium'})}const dt=new Date(d);return isNaN(dt)?d:dt.toLocaleString('it-IT',{dateStyle:'medium',timeStyle:'short'})}
 function tag(text,cls=''){return node('span','pill '+cls,text)}
 function today(){return new Date().toISOString().slice(0,10)}
-function dtLocal(raw){if(!raw)return '';const d=new Date(raw);if(isNaN(d))return raw.slice(0,16);const z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,16)}
-async function init(){document.body.classList.toggle('light',S.light);const csrf=await api('/csrf');S.csrf=csrf.csrf;const setup=await api('/setup');if(setup.needs_setup)return loginView(true);try{S.me=await api('/me');await refresh();render()}catch{loginView(false)}}
+function dtLocal(raw){if(!raw)return '';if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return raw+'T12:00';const d=new Date(raw);if(isNaN(d))return raw.slice(0,16);const z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,16)}
+async function init(){document.body.classList.toggle('light',S.light);const csrf=await api('/csrf');S.csrf=csrf.csrf;const setup=await api('/setup');if(setup.needs_setup)return loginView(true);try{S.me=await api('/me');if(new URLSearchParams(location.search).get('gmail')==='connected')S.view='settings';await refresh();render()}catch{loginView(false)}}
 function loginView(setup){const box=el('form',{class:'authbox'});box.append(node('div','logo','✓ NextDo'),node('h1','',setup?'Prima configurazione':'Accedi'),node('p','sub',setup?'Crea il primo account amministratore. La password deve avere almeno 12 caratteri.':'Usa le credenziali personali NextDo.'));const u=input('username','Nome utente');const p=input('password','Password','','password');box.append(field('Nome utente',u));if(setup)box.append(field('Nome visualizzato',input('display_name','Nome visualizzato')));box.append(field('Password',p));if(setup)box.append(field('Codice installazione (visibile nei log NextDo)',input('setup_token','Codice locale di prima attivazione')));const submit=el('button',{class:'btn primary',type:'submit',style:'width:100%;margin-top:20px',text:setup?'Crea amministratore':'Accedi'});box.append(submit);box.addEventListener('submit',async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(box));if(setup){await api('/setup',{method:'POST',body:JSON.stringify(data)});msg('Amministratore creato: effettua l’accesso');loginView(false)}else{await api('/login',{method:'POST',body:JSON.stringify({...data,display_name:''})});S.me=await api('/me');await refresh();render()}}catch(e){msg(e.message,true)}});$('app').replaceChildren(box)}
 async function refresh(){
  const out=await Promise.all([api('/tasks'),api('/courses'),api('/groups'),api('/users'),api('/projects'),api('/my-courses')]);
@@ -48,14 +48,14 @@ function render(){
  main.append(header);
  if(S.view==='dashboard')dashboard(main);else if(['tasks','notes','archive','mine'].includes(S.view))taskList(main,S.view);else if(S.view==='projects')NextDoWorkspace.projectView(main);else if(S.view==='calendar')calendar(main);else if(S.view==='courses')coursesView(main);else if(S.view==='groups')groupsView(main);else settings(main);
 }
-function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:'Completa attività'});if(t.can_complete===false)cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[node('div','tasktitle',t.title),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit);return row}
+function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:t.status==='review'?'Verificare la scadenza prima di completarla':'Completa attività'});if(t.can_complete===false||t.status==='review')cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[node('div','tasktitle',t.title),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit);return row}
 function dashboard(main){
  main.classList.add('dashboard-page');
  const pending=S.tasks.filter(t=>t.kind==='task'&&t.status!=='done');
  const urgent=pending.filter(t=>['high','critical'].includes(t.priority));
  const late=pending.filter(t=>t.due_at&&new Date(t.due_at)<new Date());
  const done=S.tasks.filter(t=>t.kind==='task'&&t.status==='done');
- const metrics=[['Da gestire',pending.length,'calendar','all'],['Urgenti',urgent.length,'alert','urgent'],['Scadute',late.length,'clock','overdue'],['Completate',done.length,'check','done']];
+ const metrics=[['Da gestire',pending.length,'calendar','all'],['Da verificare',pending.filter(t=>t.status==='review').length,'alert','review'],['Scadute',late.length,'clock','overdue'],['Completate',done.length,'check','done']];
  const summary=el('div',{class:'dash-metrics'});
  metrics.forEach(([name,n,icon,preset],index)=>summary.append(el('button',{type:'button',class:'metric metric-'+index,onclick:()=>changeView(preset==='done'?'archive':'tasks',preset),'aria-label':name+': '+n+' attività, apri elenco filtrato'},[el('span',{class:'metric-icon'},[ico(icon)]),node('span','metric-label',name),node('strong','metric-value',String(n))])));
  main.append(summary);
@@ -63,7 +63,7 @@ function dashboard(main){
  left.append(el('div',{class:'card-head'},[node('h2','','Prossime scadenze'),btn('Vedi tutte ›',()=>changeView('tasks'),'textlink')]));
  for(const t of [...pending].sort((a,b)=>(a.due_at||'9999').localeCompare(b.due_at||'9999')).slice(0,6)){
   const row=el('div',{class:'dash-task-row '+(t.priority||'normal')});
-  const checkbox=el('input',{type:'checkbox',title:'Completa attività'});
+  const checkbox=el('input',{type:'checkbox',title:t.status==='review'?'Verificare prima di completare':'Completa attività'});if(t.status==='review')checkbox.disabled=true;
   checkbox.addEventListener('change',async()=>{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);checkbox.checked=false;return}try{await api('/tasks/'+t.id+'/toggle',{method:'POST'});await refresh();render()}catch(e){checkbox.checked=false;msg(e.message,true)}});
   const details=el('button',{type:'button',class:'dash-task-title',onclick:()=>taskForm(t)},[node('span','dash-task-name',t.title),el('span',{class:'dash-task-meta'},[...(t.labels||[]).slice(0,1).map(v=>tag(v,'label-tag')),tag(priority[t.priority]||'Normale',t.priority),node('span','dash-due',fmt(t.due_at))])]);
   row.append(checkbox,details);left.append(row);
@@ -111,7 +111,7 @@ function dashboard(main){
  const legend=el('div',{class:'chart-legend'});count.forEach(([name,num],i)=>legend.append(el('div',{class:'legend-row'},[el('span',{class:'legend-dot',style:'background:'+colors[i]}),node('span','',name),node('strong','',String(num))])));if(!count.length)legend.append(node('span','muted','Nessuna etichetta assegnata'));chart.append(ring,legend);breakdown.append(chart);lower.append(week,breakdown);main.append(lower);
  NextDoProgress.dashboard(main);
 }
-function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['urgent','Urgenti'],['overdue','Scadute'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';tools.append(search,csel,gsel,status,preset);if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Email → Scadenze AI',emailIntakeForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':t.kind==='task'&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&(preset.value==='all'||(preset.value==='urgent'&&['high','critical'].includes(t.priority)&&t.status!=='done')||(preset.value==='overdue'&&t.due_at&&new Date(t.due_at)<new Date()&&t.status!=='done')||(preset.value==='done'&&t.status==='done')));panel.append(node('h2','',`${tasks.length} elementi`));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.forEach(t=>panel.append(taskrow(t)))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
+function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['review','Da verificare'],['urgent','Urgenti'],['overdue','Scadute'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';tools.append(search,csel,gsel,status,preset);if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Email → Scadenze AI',emailIntakeForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':t.kind==='task'&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&(preset.value==='all'||(preset.value==='review'&&t.status==='review')||(preset.value==='urgent'&&['high','critical'].includes(t.priority)&&t.status!=='done')||(preset.value==='overdue'&&t.due_at&&new Date(t.due_at)<new Date()&&t.status!=='done')||(preset.value==='done'&&t.status==='done')));panel.append(node('h2','',`${tasks.length} elementi`));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.forEach(t=>panel.append(taskrow(t)))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
 function modal(title){const back=el('div',{class:'modalback'}),box=el('div',{class:'modal'});box.append(node('h2','',title));back.append(box);back.addEventListener('click',e=>{if(e.target===back)back.remove()});document.body.append(back);return {back,box}}
 function checkboxes(title,values,selected=[]){const outer=el('div',{class:'full'}),region=el('div',{class:'checkboxes'});outer.append(node('label','label',title),region);for(const [v,l] of values){const cb=el('input',{type:'checkbox',value:String(v),checked:selected.includes(Number(v))});region.append(el('label',{},[cb,' '+l]))}return {outer,selected:()=>[...region.querySelectorAll('input:checked')].map(e=>Number(e.value))}}
 function taskForm(t=null,kind='task',suggestion=null,preferences={}){
@@ -191,6 +191,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
   if(!confirm('Eliminare definitivamente questa attività?'))return;
   try{await api('/tasks/'+t.id,{method:'DELETE'});back.remove();await refresh();render()}catch(e){msg(e.message,true)}
  },'danger'));
+ if(t?.status==='review')form.append(node('p','sub','Scadenza da verificare: controlla la fonte, il termine e gli eventuali CdS. Per confermarla imposta lo stato Da fare, quindi salva.'));
  const save=el('button',{class:'btn primary',type:'submit',text:editing?'Salva modifiche':'Crea attività'});
  if(t&&t.can_edit===false)save.hidden=true;
  actions.append(save);form.append(actions);
@@ -444,7 +445,86 @@ function emailIntakeSettings(main){
   },'primary'));
  }).catch(e=>msg(e.message,true));
 }
-function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
+function gmailAutoSettings(main){
+ if(S.me.role!=='admin')return;
+ const panel=el('section',{class:'card',style:'margin-top:15px'});
+ const grid=el('div',{class:'formgrid'}),activity=el('div',{class:'full'});
+ panel.append(node('h2','','Gmail → scadenze automatiche'),
+  node('p','sub','Accesso Google OAuth senza password Gmail. NextDo elabora solo messaggi con etichetta NextDo; il permesso Google gmail.readonly consente tecnicamente la lettura dell’intera casella. Prima di inoltrare email UNIVR verificare le autorizzazioni dell’Ateneo.'),
+  node('p','sub','Sono elaborati soltanto i messaggi ricevuti dopo l’attivazione. Controllo automatico ogni 5 minuti. Le proposte vengono create come scadenze private Da verificare, senza assegnazioni automatiche.'),
+  grid,activity);
+ main.append(panel);
+ const load=async()=>{
+  try{
+   const cfg=await api('/gmail-auto/config');
+   grid.replaceChildren();
+   const client=input('client_id','Client ID OAuth Google',cfg.client_id||'');
+   const secret=input('client_secret','Lascia vuoto per mantenere il segreto salvato','','password');
+   secret.setAttribute('autocomplete','new-password');
+   const redirect=input('redirect_uri','URI di reindirizzamento OAuth',
+     cfg.redirect_uri||location.origin+'/api/gmail-auto/callback');
+   const enabled=el('input',{type:'checkbox',checked:cfg.enabled});
+   grid.append(node('p','sub','Collegamento: '+(cfg.connected?'Gmail connesso'+(cfg.account?' — '+cfg.account:''):'non collegato')+
+       ' · Client Secret: '+(cfg.client_secret_configured?'presente':'da configurare')),
+      field('Google OAuth Client ID',client),field('Google OAuth Client Secret',secret),
+      field('Redirect URI HTTPS (da registrare in Google Cloud)',redirect),
+      el('label',{class:'full'},[enabled,' Abilita acquisizione automatica']));
+   const actions=el('div',{class:'actions full'});
+   const save=btn('Salva impostazioni Gmail',async()=>{
+    try{
+     const result=await api('/gmail-auto/config',{method:'POST',body:JSON.stringify({
+      client_id:client.value.trim(),client_secret:secret.value,redirect_uri:redirect.value.trim(),enabled:enabled.checked
+     })});
+     msg(result.enabled?'Controllo Gmail attivo ogni 5 minuti':'Impostazioni Gmail salvate');
+     await load();
+    }catch(e){msg(e.message,true)}
+   },'primary');
+   actions.append(save);
+   actions.append(btn('Collega Google',async()=>{
+    try{
+     const r=await api('/gmail-auto/connect',{method:'POST'});
+     window.location.assign(r.authorization_url);
+    }catch(e){msg(e.message,true)}
+   },'small'));
+   if(cfg.connected){
+    const run=btn('Controlla adesso',async()=>{
+     run.disabled=true;
+     try{
+      const r=await api('/gmail-auto/run',{method:'POST'});
+      msg('Scadenze create: '+r.created+' · email elaborate: '+r.processed+
+       ' · duplicati: '+r.duplicates+' · errori: '+r.errors);
+      await refresh();await loadHistory();
+     }catch(e){msg(e.message,true)}finally{run.disabled=false}
+    },'small');
+    if(!cfg.enabled)run.disabled=true;
+    actions.append(run,btn('Disconnetti Gmail',async()=>{
+     if(!confirm('Disattivare l’automazione e revocare il collegamento locale? Le attività già create resteranno.'))return;
+     try{await api('/gmail-auto/disconnect',{method:'POST'});await load();}catch(e){msg(e.message,true)}
+    },'small'));
+   }
+   grid.append(actions);
+   await loadHistory();
+  }catch(e){grid.replaceChildren(node('p','sub','Impostazioni Gmail non disponibili: '+e.message))}
+ };
+ const loadHistory=async()=>{
+  activity.replaceChildren(node('h3','','Registro acquisizioni Gmail'));
+  try{
+   const rows=await api('/gmail-auto/history');
+   if(!rows.length){activity.append(node('p','sub','Nessun messaggio acquisito.'));return}
+   for(const item of rows.slice(0,20)){
+    const status={processed:'Elaborata',duplicate:'Duplicata',ignored:'Esclusa',skipped:'Non analizzabile',processing:'In elaborazione',error:'Errore'}[item.status]||item.status;
+    activity.append(el('div',{class:'rowtask'},[
+     node('span','taskmain',status+' · Gmail '+item.gmail_id+' · attività create: '+item.created+
+       (item.error?' · '+item.error:'')),
+     node('span','sub',item.completed_at||'')
+    ]));
+   }
+  }catch(e){activity.append(node('p','sub','Impossibile leggere il registro: '+e.message))}
+ };
+ load();
+}
+
+function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);gmailAutoSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
 
 function restoreForm(){
  const {box,back}=modal('Ripristina un backup NextDo');

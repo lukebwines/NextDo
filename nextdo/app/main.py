@@ -152,7 +152,7 @@ def can_edit(c,u,t):
  return workspace.can_write(c,u,t)
 
 def taskdetail(c,t,u=None):
- d=dict(t);d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['external_progress']=[dict(r) for r in c.execute('SELECT course_id,status,updated_at,source FROM external_course_progress WHERE task_id=?',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];d['can_edit']=workspace.can_write(c,u,t) if u else False;d['can_move']=workspace.can_move(c,u,t) if u else False;d['can_complete']=(workspace.can_finish(c,u,t) or (t['completion_mode']=='per_course' and bool(c.execute('SELECT 1 FROM task_courses tc JOIN course_assignees ca ON ca.course_id=tc.course_id WHERE tc.task_id=? AND ca.user_id=? LIMIT 1',(t['id'],u['id'])).fetchone()))) if u else False;return d
+ d=dict(t);d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['external_progress']=[dict(r) for r in c.execute('SELECT course_id,status,updated_at,source FROM external_course_progress WHERE task_id=?',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];d['can_edit']=workspace.can_write(c,u,t) if u else False;d['can_move']=workspace.can_move(c,u,t) if u else False;d['can_complete']=(t['status']!='review' and (workspace.can_finish(c,u,t) or (t['completion_mode']=='per_course' and bool(c.execute('SELECT 1 FROM task_courses tc JOIN course_assignees ca ON ca.course_id=tc.course_id WHERE tc.task_id=? AND ca.user_id=? LIMIT 1',(t['id'],u['id'])).fetchone())))) if u else False;return d
 
 def check_course_code(code):
  # Historical INCA rule: M followed by 2-3 alphanumerics, including MM? and M??R.
@@ -341,7 +341,7 @@ class TaskIn(BaseModel):
  scope:str='personal';project_id:Optional[int]=None
  labels:list[str]=Field(default_factory=list);course_ids:list[int]=Field(default_factory=list);reminders:list[int]=Field(default_factory=list)
 def validate_task(c,u,b):
- if b.priority not in ('low','normal','high','critical') or b.status not in ('todo','doing','waiting','done') or b.kind not in ('task','note') or b.completion_mode not in ('global','per_course'):err(400,'Valore non valido')
+ if b.priority not in ('low','normal','high','critical') or b.status not in ('review','todo','doing','waiting','done') or b.kind not in ('task','note') or b.completion_mode not in ('global','per_course'):err(400,'Valore non valido')
  if b.recurrence not in ('none','daily','weekly','monthly','yearly'):err(400,'Ricorrenza non valida')
  workspace.validate_scope(c,u,b)
  parsed={}
@@ -447,6 +447,11 @@ def task_update(tid:int,b:TaskIn,req:Request):
    if b.scope!=t['scope'] or b.project_id!=t['project_id'] or b.assigned_to!=t['assigned_to'] or (t['scope']=='cds' and set(b.course_ids)!=original):
     err(403,'Solo il proprietario o l’amministratore può cambiare ambito, CdS e responsabili')
   validate_task(c,u,b)
+  if t['status']=='review' and b.status=='done':err(400,'Confermare la scadenza in stato Da fare prima di completarla')
+  if t['status']=='review' and b.status!='review':
+   b.labels=[x for x in b.labels if x!='Da verificare']
+   b.description=b.description.replace('DA VERIFICARE - scadenza proposta automaticamente da email, non convalidata.',
+    'Scadenza confermata manualmente (origine: email Gmail NextDo).',1)
   if b.completion_mode=='per_course' and b.status=='done' and b.scope in ('cds','common','project'):
    progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
@@ -502,6 +507,7 @@ def toggle(tid:int,req:Request):
   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
   if not t:err(404,'Attività non trovata')
   if not workspace.can_finish(c,u,t):err()
+  if t['status']=='review':err(400,'Verificare e confermare la scadenza prima di completarla')
   if t['completion_mode']=='per_course' and c.execute('SELECT 1 FROM task_courses WHERE task_id=?',(tid,)).fetchone():err(400,'Completare separatamente i CdS')
   next_status='todo' if t['status']=='done' else 'done'
   c.execute('UPDATE tasks SET status=?,updated_at=? WHERE id=?',(next_status,iso(),tid))
@@ -700,4 +706,7 @@ from . import calendar_import
 calendar_import.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
 from . import email_intake
 email_intake.register_routes(app,user=user,csrf=csrf,data_path=DATA)
+from . import gmail_auto
+gmail_auto.upgrade(DB,DATA)
+gmail_auto.register_routes(app,conn=conn,user=user,csrf=csrf,data_path=DATA)
 collaborators.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record,data_path=DATA)

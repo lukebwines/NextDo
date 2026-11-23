@@ -63,7 +63,7 @@ const NextDoProgress=(()=>{
   const project=S.projects.find(p=>p.id===task.project_id);
   if(project)box.append(node('p','sub','Progetto: '+project.title));
   const form=el('form',{class:'formgrid'});
-  const st=select('progress-status',Object.entries(statuses),task.status);
+  const st=select('progress-status',Object.entries(statuses).filter(([code])=>code!=='review'),task.status);
   const note=el('textarea',{class:'field',rows:'3',maxlength:'1500',placeholder:'Aggiornamento del lavoro svolto, eventuali impedimenti, documenti predisposti…','aria-label':'Nota di avanzamento'});
   const scopedCourse=task.completion_mode==='per_course'&&task.courses?.length;
   if(scopedCourse){
