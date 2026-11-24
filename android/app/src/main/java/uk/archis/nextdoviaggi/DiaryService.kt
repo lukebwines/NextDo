@@ -97,6 +97,19 @@ class DiaryService:Service(),LocationListener {
     private var scope=""
     private var segment=""
     private var last:Location?=null
+    private var lastSample:Location?=null
+    private var stationarySamples=0
+    private var lowPower=false
+    private fun requestFixes(slow:Boolean):Boolean {
+        if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED) return false
+        return try {
+            lm.removeUpdates(this)
+            // Zero distance allows stationary fixes to drive the adaptive interval.
+            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,if(slow)90_000L else 30_000L,0f,this,Looper.getMainLooper())
+            lowPower=slow
+            true
+        } catch(e:SecurityException){false} catch(e:IllegalArgumentException){false}
+    }
     override fun onCreate(){super.onCreate();lm=getSystemService(LocationManager::class.java);store=DiaryStore(this)}
     override fun onBind(intent:Intent?)=null
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
@@ -115,8 +128,8 @@ class DiaryService:Service(),LocationListener {
                 .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open)
                 .addAction(Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this,android.R.drawable.ic_media_pause),"Sospendi",stop).build()).build()
             startForeground(412,n,ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-            segment=UUID.randomUUID().toString();last=null
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,30_000L,20f,this,Looper.getMainLooper())
+            segment=UUID.randomUUID().toString();last=null;lastSample=null;stationarySamples=0
+            if(!requestFixes(false)){stopSelf();return START_NOT_STICKY}
             DiaryState.running=true
             return START_STICKY
         } catch(e:Exception){stopSelf();return START_NOT_STICKY}
@@ -124,9 +137,19 @@ class DiaryService:Service(),LocationListener {
     override fun onLocationChanged(location:Location) {
         if(!DiaryState.wanted(this)||!DiaryState.running)return
         if(!location.hasAccuracy()||location.accuracy>100f||location.time<=0||System.currentTimeMillis()-location.time>120_000)return
+        val sample=lastSample
+        if(sample!=null&&location.time<=sample.time)return
+        // Require several good, quiet fixes before reducing the sampling rate.
+        val quiet=sample!=null && location.time-sample.time<=180_000L && location.accuracy<=35f && sample.accuracy<=35f &&
+            location.distanceTo(sample)<=maxOf(12f,minOf(30f,maxOf(location.accuracy,sample.accuracy))) &&
+            (!location.hasSpeed() || location.speed<0.8f)
+        stationarySamples=if(quiet)minOf(3,stationarySamples+1) else 0
+        lastSample=location
+        val slow=stationarySamples>=3
+        if(slow!=lowPower && !requestFixes(slow)){stopSelf();return}
         val previous=last
-        if(previous!=null&&location.time<=previous.time)return
         if(previous!=null&&location.time-previous.time>300_000)segment=UUID.randomUUID().toString()
+        else if(previous!=null&&location.distanceTo(previous)<20f&&location.time-previous.time<180_000L)return
         try{
             store.append(scope,trip,JSONObject().put("id",UUID.randomUUID().toString()).put("segment",segment)
                 .put("timestamp",location.time).put("latitude",location.latitude).put("longitude",location.longitude).put("accuracy",location.accuracy.toDouble()))
