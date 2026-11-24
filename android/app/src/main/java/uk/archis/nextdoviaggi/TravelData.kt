@@ -52,7 +52,7 @@ class TravelApi(base: String) {
         }
         root = u.toASCIIString().trimEnd('/') + "/api/mobile/v1"
     }
-    fun call(path: String, token: String? = null, data: JSONObject? = null, limit: Int = MAX): ByteArray {
+    fun call(path: String, token: String? = null, data: JSONObject? = null, limit: Int = MAX, zip: ByteArray? = null): ByteArray {
         val c = URL(root + path).openConnection() as HttpURLConnection
         try {
             c.instanceFollowRedirects = false
@@ -61,7 +61,14 @@ class TravelApi(base: String) {
             c.useCaches = false
             c.setRequestProperty("Accept", "*/*")
             if (token != null) c.setRequestProperty("Authorization", "Bearer " + token)
-            if (data != null) {
+            if (zip != null) {
+                require(zip.size <= MAX) { "Archivio oltre 32 MB" }
+                c.requestMethod = "POST"
+                c.doOutput = true
+                c.setFixedLengthStreamingMode(zip.size)
+                c.setRequestProperty("Content-Type", "application/zip")
+                c.outputStream.use { it.write(zip) }
+            } else if (data != null) {
                 c.requestMethod = "POST"
                 c.doOutput = true
                 c.setRequestProperty("Content-Type", "application/json")
@@ -79,12 +86,13 @@ class TravelApi(base: String) {
     }
     fun obj(path: String, token: String? = null, data: JSONObject? = null) =
         JSONObject(String(call(path, token, data), Charsets.UTF_8))
+    fun importZip(token: String, raw: ByteArray) = JSONObject(String(call("/trips/import", token, zip=raw), Charsets.UTF_8))
     fun trips(token: String): List<JSONObject> {
         val a = JSONArray(String(call("/trips", token), Charsets.UTF_8))
         return (0 until a.length()).map { a.getJSONObject(it) }
     }
 }
-data class TripPackage(val manifest: JSONObject, val state: JSONObject, val docs: Map<String,ByteArray>) {
+data class TripPackage(val manifest: JSONObject, val state: JSONObject, val docs: Map<String,ByteArray>, val revision: Int = -1) {
     val info get() = manifest.getJSONObject("trip")
     val id get() = info.getString("id")
     val bookings get() = manifest.arr("bookings")

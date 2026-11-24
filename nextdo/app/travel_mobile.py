@@ -1,5 +1,7 @@
-"""Read-only device-scoped travel API. Pairing requires an unlocked web account."""
+"""Device-scoped travel API. Pairing requires an unlocked web account."""
+from . import travel_timeline
 import hashlib,secrets,re,time
+from datetime import date
 from fastapi import Request,HTTPException
 from fastapi.responses import Response
 from argon2.exceptions import VerificationError
@@ -11,7 +13,7 @@ def raw_token(value):
  if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}",value):fail(401,"Credenziale non valida")
  return digest(value)
 
-def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
+def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit):
  with db() as c:
   c.executescript("""CREATE TABLE IF NOT EXISTS mobile_pairings(code_hash TEXT PRIMARY KEY,owner TEXT NOT NULL,expires REAL NOT NULL);
   CREATE TABLE IF NOT EXISTS mobile_devices(id TEXT PRIMARY KEY,owner TEXT NOT NULL,label TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,expires REAL NOT NULL,created REAL NOT NULL,revoked INTEGER DEFAULT 0);
@@ -38,6 +40,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
   if not row:fail(401,"Sessione scaduta o dispositivo revocato")
   active(row["owner"])
   return row
+ travel_timeline.register(app,db=db,allowed=allowed,auth=auth,load=load)
  @app.get("/api/personal/mobile/devices")
  def devices(req:Request):
   owner=allowed(req)
@@ -119,6 +122,64 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
  def trips(req:Request):
   owner=auth(req)["owner"]
   with db() as c:return [dict(x) for x in c.execute("SELECT id,title,start,end,revision FROM trips WHERE owner=? ORDER BY start DESC",(owner,))]
+ @app.post("/api/mobile/v1/trips/import")
+ async def import_mobile(req:Request):
+  auth(req)
+  if req.headers.get("content-type","").split(";")[0]!="application/zip":fail(415,"Richiesto archivio ZIP")
+  raw=bytearray()
+  async for chunk in req.stream():
+   if len(raw)+len(chunk)>limit:fail(413,"Archivio oltre 32 MB")
+   raw.extend(chunk)
+  # Validate the same package format as the web import; keep blocking ZIP/SQLite off the event loop.
+  from starlette.concurrency import run_in_threadpool
+  def finish():
+   m,state,files=read_archive(bytes(raw))
+   with db() as c:
+    owner=auth(req)["owner"]
+    rev=save(c,owner,m,state,files)
+   return {"id":m["trip"]["id"],"revision":rev}
+  return await run_in_threadpool(finish)
+ @app.post("/api/mobile/v1/trips")
+ def create_mobile(req:Request,b:dict):
+  m=new_manifest(b)
+  with db() as c:
+   owner=auth(req)["owner"]
+   rev=save(c,owner,m,{"notes":{},"checks":{}},{})
+  return {"id":m["trip"]["id"],"revision":rev}
+ @app.post("/api/mobile/v1/trips/{tid}/edit")
+ def edit_mobile(tid:str,req:Request,b:dict):
+  rev=b.get("revision");kind=b.get("kind");fields=b.get("fields")
+  if type(rev)!=int or not isinstance(fields,dict):fail(400,"Modifica non valida")
+  allowed_fields={"trip":{"title","subtitle"},"day":{"place","headline","description"},"event":{"time","title","details"},"booking":{"title","type","date","place","status","ref","price"}}
+  if not isinstance(kind,str) or kind not in allowed_fields or not fields or set(fields)-allowed_fields[kind]:fail(400,"Campi non modificabili")
+  if any(not isinstance(v,str) or len(v)>20000 or "\x00" in v for v in fields.values()):fail(400,"Testo non valido")
+  with db() as c:
+   owner=auth(req)["owner"];r=load(c,owner,tid)
+   if r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
+   m,state,files=read_archive(r["archive"])
+   if kind=="trip":target=m["trip"]
+   elif kind in ("day","event"):
+    day=next((d for d in m.get("days",[]) if d["date"]==b.get("date")),None)
+    if day is None:fail(404,"Giornata non trovata")
+    if kind=="day":target=day
+    else:
+     events=day.setdefault("events",[]);idx=b.get("index")
+     if idx is None:
+      target={};events.append(target)
+     elif type(idx)==int and 0<=idx<len(events):target=events[idx]
+     else:fail(404,"Evento non trovato")
+   else:
+    bookings=m.setdefault("bookings",[]);ident=b.get("id")
+    if ident is None:
+     target={"id":"booking-"+secrets.token_hex(8),"lines":[],"fields":[],"locations":[]}
+     bookings.append(target)
+    else:
+     target=next((x for x in bookings if x["id"]==ident),None)
+     if target is None:fail(404,"Prenotazione non trovata")
+   target.update(fields)
+   if kind in ("trip","event","booking") and not str(target.get("title","")).strip():fail(400,"Titolo obbligatorio")
+   revision=save(c,owner,m,state,files,rev)
+  return {"revision":revision,"manifest":m,"state":state}
  @app.get("/api/mobile/v1/trips/{tid}")
  def trip(tid:str,req:Request):
   owner=auth(req)["owner"]
