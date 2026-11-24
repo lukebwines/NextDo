@@ -427,6 +427,28 @@ def promote_task_to_project(tid:int,req:Request):
   record(c,u['id'],'create','project',pid)
  return {'ok':True,'project_id':pid,'task_id':tid}
 
+class CalendarExportIn(BaseModel):
+ task_ids:list[int]=Field(min_length=1,max_length=500)
+ include_details:bool=False
+
+@app.post('/api/calendar/export')
+def export_calendar(b:CalendarExportIn,req:Request):
+ from . import calendar_export
+ u=user(req);csrf(req)
+ ids=list(dict.fromkeys(b.task_ids))
+ selected=[]
+ with conn() as c:
+  for tid in ids:
+   t=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
+   if not t or not accessible(c,u,t):err(403,'Una delle attività non è disponibile')
+   if not calendar_export.eligible(t,TZ):err(400,'Selezionare solo scadenze o appuntamenti confermati con data valida')
+   selected.append(t)
+  try:content=calendar_export.calendar(selected,TZ,b.include_details)
+  except (ValueError,OverflowError):err(400,'Data o orario non esportabile: verificare le attività')
+ return Response(content,media_type='text/calendar; charset=utf-8',headers={
+  'Content-Disposition':'attachment; filename="nextdo-calendario.ics"',
+  'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
 @app.get('/api/tasks/{tid}')
 def task_get(tid:int,req:Request):
  u=user(req)
