@@ -1,4 +1,5 @@
-"""Read-only device-scoped travel API. Pairing requires an unlocked web account."""
+"""Device-scoped travel API. Pairing requires an unlocked web account."""
+from . import travel_timeline
 import hashlib,secrets,re,time
 from fastapi import Request,HTTPException
 from fastapi.responses import Response
@@ -38,6 +39,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
   if not row:fail(401,"Sessione scaduta o dispositivo revocato")
   active(row["owner"])
   return row
+ travel_timeline.register(app,db=db,allowed=allowed,auth=auth,load=load)
  @app.get("/api/personal/mobile/devices")
  def devices(req:Request):
   owner=allowed(req)
