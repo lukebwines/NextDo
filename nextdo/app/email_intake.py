@@ -301,7 +301,9 @@ def appointment_date(source,evidence,proposed):
  if anchor:
   relative=re.search(r"\b(oggi|domani|dopodomani)\b",evidence,re.I)
   if relative:return (anchor+timedelta(days={"oggi":0,"domani":1,"dopodomani":2}[relative[1].lower()])).isoformat()
- if proposed and proposed in evidence:return proposed
+ if proposed and proposed in evidence:
+  try:return date.fromisoformat(proposed).isoformat()
+  except ValueError:return ""
  return ""
 
 def literal_evidence(text,quote):

@@ -210,6 +210,7 @@ def process_one(conn,data,row):
   attempts=row["attempt_count"]+1
   final=attempts>=RETRY_LIMIT
   reason="Errore elaborazione messaggio"
+  fallback_created=0
   if isinstance(exc,HTTPException):reason="Errore GroqCloud HTTP "+str(exc.status_code)
   with conn() as c:
    if final and isinstance(exc,HTTPException):
@@ -226,11 +227,12 @@ def process_one(conn,data,row):
        c.execute("INSERT INTO cloudflare_mail_tasks(fingerprint,message_hash,task_id) VALUES(?,?,?)",(fp,sha,cur.lastrowid))
        c.execute("INSERT INTO audit(actor_id,action,object_type,object_id) VALUES(?,?,?,?)",(owner,"cloudflare_mail_create_unverified","task",cur.lastrowid))
        c.execute("UPDATE cloudflare_mail_inbox SET tasks_created=tasks_created+1 WHERE message_hash=?",(sha,))
+       fallback_created=1
     except (HTTPException,ValueError,KeyError):pass
    c.execute("UPDATE cloudflare_mail_inbox SET status=?,error=?,next_attempt_epoch=?,completed_at=? WHERE message_hash=?",
     ("failed" if final else "retry",reason,sec()+300*attempts,stamp() if final else None,sha))
   LOG.warning("Cloudflare email processing failed (attempt %d)",attempts)
-  return {"created":0,"error":True}
+  return {"created":fallback_created,"error":True}
 
 def run_queue(conn,data):
  if not RUN_LOCK.acquire(blocking=False):return {"busy":True,"processed":0,"created":0,"errors":0}
@@ -249,14 +251,13 @@ def worker_loop(conn,data):
  while True:
   time.sleep(INTERVAL)
   try:
-   cfg=load_config(data)
-   # Purge retained text even when automatic intake is disabled.
+   # Purge retained text even when automatic intake is disabled or config is unreadable.
    # Requeue stale processing claims after interrupted launches.
    with conn() as c:
     c.execute("UPDATE cloudflare_mail_inbox SET status=CASE WHEN attempt_count>=? THEN 'failed' ELSE 'retry' END,next_attempt_epoch=?,completed_at=CASE WHEN attempt_count>=? THEN ? ELSE NULL END WHERE status='processing' AND started_at<?",
      (RETRY_LIMIT,sec(),RETRY_LIMIT,stamp(),datetime.fromtimestamp(time.time()-180,timezone.utc).isoformat()))
     purge_expired(c)
-   if cfg.get("enabled"):run_queue(conn,data)
+   if load_config(data).get("enabled"):run_queue(conn,data)
   except Exception:LOG.warning("NextDo Cloudflare email queue retry deferred")
 
 def register_routes(app,*,conn,user,csrf,data_path):

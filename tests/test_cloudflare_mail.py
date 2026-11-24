@@ -254,3 +254,25 @@ def test_retained_text_admin_only(tmp_path,monkeypatch):
  assert c.post(url+"/reanalyze",headers=h).status_code==403
  assert c.delete(url+"/text",headers=h).status_code==403
  c.close()
+
+
+def test_final_model_failure_creates_manual_review(tmp_path,monkeypatch):
+ import sqlite3
+ from app import email_intake
+ from fastapi import HTTPException
+ c,h=init(tmp_path);secret=setup(c,h)
+ raw=sample()
+ assert deliver(c,secret,raw).status_code==202
+ with sqlite3.connect(tmp_path/"nextdo.sqlite3") as db:
+  db.execute("UPDATE cloudflare_mail_inbox SET attempt_count=2")
+ def broken(cfg,src):raise HTTPException(502,"GroqCloud unavailable")
+ monkeypatch.setattr(email_intake,"analyze",broken)
+ result=c.post("/api/cloudflare-mail/process",headers=h).json()
+ assert result["created"]==1 and result["errors"]==1
+ row=c.get("/api/cloudflare-mail/history").json()[0]
+ assert row["status"]=="failed" and row["tasks_created"]==1 and row["text_available"]
+ t=c.get("/api/tasks").json()[0]
+ assert t["title"].startswith("Email da esaminare") and t["status"]=="review"
+ assert t["due_at"] is None
+ assert c.post("/api/cloudflare-mail/retry-failed",headers=h).json()["queued"]==0
+ c.close()
