@@ -34,3 +34,6 @@ Import ZIP dal selettore Android con conferma, creazione viaggio con date, modif
 
 ## Diario di bordo (0.1.5-test / server 0.1.36-test)
 Vedi [Diario di bordo](../docs/travel-timeline.md). Import JSON con filtro locale, anteprima e conferma; visualizzazione del tracciato schematico e statistiche sul web. Nessun GPS autonomo. Collaudo del formato reale del Samsung necessario. Il diario non è incluso nel pacchetto offline o nello ZIP.
+
+## Diario consultabile (0.1.6-test / server 0.1.37-test)
+Visualizzazione e filtro giorno, confronto tappe geolocalizzate e tracce effettive, zoom/pan, sfondo cartografico opzionale (richiesta esplicita), statistiche e note. Il download offline include il diario; sfondo esterno disponibile solo online. Il backup ZIP con diario si esporta dal web; la normale importazione Android ripristina anche timeline.json, senza duplicati. Collaudo reale necessario.

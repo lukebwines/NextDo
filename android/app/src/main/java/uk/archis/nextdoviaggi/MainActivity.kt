@@ -348,7 +348,7 @@ class MainActivity : ComponentActivity() {
         val t = current ?: return
         val s = session
         task({
-            val bytes = TravelApi(cfg.getString("url")).call("/trips/" + segment(t.id) + "/offline", s)
+            val bytes = TravelApi(cfg.getString("url")).call("/trips/" + segment(t.id) + "/offline?include_timeline=true", s)
             val parsed = TripPackage.parse(bytes)
             require(parsed.id == t.id) { "Viaggio non corrispondente" }
             val meta = JSONObject().put("title", parsed.info.str("title")).put("id", parsed.id)
@@ -517,6 +517,8 @@ class MainActivity : ComponentActivity() {
         Button(onClick=onClick,enabled=enabled,shape=RoundedCornerShape(15.dp)) { Text(text,fontWeight=FontWeight.SemiBold) }
     }
     @Composable private fun TimelineScreen(t:TripPackage) {
+        var saved by remember(t.id){mutableStateOf(t.timeline)}
+        var loaded by remember(t.id){mutableStateOf(offline)}
         var from by remember(t.id){mutableStateOf(t.info.str("start"))}
         var to by remember(t.id){mutableStateOf(t.info.str("end"))}
         var preview by remember(t.id){mutableStateOf<JSONObject?>(null)}
@@ -524,6 +526,24 @@ class MainActivity : ComponentActivity() {
         var confirm by remember{mutableStateOf(false)}
         val cfg=connection
         val file=timelineFile?.takeIf{cfg!=null&&timelineTrip==t.id&&timelineScope==timelineOwner(cfg)}
+        LaunchedEffect(t.id,offline) {
+            if(!offline && cfg!=null && session.isNotBlank()) {
+                val s=session
+                task({TravelApi(cfg.getString("url")).obj("/trips/"+segment(t.id)+"/timeline",s)}){saved=it.optJSONObject("data");loaded=true}
+            }
+        }
+        val mapLoader:((Int,Int,Int,(Bitmap)->Unit)->Unit)?=if(!offline && cfg!=null && session.isNotBlank()) { z,x,y,done ->
+            val s=session
+            task({ val raw=TravelApi(cfg.getString("url")).call("/trips/"+segment(t.id)+"/timeline/map/$z/$x/$y",s,limit=4*1024*1024);BitmapFactory.decodeByteArray(raw,0,raw.size) ?: error("Mappa non valida") }){done(it)}
+        } else null
+        TravelCard("Cronologia salvata",if(offline) "Copia offline: aggiorna il download per le ultime modifiche." else "Storico privato sul Raspberry") {
+            if(!offline && cfg!=null) Action("Aggiorna diario",!busy&&session.isNotBlank()) {
+                val s=session;task({TravelApi(cfg.getString("url")).obj("/trips/"+segment(t.id)+"/timeline",s)}){saved=it.optJSONObject("data");loaded=true}
+            }
+            if(!loaded) Text("Caricamento o storico non ancora disponibile",color=Muted)
+            DiaryViewer(t,saved,mapLoader,busy)
+        }
+        if(offline)return
         TravelCard("Diario di bordo","Importa la cronologia esportata da Google Maps. Nessuna registrazione GPS aggiuntiva.") {
             OutlinedTextField(from,{from=it;preview=null},label={Text("Dal (AAAA-MM-GG)")},singleLine=true,enabled=!busy)
             OutlinedTextField(to,{to=it;preview=null},label={Text("Al (incluso, AAAA-MM-GG)")},singleLine=true,enabled=!busy)
@@ -558,7 +578,7 @@ class MainActivity : ComponentActivity() {
                     if(p!=null&&c!=null&&s.isNotBlank())task({
                         require(p.toString().toByteArray(Charsets.UTF_8).size<=5*1024*1024){"Importazione troppo grande"}
                         TravelApi(c.getString("url")).obj("/trips/"+segment(t.id)+"/timeline",s,p)
-                    }){preview=null;timelineFile=null;result="Cronologia salvata. Apri il Diario di bordo nel portale web."}
+                    }){preview=null;timelineFile=null;saved=p;loaded=true;result="Cronologia salvata."}
                 }){Text("Salva")}},dismissButton={TextButton(onClick={confirm=false}){Text("Annulla")}})
         }
     }
