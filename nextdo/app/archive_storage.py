@@ -276,6 +276,7 @@ def register(app,*,conn,user,csrf,accessible,can_edit,taskdetail,record,data,db,
  @app.post('/api/archive/verify-export')
  def verify(req:Request,file:UploadFile=File(...)):
   u=admin(req,True)
+  with db_lock:plans.pop(u['id'],None)
   # The actual saved ZIP must be re-selected. Never extract untrusted paths to disk.
   if file.size is None or file.size>MAX_ARCHIVE:fail('ZIP oltre il limite di 550 MiB',413)
   try:
