@@ -60,28 +60,52 @@ def plain(v):
  return html.unescape(re.sub(r"<[^>]*>","",str(v or "")))[:400]
 
 def commons(params):
- return json_fetch("https://commons.wikimedia.org/w/api.php?"+urllib.parse.urlencode({"action":"query","format":"json","formatversion":2,**params}))
+ result=json_fetch("https://commons.wikimedia.org/w/api.php?"+urllib.parse.urlencode({"action":"query","format":"json","formatversion":2,**params}),limit=4*1024*1024)
+ if not isinstance(result,dict) or result.get("error") or result.get("errors"):
+  fail("Wikimedia ha rifiutato la ricerca. Riprovare tra poco.",502)
+ return result
 
 def photo_results(payload):
  out=[]
- for p in payload.get("query",{}).get("pages",[]):
+ pages=payload.get("query",{}).get("pages",[])
+ if isinstance(pages,dict):pages=list(pages.values())
+ if not isinstance(pages,list):return out
+ for p in pages:
+  if not isinstance(p,dict):continue
   info=(p.get("imageinfo") or [{}])[0];meta=info.get("extmetadata",{})
   def value(k):return plain(meta.get(k,{}).get("value",""))
-  license=value("LicenseShortName")
-  if not re.match(r"^(CC BY(?:-SA)?\b|CC0\b|Public domain\b)",license,re.I):continue
-  thumb=info.get("thumburl","")
-  if urllib.parse.urlsplit(thumb).hostname!="upload.wikimedia.org" or not thumb.startswith("https://"):continue
+  license=value("LicenseShortName").strip()
+  # Exclude non-commercial/no-derivatives variants; keep clear reusable licences.
+  if not re.fullmatch(r"(?:CC BY(?:-SA)?(?: [1-4]\.0(?: [A-Za-z ]+)?)?|CC0(?: 1\.0)?|Public domain(?: mark(?: 1\.0)?)?)",license,re.I):continue
+  if re.search(r"\b(?:NC|ND)\b",license,re.I):continue
+  mime=info.get("mime","")
+  if mime and mime not in ("image/jpeg","image/png","image/webp"):continue
+  thumb=info.get("thumburl") or (info.get("url","") if mime in ("image/jpeg","image/png","image/webp") and 0<info.get("size",0)<=5*1024*1024 else "")
+  if not isinstance(thumb,str) or urllib.parse.urlsplit(thumb).hostname!="upload.wikimedia.org" or not thumb.startswith("https://"):continue
   if type(p.get("pageid"))!=int:continue
-  out.append({"pageid":p["pageid"],"title":p.get("title",""),"preview":thumb,"credit":value("Artist") or "Autore indicato nella fonte","license":license,"source":"https://commons.wikimedia.org/?curid="+str(p["pageid"])})
+  out.append({"pageid":p["pageid"],"title":p.get("title",""),"preview":thumb,"credit":value("Artist") or value("Credit") or "Autore indicato nella fonte","license":license,"source":"https://commons.wikimedia.org/?curid="+str(p["pageid"])})
  return out
 
 def photos_search(query):
  q=query_text(query)
- return photo_results(commons({"generator":"search","gsrsearch":q+" filetype:bitmap","gsrnamespace":6,"gsrlimit":12,"prop":"imageinfo","iiprop":"url|extmetadata","iiurlwidth":500}))[:8]
+ # Fetch more candidates with only the metadata we actually use.
+ common={"generator":"search","gsrnamespace":6,"gsrlimit":30,"prop":"imageinfo","iiprop":"url|mime|size|extmetadata","iiextmetadatafilter":"LicenseShortName|Artist|Credit","iiurlwidth":500}
+ out={}
+ for term in ("filetype:bitmap "+q,q):
+  params={**common,"gsrsearch":term}
+  for _ in range(2):
+   payload=commons(params)
+   for r in photo_results(payload):out.setdefault(r["pageid"],r)
+   if len(out)>=8:return list(out.values())[:8]
+   continuation=payload.get("continue",{})
+   if not isinstance(continuation,dict) or "gsroffset" not in continuation:break
+   params={**common,"gsrsearch":term,**continuation}
+  if len(out)>=4:break
+ return list(out.values())[:8]
 
 def commons_photo(pageid):
  if type(pageid)!=int or pageid<=0:fail("Foto non valida")
- result=photo_results(commons({"pageids":pageid,"prop":"imageinfo","iiprop":"url|extmetadata","iiurlwidth":1280}))
+ result=photo_results(commons({"pageids":pageid,"prop":"imageinfo","iiprop":"url|mime|size|extmetadata","iiextmetadatafilter":"LicenseShortName|Artist|Credit","iiurlwidth":1280}))
  if not result:fail("Foto non disponibile con licenza riutilizzabile")
  r=result[0]
  image=photo(fetch(r["preview"],limit=5*1024*1024))

@@ -36,3 +36,24 @@ def test_groq_requires_literal_source(monkeypatch,tmp_path):
 def test_geocode_candidates(monkeypatch):
  monkeypatch.setattr(tools,"json_fetch",lambda *a,**k:{"results":[{"lat":45.1,"lon":11.1,"formatted":"Test location"},{"lat":100,"lon":0}]})
  assert len(tools.geocode("Test","test"))==1
+
+
+def test_photo_search_fallback_and_licences(monkeypatch):
+ calls=[]
+ def candidate(id,license):
+  return {"pageid":id,"title":"Test photo","imageinfo":[{"thumburl":"https://upload.wikimedia.org/test.jpg","mime":"image/jpeg","extmetadata":{"LicenseShortName":{"value":license},"Artist":{"value":"Author"}}}]}
+ def fake(params):
+  calls.append(params)
+  if params["gsrsearch"].startswith("filetype:"):return {"query":{"pages":[candidate(1,"CC BY-NC 4.0")]}}
+  return {"query":{"pages":[candidate(2,"CC BY-SA 4.0"),candidate(3,"CC BY-ND 4.0")]}}
+ monkeypatch.setattr(tools,"commons",fake)
+ result=tools.photos_search("Los Angeles")
+ assert [r["pageid"] for r in result]==[2]
+ assert len(calls)==2 and calls[0]["gsrlimit"]==30
+
+def test_wikimedia_error_is_not_empty(monkeypatch):
+ import pytest
+ from fastapi import HTTPException
+ monkeypatch.setattr(tools,"json_fetch",lambda *a,**kw:{"error":{"code":"test"}})
+ with pytest.raises(HTTPException) as e:tools.photos_search("Test")
+ assert e.value.status_code==502
