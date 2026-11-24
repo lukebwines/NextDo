@@ -108,6 +108,9 @@ def register(app,*,conn,user,csrf,accessible,data_path,revision,seen):
     for did,token,sig in work:
      if stop.is_set():return
      try:
+      with conn() as c:
+       live=c.execute("""SELECT 1 FROM work_mobile_push p JOIN work_mobile_devices d ON d.id=p.device_id JOIN work_mobile_alert_tokens a ON a.device_id=d.id JOIN users u ON u.id=d.user_id WHERE p.device_id=? AND p.token=? AND p.project=? AND d.revoked=0 AND d.expires>? AND u.active=1""",(did,token,project,time.time())).fetchone()
+      if not live:continue
       send(project,access,token)
       with conn() as c:c.execute("UPDATE work_mobile_push SET signature=? WHERE device_id=? AND token=? AND project=?",(sig,did,token,project))
      except urllib.error.HTTPError as e:

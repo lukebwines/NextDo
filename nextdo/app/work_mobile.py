@@ -62,8 +62,7 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
   if not t or not accessible(c,u,t):fail(404,"Voce non disponibile")
   return t
  def key_for(d,t):
-  # Preserve identifiers already issued by 0.1.40 for offline acknowledgement.
-  return digest(d["id"]+":"+str(t["id"])+":"+str(t["updated_at"])+":"+str(t["due_at"])+":"+t["priority"]+":"+t["status"]+":"+t["kind"])
+  return digest(d["id"]+":"+revision(t))
  @app.post("/api/work-mobile/ack/{tid}")
  def web_ack(tid:int,req:Request,b:dict):
   u=user(req);csrf(req)
@@ -96,6 +95,7 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
   return {"config":work_push.public_config(data_path)}
  @app.post("/api/mobile/v1/work/alerts/push/register")
  def push_register(req:Request,b:dict):
+  with conn() as c:alert_auth(c,req)
   config=work_push.public_config(data_path)
   if not config:fail(409,"Push non configurato")
   value=b.get("token")

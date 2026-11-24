@@ -43,7 +43,7 @@ internal object WorkPush{
         if(p==null){clear(c);return}
         val v=vault(c)
         v.write("firebase",p.toString().toByteArray(Charsets.UTF_8))
-        val app=initialize(c,p)?:return // Restart app after changing Firebase project.
+        initialize(c,p)?:return // Restart app after changing Firebase project.
         val messaging=FirebaseMessaging.getInstance()
         val registration=Tasks.await(messaging.token,15,TimeUnit.SECONDS)
         if(!WorkAlerts.matches(c,secret))return

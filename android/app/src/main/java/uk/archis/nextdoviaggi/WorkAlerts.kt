@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit
  */
 internal object WorkAlerts {
     private val lock=Any()
+    private val runLock=Any()
     private const val periodic="nextdo-work-alert-periodic"
     private const val immediate="nextdo-work-alert-now"
     private const val tag="nextdo-work-alert:"
@@ -169,20 +170,22 @@ internal object WorkAlerts {
         }
         return Plan(stage,next)
     }
-    fun run(c:Context):Boolean {
+    fun run(c:Context):Boolean=synchronized(runLock){runOnce(c)}
+    private fun runOnce(c:Context):Boolean {
         val cfg=synchronized(lock){read(c,"config")}?:return true
         if(cfg.getLong("expires")<=now()){synchronized(lock){if(read(c,"config")?.str("token")==cfg.str("token"))clear(c)};return true}
         var unauthorized=false
         val pending=synchronized(lock){val marks=read(c,"state")?.optJSONObject("marks");marks?.keys()?.asSequence()?.filter{marks.optJSONObject(it)?.optBoolean("pending")==true}?.toList()?:emptyList()}
         val delivered=mutableSetOf<String>()
         for(key in pending.take(100)){
+            if(!matches(c,cfg.str("token")))return true
             try{TravelApi(cfg.getString("url")).obj("/work/alerts/ack",cfg.getString("token"),JSONObject().put("key",key));delivered.add(key)}catch(e:Exception){if(e.message?.startsWith("HTTP 404")==true)delivered.add(key)}
         }
         val remote=try{fetch(cfg)}catch(e:Exception){unauthorized=e.message?.startsWith("HTTP 401")==true||e.message?.startsWith("HTTP 403")==true;null}
         synchronized(lock){
             val current=read(c,"config")?:return true
             if(current.str("token")!=cfg.str("token"))return true
-            if(unauthorized){clear(c);return true}
+            if(unauthorized){clear(c);WorkPush.clear(c);return true}
             val t=now();val state=read(c,"state")?:JSONObject()
             val old=state.optJSONObject("marks")?:JSONObject()
             for(key in delivered)old.optJSONObject(key)?.put("pending",false)
@@ -219,11 +222,14 @@ internal object WorkAlerts {
             nextAlarm(c,next)
         }
         if(remote!=null)try{WorkPush.sync(c,cfg)}catch(_:Exception){}
+        if(pendingCount(c)>0)return false
         return remote!=null
     }
     fun kickPush(c:Context){
         if(!enabled(c))return
-        WorkManager.getInstance(c).enqueueUniqueWork("nextdo-work-push-refresh",ExistingWorkPolicy.APPEND_OR_REPLACE,OneTimeWorkRequestBuilder<WorkAlertWorker>().setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST).build())
+        val request=OneTimeWorkRequestBuilder<WorkAlertWorker>()
+        if(Build.VERSION.SDK_INT>=31)request.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        WorkManager.getInstance(c).enqueueUniqueWork("nextdo-work-push-refresh",ExistingWorkPolicy.APPEND_OR_REPLACE,request.build())
     }
 }
 
