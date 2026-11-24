@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 from argon2.exceptions import VerificationError
 from . import personal_travel_tools as tools
-from . import travel_mobile
+from . import travel_mobile, travel_timeline
 
 LIMIT=32*1024*1024
 MAX_EXPANDED=120*1024*1024
@@ -128,7 +128,7 @@ def validate_state(state,m):
   if d not in days or not isinstance(vals,list) or any(type(i)!=int or not 0<=i<len(days[d].get("checks",[])) for i in vals):fail("Checklist non valida")
  return {"notes":state["notes"],"checks":state["checks"]}
 
-def read_archive(raw):
+def read_archive(raw,with_timeline=False):
  if len(raw)>LIMIT:fail("Archivio oltre 32 MB",413)
  try:
   with zipfile.ZipFile(io.BytesIO(raw)) as z:
@@ -139,23 +139,26 @@ def read_archive(raw):
     if i.is_dir():continue
     name=i.filename
     if i.flag_bits&1 or (i.external_attr>>16)&0o170000==0o120000 or name in data:fail("Elemento ZIP non ammesso")
-    if name not in ("manifest.json","notes.json") and not(name.startswith("documenti/") and NAME.fullmatch(name[10:])):fail("Percorso ZIP non ammesso")
+    if name not in ("manifest.json","notes.json","timeline.json") and not(name.startswith("documenti/") and NAME.fullmatch(name[10:])):fail("Percorso ZIP non ammesso")
     if i.file_size>LIMIT or (i.file_size>1024*1024 and i.file_size>250*max(1,i.compress_size)):fail("Compressione o dimensione anomala",413)
     data[name]=z.read(i)
   m=json.loads(data.pop("manifest.json"))
   state=json.loads(data.pop("notes.json",b'{"notes":{},"checks":{}}'))
+  timeline=travel_timeline.normalize(json.loads(data.pop("timeline.json"))) if "timeline.json" in data else None
   files={k[10:]:v for k,v in data.items()}
   if any(not v.startswith(b"%PDF-") for v in files.values()):fail("Documento non PDF")
   validate_manifest(m,files)
-  return m,validate_state(state,m),files
+  result=(m,validate_state(state,m),files)
+  return (*result,timeline) if with_timeline else result
  except (zipfile.BadZipFile,KeyError,ValueError,UnicodeError,RuntimeError,NotImplementedError,TypeError,RecursionError):fail("Archivio ZIP o manifest non valido")
 
-def make_archive(m,state,files):
+def make_archive(m,state,files,timeline=None):
  out=io.BytesIO()
  with zipfile.ZipFile(out,"w",zipfile.ZIP_DEFLATED) as z:
   z.writestr("manifest.json",dump(m))
   z.writestr("notes.json",dump({"revision":0,**state}))
   for name,pdf in files.items():z.writestr("documenti/"+name,pdf)
+  if timeline is not None:z.writestr("timeline.json",dump(travel_timeline.normalize(timeline)))
  raw=out.getvalue()
  if len(raw)>LIMIT:fail("Archivio oltre 32 MB",413)
  return raw
@@ -224,7 +227,17 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   cur=c.execute("UPDATE trips SET archive=?,title=?,start=?,end=?,revision=revision+1 WHERE owner=? AND id=? AND revision=?",(archive,t["title"],t["start"],t["end"],owner,t["id"],revision))
   if not cur.rowcount:fail("Il viaggio è stato modificato: ricaricare",409)
   return revision+1
- travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive,save=save,new_manifest=new_manifest,limit=LIMIT)
+ def import_bundle(c,owner,m,state,files,timeline):
+  rev=save(c,owner,m,state,files)
+  if timeline is not None:travel_timeline.store(c,owner,m["trip"]["id"],timeline)
+  return rev
+ def export_bundle(c,owner,r,include_timeline=False):
+  if not include_timeline:return r["archive"]
+  timeline=travel_timeline.read_data(c,owner,r["id"])[0]
+  if timeline is None:return r["archive"]
+  m,state,files=read_archive(r["archive"])
+  return make_archive(m,state,files,timeline)
+ travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive,save=save,new_manifest=new_manifest,limit=LIMIT,import_bundle=import_bundle,export_bundle=export_bundle,map_tile=lambda owner,z,x,y:tools.diary_tile(z,x,y,service(owner,"geoapify")))
  @app.middleware("http")
  async def private_cache(req:Request,call_next):
   res=await call_next(req)
@@ -274,8 +287,8 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  @app.post("/api/personal/trips/import")
  def import_trip(req:Request,file:UploadFile=File(...)):
   owner=allowed(req,True)
-  m,state,files=read_archive(file.file.read(LIMIT+1))
-  with db() as c:save(c,owner,m,state,files)
+  m,state,files,timeline=read_archive(file.file.read(LIMIT+1),with_timeline=True)
+  with db() as c:import_bundle(c,owner,m,state,files,timeline)
   return {"id":m["trip"]["id"],"bookings":len(m.get("bookings",[])),"days":len(m.get("days",[])),"guides":len(m.get("guides",[])),"pdfs":len(files)}
  @app.post("/api/personal/trips")
  def new_trip(req:Request,b:dict):
@@ -391,8 +404,8 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   if user(req)["role"]!="admin":fail("Analisi AI disponibile all'amministratore",403)
   return tools.analyze_booking(data_path,b.get("text"))
  @app.get("/api/personal/trips/{tid}/export")
- def export_trip(tid:str,req:Request):
+ def export_trip(tid:str,req:Request,include_timeline:bool=False):
   owner=allowed(req)
   with db() as c:
    r=load(c,owner,tid)
-   return Response(r["archive"],media_type="application/zip",headers={"Content-Disposition":'attachment; filename="viaggio_'+tid+'.zip"'})
+   return Response(export_bundle(c,owner,r,include_timeline),media_type="application/zip",headers={"Content-Disposition":'attachment; filename="viaggio_'+tid+'.zip"'})

@@ -30,3 +30,32 @@ def test_timeline_import(tmp_path):
     assert c.post(web+"/clear",headers=h).status_code==200
     assert c.get(web).json()["data"] is None
     c.close()
+
+
+def test_timeline_archive_and_mobile_read(tmp_path):
+    import io,json,zipfile
+    c,h=init(tmp_path);p="/api/personal";m="/api/mobile/v1"
+    assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+    raw,manifest=sample()
+    tid=manifest["trip"]["id"];web=p+"/trips/"+tid;mobile=m+"/trips/"+tid
+    assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
+    code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+    d=c.post(m+"/pair",json={"code":code}).json()
+    s=c.post(m+"/unlock",headers={"Authorization":"Bearer "+d["device_token"]},json={"pin":"123456"}).json()
+    session={"Authorization":"Bearer "+s["session_token"]}
+    b={"from":"2027-01-01","to":"2027-01-02","visits":[],"activities":[],"paths":[[{"time":"2027-01-01T09:00:00-08:00","lat":0.2,"lon":0.3}]]}
+    assert c.post(mobile+"/timeline",headers=session,json=b).status_code==200
+    assert c.get(mobile+"/timeline",headers=session).json()["data"]==b
+    assert c.get(mobile+"/timeline").status_code==401
+    assert "timeline.json" not in zipfile.ZipFile(io.BytesIO(c.get(web+"/export").content)).namelist()
+    full=c.get(web+"/export?include_timeline=true").content
+    assert json.loads(zipfile.ZipFile(io.BytesIO(full)).read("timeline.json"))==b
+    assert json.loads(zipfile.ZipFile(io.BytesIO(c.get(mobile+"/offline?include_timeline=true",headers=session).content)).read("timeline.json"))==b
+    assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",full,"application/zip")}).status_code==409
+    assert c.get(web+"/timeline/map/3/1/1").status_code==400
+    assert c.get(mobile+"/timeline/map/3/1/1").status_code==401
+    create_user(c,h,"colleague");sign_in(c,h,"colleague")
+    assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+    assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",full,"application/zip")}).status_code==200
+    assert c.get(web+"/timeline").json()["data"]==b
+    c.close()

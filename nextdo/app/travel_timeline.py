@@ -2,6 +2,7 @@
 import json, math, re, time
 from datetime import date, datetime
 from fastapi import HTTPException, Request
+from fastapi.responses import Response
 
 MAX_RECORDS = 30000
 MAX_BYTES = 5 * 1024 * 1024
@@ -70,7 +71,16 @@ def normalize(b):
     if not any(out[k] for k in ("visits","activities","paths")): invalid()
     return out
 
-def register(app,*,db,allowed,auth,load):
+def read_data(c,owner,tid):
+    row=c.execute("SELECT data,updated FROM trip_timeline WHERE owner=? AND trip_id=?",(owner,tid)).fetchone()
+    return (json.loads(row["data"]),row["updated"]) if row else (None,None)
+
+def store(c,owner,tid,data):
+    payload=json.dumps(normalize(data),ensure_ascii=False,separators=(",",":"),allow_nan=False)
+    if len(payload.encode())>MAX_BYTES:raise HTTPException(413,"Importazione troppo grande")
+    c.execute("INSERT OR REPLACE INTO trip_timeline VALUES(?,?,?,?)",(owner,tid,payload,time.time()))
+
+def register(app,*,db,allowed,auth,load,map_tile):
     with db() as c:
         c.execute("CREATE TABLE IF NOT EXISTS trip_timeline(owner TEXT NOT NULL,trip_id TEXT NOT NULL,data TEXT NOT NULL,updated REAL NOT NULL,PRIMARY KEY(owner,trip_id))")
     @app.post("/api/mobile/v1/trips/{tid}/timeline")
@@ -83,21 +93,36 @@ def register(app,*,db,allowed,auth,load):
         try: b=json.loads(raw)
         except (ValueError,UnicodeError,RecursionError): invalid()
         data=normalize(b)
-        payload=json.dumps(data,ensure_ascii=False,separators=(",",":"),allow_nan=False)
         owner=device["owner"]
         with db() as c:
             load(c,owner,tid)
             # Recheck the device and session after reading the request.
             if auth(req)["id"]!=device["id"]: raise HTTPException(401,"Sessione non valida")
-            c.execute("INSERT OR REPLACE INTO trip_timeline VALUES(?,?,?,?)",(owner,tid,payload,time.time()))
+            store(c,owner,tid,data)
         return {"ok":True,"visits":len(data["visits"]),"activities":len(data["activities"]),"points":sum(map(len,data["paths"]))}
     @app.get("/api/personal/trips/{tid}/timeline")
     def read(tid:str,req:Request):
         owner=allowed(req)
         with db() as c:
             load(c,owner,tid)
-            row=c.execute("SELECT data,updated FROM trip_timeline WHERE owner=? AND trip_id=?",(owner,tid)).fetchone()
-        return {"data":json.loads(row["data"]) if row else None,"updated":row["updated"] if row else None}
+            data,updated=read_data(c,owner,tid)
+        return {"data":data,"updated":updated}
+    @app.get("/api/mobile/v1/trips/{tid}/timeline")
+    def read_mobile(tid:str,req:Request):
+        owner=auth(req)["owner"]
+        with db() as c:
+            load(c,owner,tid);data,updated=read_data(c,owner,tid)
+        return {"data":data,"updated":updated}
+    @app.get("/api/personal/trips/{tid}/timeline/map/{z}/{x}/{y}")
+    def web_tile(tid:str,z:int,x:int,y:int,req:Request):
+        owner=allowed(req)
+        with db() as c:load(c,owner,tid)
+        return Response(map_tile(owner,z,x,y),media_type="image/png")
+    @app.get("/api/mobile/v1/trips/{tid}/timeline/map/{z}/{x}/{y}")
+    def mobile_tile(tid:str,z:int,x:int,y:int,req:Request):
+        owner=auth(req)["owner"]
+        with db() as c:load(c,owner,tid)
+        return Response(map_tile(owner,z,x,y),media_type="image/png")
     @app.post("/api/personal/trips/{tid}/timeline/clear")
     def clear(tid:str,req:Request):
         owner=allowed(req,True)

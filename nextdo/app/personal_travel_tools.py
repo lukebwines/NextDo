@@ -134,3 +134,30 @@ def validate_expense(e):
    d=date.fromisoformat(e["date"])
    if d.isoformat()!=e["date"]:raise ValueError()
  except (ValueError,InvalidOperation,TypeError):fail("Importo, valuta o data non validi")
+
+
+def diary_tile(z,x,y,key):
+ """Opt-in background only: 3x3 raster tiles, no visits or tracks sent."""
+ if not 0<=z<=18 or not 0<=x<2**z or not 0<=y<2**z:fail("Area mappa non valida")
+ if not key:fail("Configura la chiave Geoapify in Servizi Viaggi")
+ key=service_key(key)
+ from concurrent.futures import ThreadPoolExecutor
+ from PIL import Image
+ n=2**z
+ coords={((x+dx)%n,y+dy) for dx in (-1,0,1) for dy in (-1,0,1) if 0<=y+dy<n}
+ def tile(pair):
+  a,b=pair
+  raw=fetch(f"https://maps.geoapify.com/v1/tile/osm-bright/{z}/{a}/{b}.png?"+urllib.parse.urlencode({"apiKey":key}),limit=1024*1024)
+  try:
+   with Image.open(io.BytesIO(raw)) as im:
+    if im.format!="PNG" or im.size!=(256,256):raise ValueError()
+    return pair,im.convert("RGB")
+  except Exception:fail("Tessera cartografica non valida",502)
+ with ThreadPoolExecutor(max_workers=4) as pool:images=dict(pool.map(tile,coords))
+ im=Image.new("RGB",(768,768),"#e1e8ec")
+ for dy in (-1,0,1):
+  for dx in (-1,0,1):
+   pic=images.get(((x+dx)%n,y+dy))
+   if pic is not None:im.paste(pic,((dx+1)*256,(dy+1)*256))
+ out=io.BytesIO();im.save(out,format="PNG")
+ return out.getvalue()
