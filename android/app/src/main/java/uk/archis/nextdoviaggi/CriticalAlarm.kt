@@ -111,6 +111,14 @@ class CriticalAlarmService:Service(){
     private var focus:AudioFocusRequest?=null
     private var vibrator:Vibrator?=null
     private val finish=Runnable{end()}
+    private val watchdog=object:Runnable{
+        override fun run(){
+            val k=playing?:return
+            if(!WorkAlerts.alarmActive(this@CriticalAlarmService,k)||!CriticalAlarm.channelAllowed(this@CriticalAlarmService)||
+                CriticalAlarm.manager(this@CriticalAlarmService).currentInterruptionFilter !in listOf(NotificationManager.INTERRUPTION_FILTER_ALL,NotificationManager.INTERRUPTION_FILTER_ALARMS)){end();return}
+            handler.postDelayed(this,1000)
+        }
+    }
     private val attr=AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
     override fun onCreate(){super.onCreate();current=this}
@@ -138,6 +146,7 @@ class CriticalAlarmService:Service(){
             playing=key
             val o=CriticalAlarm.options(this)
             handler.postDelayed(finish,o.duration*1000L)
+            handler.postDelayed(watchdog,1000)
             if(channel?.sound!=null){
                 val am=getSystemService(AudioManager::class.java);audio=am
                 val request=AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
@@ -171,7 +180,7 @@ class CriticalAlarmService:Service(){
     }
     internal fun halt(key:String?){handler.post{if(key==null||playing==key)end()}}
     private fun release(){
-        handler.removeCallbacks(finish)
+        handler.removeCallbacks(finish);handler.removeCallbacks(watchdog)
         try{player?.release()}catch(_:Exception){};player=null
         try{vibrator?.cancel()}catch(_:Exception){};vibrator=null
         try{focus?.let{audio?.abandonAudioFocusRequest(it)}}catch(_:Exception){};focus=null;audio=null

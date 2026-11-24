@@ -18,7 +18,7 @@
       <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
     </service>
     <service android:name=".CriticalAlarmService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
-    <activity android:name=".CriticalAlarmActivity" android:exported="false" android:excludeFromRecents="true" android:launchMode="singleTask" />
+    <activity android:name=".CriticalAlarmActivity" android:exported="false" android:excludeFromRecents="true" />
     <receiver android:name=".WorkAlertReceiver" android:exported="false" />
     <activity android:name=".MainActivity" android:exported="true">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>

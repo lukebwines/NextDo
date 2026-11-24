@@ -212,6 +212,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshAlertStatus()
+        if(alertsEnabled)WorkAlerts.kick(this)
     }
     private fun refreshAlertStatus(){
         alertPermission=WorkAlerts.permission(this)

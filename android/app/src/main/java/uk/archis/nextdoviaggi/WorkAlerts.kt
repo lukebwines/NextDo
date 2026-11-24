@@ -115,7 +115,8 @@ internal object WorkAlerts {
         val cfg=read(c,"config")?:return@synchronized false
         val state=read(c,"state")?:return@synchronized false
         if(cfg.optLong("expires")<=now()||now()-state.optLong("synced",0)>=day)return@synchronized false
-        state.optJSONObject("marks")?.optJSONObject(key)?.optBoolean("ack")!=true
+        val mark=state.optJSONObject("marks")?.optJSONObject(key)?:return@synchronized false
+        !mark.optBoolean("ack")
     }
     fun test(c:Context){
         channels(c)
@@ -157,13 +158,12 @@ internal object WorkAlerts {
     }
     fun acknowledge(c:Context,key:String){
         if(!keyPattern.matches(key))return
-        CriticalAlarm.stop(c,key)
         synchronized(lock){
             val state=read(c,"state")?:return
             val marks=state.optJSONObject("marks")?:return
             val entry=marks.optJSONObject(key)?:return
             entry.put("ack",true).put("pending",true);marks.put(key,entry)
-            write(c,"state",state);manager(c).cancel(tag+key,id)
+            write(c,"state",state);CriticalAlarm.stop(c,key);manager(c).cancel(tag+key,id)
         }
         kick(c)
     }
