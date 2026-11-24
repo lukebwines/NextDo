@@ -524,10 +524,10 @@ class MainActivity : ComponentActivity() {
         TravelCard("Diario di bordo",if(running)"Registrazione attiva" else if(wanted)"Registrazione interrotta · riprendi" else "Registrazione sospesa"){
             Text("Punti da sincronizzare: "+pending,color=Muted)
             Text("Il GPS si attiva solo su richiesta. Puoi interromperlo anche dalla notifica. Il diario continua offline.",color=Muted)
-            if(running || wanted) Action("Sospendi",!busy){DiaryState.stop(this);diaryMessage="Diario sospeso"}
+            if(running || wanted) Action("Sospendi",!busy){DiaryState.stop(this@MainActivity);diaryMessage="Diario sospeso"}
             if(!running)Action("Avvia / riprendi",!busy && cfg!=null){diaryStart(t)}
             Action("Sincronizza con NextDo",!busy && session.isNotBlank() && pending>0){diarySync(t)}
-            if(!DiaryState.background(this))TextButton(onClick={
+            if(!DiaryState.background(this@MainActivity))TextButton(onClick={
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+packageName)))
             }){Text("Autorizza posizione sempre per ripresa dopo riavvio")}
             if(diaryMessage.isNotBlank())Text(diaryMessage,color=Sand)
