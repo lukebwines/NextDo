@@ -77,7 +77,11 @@ def test_auto_rule_multiple_dates_dedup_and_review(tmp_path,monkeypatch):
  assert deliver(c,secret,raw).json()["duplicate"]
  automatic_ics.run_one(main.conn,tmp_path)
  assert len(sent)==2
- assert c.get("/api/outbound-mail/automatic-ics").json()["history"][0]["status"]=="queued" or c.get("/api/outbound-mail/automatic-ics").json()["history"][0]["detail"]=="Test queued"
+ assert c.get("/api/outbound-mail/automatic-ics").json()["history"][0]["status"]=="provider_queued"
+ # Provider acceptance must not block the next local queue item.
+ with main.conn() as db:db.execute("UPDATE outbound_mail_log SET created_epoch=0")
+ automatic_ics.run_one(main.conn,tmp_path)
+ assert len(sent)==2
  assert rule(c,h,False).status_code==200
  assert not c.get("/api/outbound-mail/automatic-ics").json()["enabled"]
  c.close()

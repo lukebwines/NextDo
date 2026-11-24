@@ -114,7 +114,9 @@ def run_one(conn,data):
     f"NextDo ha individuato {len(tasks)} attività, scadenze o appuntamenti con data. L'allegato contiene proposte AI DA VERIFICARE, non inviti o conferme. Controllare le date in NextDo prima di farvi affidamento. Nessun testo originale o allegato della mail ricevuta è incluso.")
   except Exception:status,detail="unknown","Esito non certo: verificare Cloudflare"
   with conn() as c:
-   c.execute("UPDATE automatic_ics_queue SET status=?,detail=? WHERE source_digest=?",(status,detail,digest))
+   # Provider "queued" means accepted, not locally pending.
+   final_status="provider_queued" if status=="queued" else status
+   c.execute("UPDATE automatic_ics_queue SET status=?,detail=? WHERE source_digest=?",(final_status,detail,digest))
    c.execute("UPDATE outbound_mail_log SET status=?,detail=? WHERE request_id=?",(status,detail,rid))
    c.execute("DELETE FROM outbound_mail_log WHERE created_epoch<?",(now-90*86400,))
  except Exception:LOG.warning("NextDo automatic ICS processing deferred")
