@@ -669,6 +669,32 @@ function gmailAutoSettings(main){
  load();
 }
 
+function automaticICSSettings(main){
+ if(S.me.role!=='admin')return;
+ const card=el('section',{class:'card',style:'margin-top:15px'});
+ main.append(card);
+ async function draw(){
+  card.replaceChildren(node('h2','','Regola automatica · Email → ICS'),node('p','sub','Per le nuove email ricevute tramite Cloudflare, invia un unico ICS con le nuove voci con data verificabile nel testo. Le proposte restano Da verificare; nessun invito, nessuna risposta al mittente originale. Le date trascorse, le richieste senza data e le proposte ambigue non vengono inviate.'));
+  try{
+   const cfg=await api('/outbound-mail/automatic-ics');
+   card.append(tag(cfg.enabled?'Regola attiva':'Regola disattivata',cfg.enabled?'low':''));
+   if(!cfg.ready)card.append(node('p','sub','Prima completare il collaudo e abilitare la posta in uscita.'));
+   const recipient=select('auto_recipient',[['','Selezionare destinatario'],...cfg.recipients.map(x=>[x,x])],cfg.recipient);
+   const enable=el('input',{type:'checkbox',checked:cfg.enabled});
+   const consent=el('input',{type:'checkbox'});
+   card.append(field('Destinatario fisso verificato',recipient),el('label',{class:'rowtask'},[enable,' Abilita invio automatico ICS']),el('label',{class:'rowtask'},[consent,' Autorizzo l’invio di titoli e date delle proposte AI a questo indirizzo, senza testo originale.']));
+   const save=btn('Salva regola',async()=>{save.disabled=true;try{
+    if(enable.checked&&(!recipient.value||!consent.checked))return msg('Scegliere il destinatario e confermare l’autorizzazione',true);
+    await api('/outbound-mail/automatic-ics',{method:'POST',body:JSON.stringify({enabled:enable.checked,recipient:recipient.value,confirmed:consent.checked})});
+    msg('Regola salvata');await draw()
+   }catch(e){msg(e.message,true)}finally{save.disabled=false}},'primary');
+   card.append(save,node('h3','','Registro regola automatica'));
+   if(!cfg.history.length)card.append(node('p','sub','Nessun invio automatico registrato.'));
+   for(const row of cfg.history)card.append(node('p','sub',fmt(new Date(row.created_epoch*1000).toISOString())+' · '+row.message_hash.slice(0,12)+' · '+row.detail));
+  }catch(e){card.append(node('p','sub',e.message))}
+ }
+ draw()
+}
 function outboundMailSettings(main){
  if(S.me.role!=='admin')return;
  const card=el('section',{class:'card',style:'margin-top:15px'});
@@ -708,7 +734,7 @@ function outboundMailSettings(main){
  }
  async function showHistory(){
   history.replaceChildren(node('h3','','Registro invii'),node('p','sub','Consegna o accodamento riportati da Cloudflare; se l’esito è incerto non ripetere automaticamente. Registro senza titoli o contenuto, conservato 90 giorni (pulizia al prossimo invio).'));
-  try{const rows=await api('/outbound-mail/history');if(!rows.length)history.append(node('p','sub','Nessun invio registrato.'));for(const row of rows)history.append(node('p','sub',fmt(new Date(row.created_epoch*1000).toISOString())+' · '+(row.kind==='test'?'Prova':'ICS ('+row.task_count+')')+' · '+row.detail))}catch(e){history.append(node('p','sub',e.message))}
+  try{const rows=await api('/outbound-mail/history');if(!rows.length)history.append(node('p','sub','Nessun invio registrato.'));for(const row of rows)history.append(node('p','sub',fmt(new Date(row.created_epoch*1000).toISOString())+' · '+(row.kind==='test'?'Prova':(row.kind==='auto'?'ICS automatico':'ICS')+' ('+row.task_count+')')+' · '+row.detail))}catch(e){history.append(node('p','sub',e.message))}
  }
  load()
 }
@@ -811,7 +837,7 @@ function cloudflareMailSettings(main){
  load();
 }
 
-function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);emailPromptSettings(main);cloudflareMailSettings(main);outboundMailSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
+function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);emailPromptSettings(main);cloudflareMailSettings(main);outboundMailSettings(main);automaticICSSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
 
 function restoreForm(){
  const {box,back}=modal('Ripristina un backup NextDo');

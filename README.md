@@ -1,5 +1,7 @@
 # NextDo — Home Assistant add-on
 
+**0.1.45-test — Regola automatica email → ICS.** In Impostazioni selezionare un destinatario verificato, autorizzare l’invio e attivare la regola. Per le nuove email Cloudflare elaborate dopo l’attivazione, invio cumulativo delle nuove voci datate e supportate da evidenza, non trascorse. Titolo [DA VERIFICARE], stato TENTATIVE, nessun testo originale, destinatario fisso; task in revisione. Coda persistente e dedup per testo, nessun retry di esito incerto. Disattivazione o modifica cancella la coda; nessun invio storico. Collaudo reale necessario.
+
 **0.1.44-test — Posta in uscita Cloudflare.** Configurazione locale separata dalla ricezione, token cifrato, prova sintetica con ICS, conferma manuale della ricezione, invio ICS singolo o cumulativo a un destinatario autorizzato per invio. Solo amministratore, nessun invio automatico. Vedere [guida](docs/cloudflare-outbound.md).
 
 **0.1.43-test — Esportazione calendario ICS.** Aprire un’attività confermata con data e scegliere Aggiungi al calendario · ICS; oppure Esporta ICS nelle liste e nel calendario mensile, selezionando più voci. Scadenze giornaliere, appuntamenti con orario salvato senza durata inventata, appuntamenti con sola data esplicitamente marcati «orario da definire». Descrizioni e collegamenti espliciti facoltativi (disattivati per impostazione predefinita). Il download non sincronizza i calendari, non invia inviti e non espande le ricorrenze. Il calendario esterno può gestire gli eventi senza durata in modo diverso. Versione web/server; Android invariato.
