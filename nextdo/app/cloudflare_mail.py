@@ -53,10 +53,14 @@ def public(cfg):
   "ingest_path":PATH,"interval_seconds":INTERVAL,"requires_gmail":False}
 
 def email_ok(s):return bool(re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}",s))
+
+def sender_addresses(value):
+ return list(dict.fromkeys(address.strip().lower() for address in value.split(",") if address.strip()))
+
 class Config(BaseModel):
  enabled:bool=False
  recipient:str=Field(default="",max_length=254)
- allowed_sender:str=Field(default="",max_length=254)
+ allowed_sender:str=Field(default="",max_length=4096)
 
 def upgrade(db_path):
  with sqlite3.connect(db_path) as db:
@@ -96,7 +100,7 @@ def verify(headers,raw,cfg):
  expected=hmac.new(cfg["secret"].encode(),payload,hashlib.sha256).hexdigest()
  if not hmac.compare_digest(expected,sig):fail("Firma Cloudflare non valida",401)
  if recipient!=cfg.get("recipient","").lower():fail("Destinatario inatteso",403)
- if sender!=cfg.get("allowed_sender","").lower():fail("Mittente non autorizzato",403)
+ if sender not in sender_addresses(cfg.get("allowed_sender","")):fail("Mittente non autorizzato",403)
  return sender,recipient
 
 def digest(source):
@@ -228,12 +232,12 @@ def register_routes(app,*,conn,user,csrf,data_path):
   owner=admin(req);csrf(req)
   cfg=load_config(data_path)
   recipient=body.recipient.strip().lower()
-  sender=body.allowed_sender.strip().lower()
+  senders=sender_addresses(body.allowed_sender)
   if recipient and not email_ok(recipient):fail("Destinatario non valido")
-  if sender and not email_ok(sender):fail("Mittente non valido")
-  if body.enabled and (not cfg.get("secret") or not recipient or not sender):
+  if any(len(sender)>254 or not email_ok(sender) for sender in senders):fail("Mittente non valido")
+  if body.enabled and (not cfg.get("secret") or not recipient or not senders):
    fail("Configurare gli indirizzi e generare il segreto prima di attivare la ricezione")
-  cfg.update(enabled=body.enabled,recipient=recipient,allowed_sender=sender,owner_id=owner["id"])
+  cfg.update(enabled=body.enabled,recipient=recipient,allowed_sender=", ".join(senders),owner_id=owner["id"])
   save_config(data_path,cfg)
   return public(cfg)
  @app.post("/api/cloudflare-mail/secret")

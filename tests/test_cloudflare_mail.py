@@ -46,6 +46,21 @@ def deliver(client,secret,raw,**kwargs):
  return client.post("/api/cloudflare-mail/inbound",
     headers=header(secret,raw,**kwargs),content=raw)
 
+def test_multiple_authorized_senders(tmp_path):
+ c,h=init(tmp_path)
+ secret=setup(c,h)
+ second="another@example.org"
+ config={"recipient":RECIPIENT,"allowed_sender":f"{SENDER}, {second.upper()}, {SENDER}","enabled":True}
+ r=c.post("/api/cloudflare-mail/config",headers=h,json=config)
+ assert r.status_code==200,r.text
+ assert r.json()["allowed_sender"]==f"{SENDER}, {second}"
+ assert deliver(c,secret,sample(),sender=SENDER).status_code==202
+ assert deliver(c,secret,sample(changed=True),sender=second).status_code==202
+ assert deliver(c,secret,sample(),sender="not"+second).status_code==403
+ config["allowed_sender"]=f"{SENDER}, *@example.org"
+ assert c.post("/api/cloudflare-mail/config",headers=h,json=config).status_code==400
+ c.close()
+
 def test_settings_only_admin_and_encrypted_secret(tmp_path):
  c,h=init(tmp_path)
  secret=setup(c,h)

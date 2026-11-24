@@ -30,7 +30,7 @@ Configurare le variabili di testo:
 |---|---|
 | NEXTDO_ENDPOINT | URL HTTPS pubblico di NextDo seguito da /api/cloudflare-mail/inbound |
 | EXPECTED_TO | Indirizzo completo creato per la ricezione, senza indirizzi aggiuntivi |
-| ALLOWED_FROM | Indirizzo esatto dal quale si effettuano gli inoltri |
+| ALLOWED_FROM | Indirizzi esatti dai quali si effettuano gli inoltri, separati da virgole |
 
 Configurare una **variabile segreta**, senza scriverne il valore nel repository:
 
@@ -51,7 +51,7 @@ Infine creare la regola **Email Routing → Send to a Worker** che associa l'ind
 
 1. Installare la versione di NextDo che include la funzione Cloudflare.
 2. Aprire **Impostazioni → Posta in arrivo Cloudflare → Scadenze**.
-3. Inserire il destinatario configurato in Cloudflare e il mittente autorizzato.
+3. Inserire il destinatario configurato in Cloudflare e gli stessi mittenti autorizzati del Worker, separati da virgole.
 4. Fare clic su **Genera / rigenera segreto Worker**, copiare il valore una sola volta, inserirlo come segreto del Worker e verificare che i valori dei due lati coincidano.
 5. Salvare le impostazioni e attivare **Abilita la ricezione automatica**.
 6. Inviare un messaggio sintetico, senza dati personali o informazioni istituzionali riservate, dal mittente configurato. Controllare il registro email e poi le **Scadenze → Da verificare**.

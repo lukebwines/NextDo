@@ -21,7 +21,8 @@ globalThis.fetch=async (url,opts)=>{
  assert.equal(opts.method,"POST");
  assert.equal(opts.headers.get("Content-Type"),"message/rfc822");
  const time=opts.headers.get("X-NextDo-Timestamp");
- const prefix=time+"\n"+envelopeFrom+"\n"+envelopeTo+"\n";
+ const sender=opts.headers.get("X-NextDo-Envelope-From");
+ const prefix=time+"\n"+sender+"\n"+envelopeTo+"\n";
  const expected=createHmac("sha256",env.NEXTDO_SIGNING_SECRET)
   .update(prefix).update(Buffer.from(opts.body)).digest("hex");
  assert.equal(opts.headers.get("X-NextDo-Signature"),expected);
@@ -44,4 +45,14 @@ const tooLarge=mk(envelopeFrom,envelopeTo,7_000_000);
 await worker.email(tooLarge,env,{});
 assert.ok(tooLarge.rejected.includes("limit"));
 assert.equal(requests,1);
+const secondSender="another@valid.test";
+const multiple={...env,ALLOWED_FROM:envelopeFrom+", "+secondSender.toUpperCase()};
+const secondMessage=mk(secondSender);
+await worker.email(secondMessage,multiple,{});
+assert.equal(secondMessage.rejected,"");
+assert.equal(requests,2);
+const otherMessage=mk("not"+secondSender);
+await worker.email(otherMessage,multiple,{});
+assert.ok(otherMessage.rejected.includes("authorized"));
+assert.equal(requests,2);
 console.log("PASS Cloudflare Worker HMAC, recipient/sender allowlist and 6MB cap");

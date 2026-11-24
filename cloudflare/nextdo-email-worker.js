@@ -28,13 +28,14 @@ export default {
     const sender = (message.from || "").trim().toLowerCase();
     const recipient = (message.to || "").trim().toLowerCase();
     const expected = (env.EXPECTED_TO || "").trim().toLowerCase();
-    const allowed = (env.ALLOWED_FROM || "").trim().toLowerCase();
+    const allowed = (env.ALLOWED_FROM || "").split(",")
+      .map(address => address.trim().toLowerCase()).filter(Boolean);
 
     // Fail closed: do not process incoming mail before configuration is complete.
-    if (!expected || !allowed || !env.NEXTDO_SIGNING_SECRET || !env.NEXTDO_ENDPOINT) {
+    if (!expected || !allowed.length || !env.NEXTDO_SIGNING_SECRET || !env.NEXTDO_ENDPOINT) {
       throw new Error("NextDo email Worker is not configured");
     }
-    if (recipient !== expected || sender !== allowed) {
+    if (recipient !== expected || !allowed.includes(sender)) {
       message.setReject("This mailbox only accepts authorized forwarded messages");
       return;
     }

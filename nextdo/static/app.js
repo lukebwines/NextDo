@@ -558,13 +558,13 @@ function cloudflareMailSettings(main){
    const cfg=await api('/cloudflare-mail/config');
    grid.replaceChildren();
    const recipient=input('recipient','Esempio: scadenze@posta.archis.uk',cfg.recipient||'');
-   const sender=input('allowed_sender','Email da cui inoltri i messaggi',cfg.allowed_sender||'');
+   const sender=input('allowed_sender','Separa gli indirizzi con una virgola',cfg.allowed_sender||'');
    const active=el('input',{type:'checkbox',checked:cfg.enabled});
    const url=el('input',{class:'field',readOnly:true,value:location.origin+cfg.ingest_path});
    grid.append(node('p','sub','Segreto Worker: '+(cfg.secret_configured?'configurato':'non configurato')+
       ' · Ricezione: '+(cfg.enabled?'attiva':'disattivata')),
     field('Indirizzo email dedicato (da creare in Cloudflare)',recipient),
-    field('Mittente autorizzato per gli inoltri',sender),
+    field('Mittenti autorizzati per gli inoltri',sender),
     field('Endpoint HTTPS NextDo per il Worker',url),
     el('label',{class:'full'},[active,' Abilita la ricezione automatica']));
    const actions=el('div',{class:'actions full'});
