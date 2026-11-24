@@ -38,71 +38,40 @@ def test_geocode_candidates(monkeypatch):
  assert len(tools.geocode("Test","test"))==1
 
 
-def test_photo_search_fallback_and_licences(monkeypatch):
- calls=[]
- def candidate(id,license):
-  return {"pageid":id,"title":"Test photo","imageinfo":[{"thumburl":"https://upload.wikimedia.org/test.jpg","mime":"image/jpeg","extmetadata":{"LicenseShortName":{"value":license},"Artist":{"value":"Author"}}}]}
- def fake(params):
-  calls.append(params)
-  if params["gsrsearch"].startswith("filetype:"):return {"query":{"pages":[candidate(1,"CC BY-NC 4.0")]}}
-  return {"query":{"pages":[candidate(2,"CC BY-SA 4.0"),candidate(3,"CC BY-ND 4.0")]}}
- monkeypatch.setattr(tools,"commons",fake)
- result=tools.photos_search("Los Angeles")
- assert [r["pageid"] for r in result]==[2]
- assert len(calls)==2 and calls[0]["gsrlimit"]==30
-
-def test_wikimedia_error_is_not_empty(monkeypatch):
- import pytest
- from fastapi import HTTPException
- monkeypatch.setattr(tools,"json_fetch",lambda *a,**kw:{"error":{"code":"test"}})
- with pytest.raises(HTTPException) as e:tools.photos_search("Test")
- assert e.value.status_code==502
-
-
-def test_pexels_services_private_and_photo(tmp_path,monkeypatch):
+def test_ai_image_preview_and_accept(tmp_path,monkeypatch):
  c,h=init(tmp_path);p="/api/personal"
  assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
- assert c.post(p+"/services",headers=h,json={"pexels":"synthetic-secret","geoapify":"synthetic-geo"}).status_code==200
- cfg=c.get(p+"/services").json()
- assert cfg=={"pexels_configured":True,"geoapify_configured":True}
+ assert c.post(p+"/services",headers=h,json={"image_ai":"synthetic-secret","geoapify":"synthetic-geo"}).status_code==200
+ assert c.get(p+"/services").json()=={"image_ai_configured":True,"geoapify_configured":True}
  assert b"synthetic-secret" not in (tmp_path/"personal"/"trips.sqlite3").read_bytes()
  raw,m=sample()
  assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
  url=p+"/trips/"+m["trip"]["id"]
  img=io.BytesIO();Image.new("RGB",(300,200),"navy").save(img,"PNG")
- pic=tools.photo(img.getvalue())
- monkeypatch.setattr(tools,"pexels_search",lambda q,k:[{"pageid":42}] if k=="synthetic-secret" else [])
- monkeypatch.setattr(tools,"pexels_photo",lambda id,k:pic)
- assert c.post(p+"/photos/search",headers=h,json={"provider":"pexels","query":"Test"}).json()==[{"pageid":42}]
- r=c.post(url+"/photo",headers=h,json={"provider":"pexels","pageid":42,"target":"day:2027-01-01"})
+ pic={**tools.photo(img.getvalue()),"credit":"Immagine illustrativa generata con AI OpenAI","license":"Generata con AI"}
+ calls=[]
+ def generate(prompt,key):
+  calls.append((prompt,key));return pic
+ monkeypatch.setattr(tools,"generate_image",generate)
+ body={"target":"day:2027-01-01","prompt":"Synthetic landscape","confirm_cost":True}
+ assert c.post(url+"/photo/generate",headers=h,json={**body,"confirm_cost":False}).status_code==400
+ assert c.post(url+"/photo/generate",headers=h,json={**body,"target":"day:2027-02-01"}).status_code==400
+ assert not calls
+ r=c.post(url+"/photo/generate",headers=h,json=body)
  assert r.status_code==200,r.text
+ assert calls==[("Synthetic landscape","synthetic-secret")]
+ assert "travel_photos" not in c.get(url).json()["manifest"]
+ token=r.json()["token"]
+ assert c.post(url+"/photo/accept",headers=h,json={"token":"wrong"}).status_code==409
+ assert c.post(url+"/photo/accept",headers=h,json={"token":token}).status_code==200
  b=c.get(url).json()
  assert b["manifest"]["travel_photos"]["day:2027-01-01"]==pic
  assert b["manifest"]["bookings"]==m["bookings"]
- assert b"synthetic-secret" not in c.get(url+"/export").content
- assert c.post(url+"/photo",headers=h,json={"provider":"pexels","pageid":42,"target":"day:2027-02-01"}).status_code==400
+ assert c.post(url+"/photo/accept",headers=h,json={"token":token}).status_code==409
+ with zipfile.ZipFile(io.BytesIO(c.get(url+"/export").content)) as z:
+  assert b"synthetic-secret" not in z.read("manifest.json")
+  assert z.read("documenti/test.pdf")==b"%PDF-synthetic"
+ assert c.post(p+"/photos/search",headers=h,json={"query":"Test"}).status_code==404
  assert c.post(p+"/lock",headers=h).status_code==200
- assert c.get(p+"/services").status_code==423
- c.close()
-
-def test_pexels_rejects_untrusted_image_hosts(monkeypatch):
- def item(host):
-  return {"id":123,"alt":"test","photographer":"Test","url":"https://www.pexels.com/photo/test-123/","src":{"medium":"https://"+host+"/test.jpg","landscape":"https://"+host+"/test.jpg"}}
- monkeypatch.setattr(tools,"pexels_request",lambda *a,**kw:{"photos":[item("images.pexels.com"),item("example.org")]})
- assert len(tools.pexels_search("Test","test"))==1
-
-
-def test_default_photo_provider_without_api_key(tmp_path,monkeypatch):
- c,h=init(tmp_path);p="/api/personal"
- assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
- monkeypatch.setattr(tools,"photos_search",lambda q:[{"pageid":42,"title":"Synthetic photo"}])
- assert c.post(p+"/photos/search",headers=h,json={"query":"Test"}).json()==[{"pageid":42,"title":"Synthetic photo"}]
- raw,m=sample()
- assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
- img=io.BytesIO();Image.new("RGB",(80,60),"navy").save(img,"PNG")
- pic=tools.photo(img.getvalue())
- monkeypatch.setattr(tools,"commons_photo",lambda id:pic)
- url=p+"/trips/"+m["trip"]["id"]
- assert c.post(url+"/photo",headers=h,json={"pageid":42,"target":"cover"}).status_code==200
- assert c.get(url).json()["manifest"]["cover"]==pic
+ assert c.post(url+"/photo/generate",headers=h,json=body).status_code==423
  c.close()

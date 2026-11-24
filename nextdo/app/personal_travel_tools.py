@@ -56,94 +56,25 @@ def validate_cover(cover):
   if k in cover and (not isinstance(cover[k],str) or len(cover[k])>1000):fail("Attribuzione non valida")
  if set(cover)-{"jpeg","credit","source","license"}:fail("Copertina non valida")
 
-def plain(v):
- return html.unescape(re.sub(r"<[^>]*>","",str(v or "")))[:400]
-
-def commons(params):
- result=json_fetch("https://commons.wikimedia.org/w/api.php?"+urllib.parse.urlencode({"action":"query","format":"json","formatversion":2,**params}),limit=4*1024*1024)
- if not isinstance(result,dict) or result.get("error") or result.get("errors"):
-  fail("Wikimedia ha rifiutato la ricerca. Riprovare tra poco.",502)
- return result
-
-def photo_results(payload):
- out=[]
- pages=payload.get("query",{}).get("pages",[])
- if isinstance(pages,dict):pages=list(pages.values())
- if not isinstance(pages,list):return out
- for p in pages:
-  if not isinstance(p,dict):continue
-  info=(p.get("imageinfo") or [{}])[0];meta=info.get("extmetadata",{})
-  def value(k):return plain(meta.get(k,{}).get("value",""))
-  license=value("LicenseShortName").strip()
-  # Exclude non-commercial/no-derivatives variants; keep clear reusable licences.
-  if not re.fullmatch(r"(?:CC BY(?:-SA)?(?: [1-4]\.0(?: [A-Za-z ]+)?)?|CC0(?: 1\.0)?|Public domain(?: mark(?: 1\.0)?)?)",license,re.I):continue
-  if re.search(r"\b(?:NC|ND)\b",license,re.I):continue
-  mime=info.get("mime","")
-  if mime and mime not in ("image/jpeg","image/png","image/webp"):continue
-  thumb=info.get("thumburl") or (info.get("url","") if mime in ("image/jpeg","image/png","image/webp") and 0<info.get("size",0)<=5*1024*1024 else "")
-  if not isinstance(thumb,str) or urllib.parse.urlsplit(thumb).hostname!="upload.wikimedia.org" or not thumb.startswith("https://"):continue
-  if type(p.get("pageid"))!=int:continue
-  out.append({"pageid":p["pageid"],"title":p.get("title",""),"preview":thumb,"credit":value("Artist") or value("Credit") or "Autore indicato nella fonte","license":license,"source":"https://commons.wikimedia.org/?curid="+str(p["pageid"])})
- return out
-
-def photos_search(query):
- q=query_text(query)
- # Fetch more candidates with only the metadata we actually use.
- common={"generator":"search","gsrnamespace":6,"gsrlimit":30,"prop":"imageinfo","iiprop":"url|mime|size|extmetadata","iiextmetadatafilter":"LicenseShortName|Artist|Credit","iiurlwidth":500}
- out={}
- for term in ("filetype:bitmap "+q,q):
-  params={**common,"gsrsearch":term}
-  for _ in range(2):
-   payload=commons(params)
-   for r in photo_results(payload):out.setdefault(r["pageid"],r)
-   if len(out)>=8:return list(out.values())[:8]
-   continuation=payload.get("continue",{})
-   if not isinstance(continuation,dict) or "gsroffset" not in continuation:break
-   params={**common,"gsrsearch":term,**continuation}
-  if len(out)>=4:break
- return list(out.values())[:8]
-
-def commons_photo(pageid):
- if type(pageid)!=int or pageid<=0:fail("Foto non valida")
- result=photo_results(commons({"pageids":pageid,"prop":"imageinfo","iiprop":"url|mime|size|extmetadata","iiextmetadatafilter":"LicenseShortName|Artist|Credit","iiurlwidth":1280}))
- if not result:fail("Foto non disponibile con licenza riutilizzabile")
- r=result[0]
- image=photo(fetch(r["preview"],limit=5*1024*1024))
- return {**image,"credit":r["credit"],"license":r["license"],"source":r["source"]}
-
 def service_key(value):
  if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,250}",value):fail("Chiave API non valida")
  return value
 
-def pexels_request(path,key,params=None):
- key=service_key(key)
- return json_fetch("https://api.pexels.com/v1/"+path+("?" + urllib.parse.urlencode(params) if params else ""),headers={"Authorization":key})
-
-def pexels_result(item):
- if not isinstance(item,dict) or type(item.get("id"))!=int:return None
- src=item.get("src",{})
- if not isinstance(src,dict):return None
- def trusted(url,host):
-  try:
-   parsed=urllib.parse.urlsplit(url)
-   return isinstance(url,str) and parsed.scheme=="https" and parsed.hostname==host and not parsed.username and not parsed.password and parsed.port in (None,443)
-  except (ValueError,TypeError,AttributeError):return False
- preview=src.get("medium","");image=src.get("landscape","");source=item.get("url","")
- if not trusted(preview,"images.pexels.com") or not trusted(image,"images.pexels.com") or not trusted(source,"www.pexels.com"):return None
- return {"pageid":item["id"],"title":str(item.get("alt") or "Foto Pexels")[:400],"preview":preview,"image":image,"credit":str(item.get("photographer") or "Fotografo Pexels")[:300]+" · Pexels","license":"Pexels","source":source,"provider":"pexels"}
-
-def pexels_search(query,key):
- q=query_text(query)
- result=pexels_request("search",key,{"query":q,"orientation":"landscape","per_page":12,"locale":"en-US"})
- if not isinstance(result,dict) or not isinstance(result.get("photos"),list):fail("Risposta Pexels non valida",502)
- return [r for item in result["photos"] if (r:=pexels_result(item))][:12]
-
-def pexels_photo(pageid,key):
- if type(pageid)!=int or not 0<pageid<10**12:fail("Foto non valida")
- r=pexels_result(pexels_request("photos/"+str(pageid),key))
- if not r:fail("Foto Pexels non disponibile")
- image=photo(fetch(r["image"],limit=5*1024*1024))
- return {**image,"credit":r["credit"],"license":r["license"],"source":r["source"]}
+def generate_image(prompt,key):
+ prompt=query_text(prompt,1500);key=service_key(key)
+ payload={"model":"gpt-image-2.5-flare","prompt":prompt,"size":"1536x864","quality":"medium","n":1,"output_format":"jpeg","output_compression":80}
+ opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+ try:
+  req=urllib.request.Request("https://api.openai.com/v1/images/generations",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"NextDo-Travel/0.1.32"},method="POST")
+  with opener.open(req,timeout=150) as response:raw=response.read(8*1024*1024+1)
+  if len(raw)>8*1024*1024:fail("Risposta immagine troppo grande",502)
+  result=json.loads(raw)
+  img=photo(base64.b64decode(result["data"][0]["b64_json"],validate=True))
+  return {**img,"credit":"Immagine illustrativa generata con AI OpenAI","license":"Generata con AI"}
+ except HTTPException:raise
+ except urllib.error.HTTPError as exc:
+  fail("OpenAI Images HTTP "+str(exc.code)+": verificare chiave, accesso al modello, limiti e fatturazione",502)
+ except (OSError,ValueError,KeyError,IndexError,TypeError):fail("Generazione non riuscita o risposta non valida. Verificare il servizio OpenAI; non ripetere automaticamente.",502)
 
 def geocode(query,key):
  q=query_text(query);key=query_text(key,160)
