@@ -1,0 +1,49 @@
+"""Synthetic private-trip tests: never use real bookings in Git."""
+import io,json,zipfile
+from test_workspace import init,create_user,sign_in
+
+def sample():
+ m={"format_version":1,"trip":{"id":"synthetic-trip","title":"Private synthetic trip","start":"2027-01-01","end":"2027-01-02"},"bookings":[{"id":"hotel-test","title":"Synthetic hotel","doc":"test.pdf","map":"https://example.org/maps","lines":[["Check-in","15:00"]]}],"days":[{"date":"2027-01-01","events":[{"title":"Hotel","bid":"hotel-test","gid":"guide-test"}],"checks":["Test checklist"]}],"guides":[{"id":"guide-test","title":"Synthetic guide","doc":"test.pdf","items":[["Test","Info"]],"links":[{"label":"Map","url":"https://example.org"}]}],"documents":[]}
+ b=io.BytesIO()
+ with zipfile.ZipFile(b,"w") as z:
+  z.writestr("manifest.json",json.dumps(m));z.writestr("documenti/test.pdf",b"%PDF-synthetic");z.writestr("notes.json",json.dumps({"revision":0,"notes":{"2027-01-01":"Test note"},"checks":{"2027-01-01":[0]}}))
+ return b.getvalue(),m
+
+def test_import_owner_pin_export(tmp_path):
+ c,h=init(tmp_path)
+ p="/api/personal"
+ assert c.get(p+"/trips").status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ raw,m=sample()
+ r=c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")})
+ assert r.status_code==200,r.text
+ tid=r.json()["id"];url=p+"/trips/"+tid
+ assert c.get(url).json()["manifest"]==m
+ assert c.get(url).json()["state"]["checks"]=={"2027-01-01":[0]}
+ assert c.get(url+"/documents/test.pdf").content==b"%PDF-synthetic"
+ assert c.get(url+"/export").headers["cache-control"]=="no-store, private"
+ assert c.get("/api/tasks").json()==[]
+ assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==409
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.get(url+"/documents/test.pdf").status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"000000"}).status_code==403
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456"}).status_code==200
+ create_user(c,h,"colleague");sign_in(c,h,"colleague")
+ assert c.get(url).status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+ assert c.get(url).status_code==404
+ assert c.get(p+"/trips").json()==[]
+ c.close()
+
+def test_create_and_edit(tmp_path):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ r=c.post(p+"/trips",headers=h,json={"title":"New synthetic trip","start":"2027-01-01","end":"2027-01-02"})
+ assert r.status_code==200,r.text
+ url=p+"/trips/"+r.json()["id"];b=c.get(url).json()
+ assert len(b["manifest"]["days"])==2
+ b["manifest"]["days"][0]["headline"]="New plan"
+ assert c.put(url,headers=h,json=b).status_code==200
+ assert c.put(url,headers=h,json=b).status_code==409
+ assert c.get(url).json()["manifest"]["days"][0]["headline"]=="New plan"
+ c.close()
