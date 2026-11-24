@@ -135,6 +135,7 @@ def main():
      assert dashboard_page.locator('.rowtask',has_text='Dashboard today synthetic').count()==1
      assert dashboard_page.locator('.rowtask',has_text='Dashboard tomorrow synthetic').count()==0
      dashboard_page.get_by_role('button',name='Impostazioni',exact=True).click()
+     dashboard_page.locator('.settings-link',has_text='Profilo e preferenze').click()
      assert dashboard_page.locator('.settings-content',has_text='Il mio profilo').count()==1
      assert dashboard_page.locator('.settings-content',has_text='Regola automatica · Email → ICS').count()==0
      dashboard_page.locator('.settings-link',has_text='Automazioni').click()
