@@ -10,8 +10,8 @@ android {
         applicationId = "uk.archis.nextdoviaggi"
         minSdk = 30
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.1.10-test"
+        versionCode = 12
+        versionName = "0.1.11-test"
     }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

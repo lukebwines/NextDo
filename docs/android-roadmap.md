@@ -32,3 +32,6 @@ Presa visione per utente e revisione (non completamento); Android, notifica e we
 
 ### Pubblicazione 0.1.10-test
 Per questa sola versione, la pipeline firmata può partire anche da un merge esplicitamente marcato `Publish Android 0.1.10-test:` su main, dopo i test PR superati. Mantiene la firma permanente, il package ID e il normale comando manuale per i rilasci successivi. Nessuna modifica alle chiavi.
+
+## 0.1.11-test — Allarmi professionali potenziati (priorità utente)
+Server invariato, impostazioni locali per durata/ripetizione/suono/vibrazione/schermo/notifica. Full-screen e promemoria esatti solo se Android autorizza, servizio audio temporaneo con fallback notifica. Presa visione sincronizzata; silenziamento distinto. Test CI e collaudo Samsung obbligatori. La roadmap personale è rinviata a una release successiva.
