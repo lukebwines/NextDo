@@ -121,6 +121,24 @@ async function downloadICS(ids,includeDetails){
  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
  msg('File ICS scaricato. Aprirlo nel calendario desiderato.');
 }
+function outboundRequestId(){return Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('')}
+async function sendCalendarMail(ids,details){
+ const cfg=await api('/outbound-mail/config');
+ if(!cfg.enabled)return msg('Collaudare e abilitare Posta in uscita nelle Impostazioni',true);
+ const {box,back}=modal('Invia ICS via email');
+ const recipient=select('recipient',[['','Selezionare destinatario'],...cfg.recipients.map(x=>[x,x])]);
+ const status=node('p','sub','');
+ const send=btn('Invia ICS',async()=>{
+  if(!recipient.value)return msg('Seleziona un destinatario',true);
+  if(!confirm('Inviare '+ids.length+' voci di calendario a '+recipient.value+'?'+(details?' Sono inclusi descrizione e collegamenti.':'')))return;
+  send.disabled=true;recipient.disabled=true;
+  try{
+   const result=await api('/outbound-mail/send-ics',{method:'POST',body:JSON.stringify({request_id:outboundRequestId(),recipient:recipient.value,task_ids:ids,include_details:details,confirmed:true})});
+   status.textContent=result.detail;msg(result.detail,!['delivered','queued'].includes(result.status));
+  }catch(e){status.textContent=e.message+' — Controllare il registro prima di un nuovo invio.';msg(e.message,true)}
+ },'primary');
+ box.append(node('p','sub','Mittente: '+cfg.sender+' · '+ids.length+' voci. Solo destinatari autorizzati. Invio manuale, nessun invito automatico.'),field('Destinatario',recipient),status,send,btn('Chiudi',()=>back.remove(),'small'));
+}
 function calendarExportForm(tasks){
  const candidates=tasks.filter(canExportICS);
  if(!candidates.length)return msg('Nessuna attività confermata con data da esportare',true);
@@ -147,7 +165,7 @@ function calendarExportForm(tasks){
  box.append(node('p','sub','Esportazione dei dati salvati. Scadenze come eventi giornalieri; appuntamenti con l’orario registrato, senza durata inventata. Le date non ancora confermate e le note sono escluse.'),
   selection,list,count,el('label',{class:'rowtask'},[details,' Includi descrizione, luogo e collegamenti espliciti']),
   node('p','sub','Includere i dettagli solo se autorizzati a trasferirli nel calendario esterno. Aprire il file .ics scaricato con il calendario scelto. Nessuna sincronizzazione automatica.'),
-  el('div',{class:'actions'},[btn('Annulla',()=>back.remove()),run]));
+  el('div',{class:'actions'},[btn('Annulla',()=>back.remove()),run,...(S.me.role==='admin'?[btn('Invia ICS via email',async()=>{if(!selected.size)return msg('Seleziona almeno una voce',true);try{await sendCalendarMail([...selected],details.checked)}catch(e){msg(e.message,true)}},'small')]:[])]));
  update();
 }
 function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['review','Da verificare'],['urgent','Urgenti'],['overdue','Scadute'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';tools.append(search,csel,gsel,status,preset);if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Email → Scadenze AI',emailIntakeForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':(view==='agenda'?['task','appointment'].includes(t.kind):t.kind===(view==='appointments'?'appointment':'task'))&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&(preset.value==='all'||(preset.value==='review'&&t.status==='review')||(preset.value==='urgent'&&['high','critical'].includes(t.priority)&&t.status!=='done')||(preset.value==='overdue'&&t.due_at&&new Date(t.due_at)<new Date()&&t.status!=='done')||(preset.value==='done'&&t.status==='done')));panel.append(node('h2','',`${tasks.length} elementi`));if(tasks.some(canExportICS))panel.append(btn('Esporta ICS',()=>calendarExportForm(tasks),'small'));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.forEach(t=>panel.append(taskrow(t)))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
@@ -651,6 +669,49 @@ function gmailAutoSettings(main){
  load();
 }
 
+function outboundMailSettings(main){
+ if(S.me.role!=='admin')return;
+ const card=el('section',{class:'card',style:'margin-top:15px'});
+ card.append(node('h2','','Posta in uscita · Cloudflare'),node('p','sub','Invio manuale ICS tramite API REST. Non modifica la ricezione Cloudflare. I destinatari devono essere verificati anche nel pannello Cloudflare.'));
+ const form=el('div',{class:'formgrid'}),history=el('div',{});card.append(form,history);main.append(card);
+ async function load(){
+  try{
+   const cfg=await api('/outbound-mail/config');form.replaceChildren();
+   const account=input('account','Account ID Cloudflare',cfg.account_id);
+   const sender=input('sender','Mittente del sottodominio dedicato',cfg.sender);
+   const token=input('token',cfg.token_configured?'Token salvato (lascia vuoto per mantenerlo)':'Token API','','password');token.autocomplete='new-password';
+   const recipients=el('textarea',{class:'field',rows:'3',placeholder:'Un indirizzo verificato per riga'});recipients.value=cfg.recipients.join('\n');
+   const state=node('p','sub',cfg.enabled?'Invio abilitato':cfg.tested?'Prova accettata: confermare ricezione':'Invio disabilitato · collaudo necessario');
+   const save=btn('Salva configurazione',async()=>{save.disabled=true;try{
+    await api('/outbound-mail/config',{method:'POST',body:JSON.stringify({account_id:account.value,sender:sender.value,token:token.value,recipients:recipients.value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean)})});token.value='';msg('Configurazione salvata. Eseguire il collaudo.');await load()
+   }catch(e){msg(e.message,true)}finally{save.disabled=false}},'primary');
+   form.append(state,field('Account ID',account),field('Mittente',sender),field('Token API · Email Sending Edit',token),field('Destinatari verificati e autorizzati',recipients),save);
+   if(cfg.token_configured){
+    const recipient=select('test_recipient',[['','Scegli destinatario di prova'],...cfg.recipients.map(x=>[x,x])]);
+    const test=btn('Invia email di prova con ICS',async()=>{
+     if(!recipient.value)return msg('Seleziona destinatario di prova',true);
+     if(!confirm('Inviare un solo evento fittizio a '+recipient.value+'?'))return;
+     test.disabled=true;
+     try{const result=await api('/outbound-mail/test',{method:'POST',body:JSON.stringify({recipient:recipient.value,request_id:outboundRequestId()})});msg(result.detail,!['delivered','queued'].includes(result.status));await load()}catch(e){msg(e.message,true);await showHistory()}finally{test.disabled=false}
+    },'small');
+    form.append(field('Destinatario test',recipient),test);
+    if(cfg.tested&&!cfg.enabled){
+     const received=el('input',{type:'checkbox'});
+     const enable=btn('Abilita invio manuale',async()=>{if(!received.checked)return;try{await api('/outbound-mail/enable',{method:'POST',body:JSON.stringify({enabled:true,confirmed_received:true})});await load();msg('Invio manuale abilitato')}catch(e){msg(e.message,true)}},'primary');
+     enable.disabled=true;received.onchange=()=>enable.disabled=!received.checked;
+     form.append(el('label',{class:'full'},[received,' Ho ricevuto e aperto correttamente l’ICS di prova']),enable);
+    }
+    if(cfg.enabled)form.append(btn('Disabilita invio',async()=>{try{await api('/outbound-mail/enable',{method:'POST',body:JSON.stringify({enabled:false})});await load()}catch(e){msg(e.message,true)}},'danger'));
+   }
+   await showHistory()
+  }catch(e){form.replaceChildren(node('p','sub',e.message))}
+ }
+ async function showHistory(){
+  history.replaceChildren(node('h3','','Registro invii'),node('p','sub','Consegna o accodamento riportati da Cloudflare; se l’esito è incerto non ripetere automaticamente. Registro senza titoli o contenuto, conservato 90 giorni (pulizia al prossimo invio).'));
+  try{const rows=await api('/outbound-mail/history');if(!rows.length)history.append(node('p','sub','Nessun invio registrato.'));for(const row of rows)history.append(node('p','sub',fmt(new Date(row.created_epoch*1000).toISOString())+' · '+(row.kind==='test'?'Prova':'ICS ('+row.task_count+')')+' · '+row.detail))}catch(e){history.append(node('p','sub',e.message))}
+ }
+ load()
+}
 function cloudflareMailSettings(main){
  if(S.me.role!=='admin')return;
  const card=el('section',{class:'card',style:'margin-top:15px'});
@@ -750,7 +811,7 @@ function cloudflareMailSettings(main){
  load();
 }
 
-function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);emailPromptSettings(main);cloudflareMailSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
+function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);emailPromptSettings(main);cloudflareMailSettings(main);outboundMailSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
 
 function restoreForm(){
  const {box,back}=modal('Ripristina un backup NextDo');
