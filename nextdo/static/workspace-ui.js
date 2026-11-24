@@ -20,6 +20,7 @@ const NextDoWorkspace=(()=>{
    S.selectedProject=null;
    const tools=el('div',{class:'workspace-tools'},[
     node('p','sub','Tutti i progetti in una vista compatta. Aprine uno per visualizzare Kanban o Gantt.'),
+    opt('Avanzamenti e Gantt in evidenza',()=>changeView('project-progress'),'small'),
     opt('+ Nuovo progetto',()=>projectForm(),'primary')
    ]);
    main.append(tools);
@@ -575,12 +576,12 @@ const NextDoWorkspace=(()=>{
    opt('Collaboratori Lists ('+onlyLists+')',()=>courseCollaboratorForm(c),'small')
   ]);
  }
- function settings(main){
+ function settings(main,mode='all'){
   const section=el('section',{class:'card workspace-settings',style:'margin-top:16px'});
   section.append(node('h2','','Il mio profilo'),node('p','sub','Modifica la tua password senza coinvolgere l’amministratore.'));
   section.append(opt('Cambia password',changePasswordForm,'primary'));
-  main.append(section);
-  if(S.me.role!=='admin')return;
+  if(mode!=='organization')main.append(section);
+  if(S.me.role!=='admin'||mode==='profile')return;
   const section2=el('section',{class:'card workspace-settings',style:'margin-top:16px'});
   section2.append(node('h2','','Gestione utenti'),node('p','sub','Crea i colleghi con + Utente, poi assegna loro i CdS. Qui puoi cambiare ruolo, reimpostare password e attivare/disattivare account.'));
   for(const u of S.users){

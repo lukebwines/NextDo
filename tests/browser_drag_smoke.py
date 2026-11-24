@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from datetime import date,timedelta
 from urllib.request import urlopen
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -65,6 +66,10 @@ def main():
    'title':'Dashboard completed appointment','kind':'appointment','scope':'personal','status':'done'}))
   check(client.post('/api/tasks',headers=headers,json={
    'title':'Dashboard private note','kind':'note','scope':'personal'}))
+  for label,offset in [('today',0),('tomorrow',1),('past',-1),('later',14)]:
+   check(client.post('/api/tasks',headers=headers,json={
+    'title':'Dashboard '+label+' synthetic','kind':'task','scope':'personal',
+    'due_at':(date.today()+timedelta(days=offset)).isoformat()}))
   with socket.socket() as sock:
    sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
   base=f'http://127.0.0.1:{port}/'
@@ -100,6 +105,37 @@ def main():
      dashboard_page.get_by_role('button',name='Da verificare: 9 attività, apri elenco filtrato').click()
      assert dashboard_page.locator('.rowtask',has_text='Dashboard appointment').count()==8
      assert dashboard_page.locator('.rowtask',has_text='Dashboard deadline review').count()==1
+     dashboard_page.get_by_role('button',name='Dashboard',exact=True).click()
+     assert dashboard_page.locator('.bento-overdue',has_text='Dashboard past synthetic').count()==1
+     assert dashboard_page.locator('.bento-upcoming',has_text='Dashboard today synthetic').count()==1
+     assert dashboard_page.locator('.bento-upcoming',has_text='Dashboard tomorrow synthetic').count()==1
+     assert dashboard_page.locator('.bento-later',has_text='Dashboard later synthetic').count()==1
+     assert dashboard_page.locator('.dashboard-work').count()==0
+     assert dashboard_page.locator('.mini-day').count()==42
+     dashboard_page.locator('.metric-tomorrow').click()
+     assert dashboard_page.locator('.rowtask',has_text='Dashboard tomorrow synthetic').count()==1
+     assert dashboard_page.locator('.rowtask',has_text='Dashboard today synthetic').count()==0
+     dashboard_page.get_by_role('button',name='Dashboard',exact=True).click()
+     dashboard_page.locator('.mini-day.today').click()
+     assert dashboard_page.locator('.rowtask',has_text='Dashboard today synthetic').count()==1
+     assert dashboard_page.locator('.rowtask',has_text='Dashboard tomorrow synthetic').count()==0
+     dashboard_page.get_by_role('button',name='Impostazioni',exact=True).click()
+     assert dashboard_page.locator('.settings-content',has_text='Il mio profilo').count()==1
+     assert dashboard_page.locator('.settings-content',has_text='Regola automatica · Email → ICS').count()==0
+     dashboard_page.locator('.settings-link',has_text='Automazioni').click()
+     dashboard_page.get_by_role('heading',name='Regola automatica · Email → ICS').wait_for()
+     assert dashboard_page.locator('.settings-content',has_text='Il mio profilo').count()==0
+     dashboard_page.locator('.settings-link',has_text='Sicurezza e backup').click()
+     dashboard_page.get_by_role('button',name='Importa backup NextDo').wait_for()
+     dashboard_page.set_viewport_size({'width':390,'height':844})
+     dashboard_page.get_by_role('button',name='Apri menu').click()
+     dashboard_page.get_by_role('button',name='Dashboard',exact=True).click()
+     assert dashboard_page.locator('.bento-upcoming').is_visible()
+     assert dashboard_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth+1')
+     dashboard_page.get_by_role('button',name='Apri menu').click()
+     dashboard_page.get_by_role('button',name='Impostazioni',exact=True).click()
+     dashboard_page.locator('.settings-link',has_text='App Android').click()
+     dashboard_page.get_by_role('button',name='Dispositivi e associazione').wait_for()
      dashboard_page.close()
      page=browser.new_page(viewport={'width':1365,'height':930})
      page.goto(base,wait_until='networkidle')
@@ -107,14 +143,11 @@ def main():
      page.locator('input[name="password"]').fill('synthetic colleague password 123')
      page.get_by_role('button',name='Accedi').click()
      page.get_by_role('button',name='Progetti',exact=True).wait_for()
-     page.locator('.dashboard-work').wait_for()
-     assert page.evaluate("""() => {
-       const content=document.querySelector('.dashboard-page');
-       const children=[...content.children];
-       return children.indexOf(content.querySelector('.dashboard-work'))
-         > children.indexOf(content.querySelector('.dash-bottom'));
-     }"""),'The project and Gantt section must appear after the regular dashboard summaries'
+     assert page.locator('.dashboard-work').count()==0
      page.get_by_role('button',name='Progetti',exact=True).click()
+     page.get_by_role('button',name='Avanzamenti e Gantt in evidenza').click()
+     page.locator('.dashboard-work').wait_for()
+     page.get_by_role('button',name='Torna ai progetti').click()
      assert page.locator('.project-list-row').count()==2,'Two projects must fit in the compact index'
      assert 'Indipendente dai CdS' in page.locator('.project-list-row',has_text='Synthetic team project').inner_text()
      assert page.locator('.kanban-board').count()==0,'Kanban must open only within a project'

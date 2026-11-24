@@ -13,6 +13,10 @@ def test_html_does_not_cache_old_dashboard(tmp_path):
   assert 'assets/app.js?v=' in result.text
   assert 'assets/style.css?v=' in result.text
   assert 'assets/visual-v1.css?v=' in result.text
+  assert 'assets/bento.css?v=' in result.text
+  assert 'assets/nextdo.svg?v=' in result.text
+  assert client.get('/assets/nextdo.svg').status_code==200
+  assert client.get('/assets/bento.css').status_code==200
   js=client.get('/assets/app.js')
   assert js.status_code==200
   assert 'no-store' in js.headers.get('cache-control','')

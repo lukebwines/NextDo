@@ -160,7 +160,7 @@ def check_course_code(code):
 
 def asset_versions():
  return {name:hashlib.sha256((ROOT/'static'/name).read_bytes()).hexdigest()[:12]
-         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','workspace-ui.css','workspace-ui.js','gantt.css','gantt.js','progress-ui.css','progress-ui.js','app.js')}
+         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','workspace-ui.css','workspace-ui.js','gantt.css','gantt.js','progress-ui.css','progress-ui.js','app.js','bento.css','nextdo.svg','microsoft-lists-ui.css','microsoft-lists-ui.js','personal-travel.css','personal-trips.js')}
 
 @app.get('/',response_class=HTMLResponse)
 def home():
@@ -172,7 +172,7 @@ def home():
 @app.get('/api/build')
 def build_details(req:Request):
  user(req)
- return {'version':'0.1.22-test','assets':asset_versions()}
+ return {'version':'0.2.0-test','assets':asset_versions()}
 @app.get('/api/setup')
 def setup():
  with conn() as c:count=c.execute('SELECT COUNT(*) FROM users').fetchone()[0]
