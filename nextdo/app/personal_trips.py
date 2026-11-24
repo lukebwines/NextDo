@@ -39,7 +39,14 @@ def validate_shape(v,depth=0):
 def validate_manifest(m,available):
  if isinstance(m,dict):
   tools.validate_cover(m.get('cover'))
-  validate_shape({k:v for k,v in m.items() if k!='cover'})
+  validate_shape({k:v for k,v in m.items() if k not in ('cover','travel_photos')})
+  photos=m.get('travel_photos',{})
+  if not isinstance(photos,dict) or len(photos)>80:fail('Troppe foto del viaggio')
+  total=0
+  for key,img in photos.items():
+   if not isinstance(key,str) or not re.fullmatch(r'(?:day|booking):[a-z0-9_-]{2,48}',key) or img is None:fail('Foto del viaggio non valida')
+   tools.validate_cover(img);total+=len(img['jpeg'])
+  if total>12_000_000:fail('Limite immagini del viaggio raggiunto')
  else:validate_shape(m)
  if not isinstance(m,dict) or m.get("format_version")!=1:fail("Richiesto manifest.json formato 1")
  t=m.get("trip")
@@ -94,6 +101,7 @@ def validate_manifest(m,available):
   if not isinstance(e.get("title"),str) or not e["title"].strip():fail("Spesa non valida")
   tools.validate_expense(e)
   doc(e.get("doc"))
+ if any(k not in {"day:"+d["date"] for d in m.get("days",[])}|{"booking:"+i for i in bids} for k in m.get("travel_photos",{})):fail("Foto associata a una tappa inesistente")
  if refs!=set(available):fail("PDF mancanti o non dichiarati")
  return m
 
@@ -156,6 +164,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  with db() as c:
   c.executescript("""CREATE TABLE IF NOT EXISTS pins(owner TEXT PRIMARY KEY,pin TEXT NOT NULL,attempts INTEGER DEFAULT 0,blocked_until REAL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS trips(owner TEXT NOT NULL,id TEXT NOT NULL,archive BLOB NOT NULL,title TEXT NOT NULL,start TEXT NOT NULL,end TEXT NOT NULL,revision INTEGER DEFAULT 0,PRIMARY KEY(owner,id));""")
+ with db() as c:c.execute("CREATE TABLE IF NOT EXISTS travel_services(owner TEXT NOT NULL,name TEXT NOT NULL,secret TEXT NOT NULL,PRIMARY KEY(owner,name))")
  os.chmod(database,0o600)
  # Stable account binding; deleting an account cascades its identity, so reused IDs cannot read old trips.
  with conn() as c:
@@ -297,10 +306,69 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
    r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
    m["cover"]=image
    return {"revision":save(c,owner,m,state,files,r["revision"])}
+ def service(owner,name):
+  with db() as c:r=c.execute("SELECT secret FROM travel_services WHERE owner=? AND name=?",(owner,name)).fetchone()
+  if not r:return ""
+  try:return tools.email_intake._cipher(data_path).decrypt(r["secret"].encode()).decode()
+  except Exception:fail("Chiave del servizio non leggibile",500)
+ @app.get("/api/personal/services")
+ def services(req:Request):
+  owner=allowed(req)
+  with db() as c:names={r[0] for r in c.execute("SELECT name FROM travel_services WHERE owner=?",(owner,))}
+  return {"pexels_configured":"pexels" in names,"geoapify_configured":"geoapify" in names}
+ @app.post("/api/personal/services")
+ def save_services(req:Request,b:dict):
+  owner=allowed(req,True)
+  updates={}
+  for name in ("pexels","geoapify"):
+   key=b.get(name)
+   if key is None or key=="":continue
+   updates[name]=tools.email_intake._cipher(data_path).encrypt(tools.service_key(key.strip() if isinstance(key,str) else key).encode()).decode()
+  remove=b.get("remove",[])
+  if not isinstance(remove,list) or any(x not in ("pexels","geoapify") for x in remove):fail("Servizio non valido")
+  with db() as c:
+   for name,value in updates.items():c.execute("INSERT OR REPLACE INTO travel_services(owner,name,secret) VALUES(?,?,?)",(owner,name,value))
+   for name in remove:c.execute("DELETE FROM travel_services WHERE owner=? AND name=?",(owner,name))
+  return {"ok":True}
  @app.post("/api/personal/photos/search")
  def photos_search(req:Request,b:dict):
-  allowed(req,True)
+  owner=allowed(req,True)
+  provider=b.get("provider","commons")
+  if provider=="pexels":
+   key=service(owner,"pexels")
+   if not key:fail("Configura la chiave Pexels in Servizi Viaggi")
+   return tools.pexels_search(b.get("query"),key)
+  if provider!="commons":fail("Servizio fotografico non valido")
   return tools.photos_search(b.get("query"))
+ def assign_photo(m,target,image):
+  if target=="cover":m["cover"]=image;return
+  if target not in {"day:"+d["date"] for d in m.get("days",[])}|{"booking:"+b["id"] for b in m.get("bookings",[])}:fail("Tappa non trovata")
+  m.setdefault("travel_photos",{})[target]=image
+ @app.post("/api/personal/trips/{tid}/photo")
+ def choose_photo(tid:str,req:Request,b:dict):
+  owner=allowed(req,True)
+  target=b.get("target","cover")
+  if not isinstance(target,str):fail("Destinazione foto non valida")
+  with db() as c:load(c,owner,tid)
+  provider=b.get("provider","pexels")
+  if provider=="pexels":
+   key=service(owner,"pexels")
+   if not key:fail("Configura la chiave Pexels in Servizi Viaggi")
+   image=tools.pexels_photo(b.get("pageid"),key)
+  elif provider=="commons":image=tools.commons_photo(b.get("pageid"))
+  else:fail("Servizio fotografico non valido")
+  if allowed(req,True)!=owner:fail("Sessione cambiata",403)
+  with db() as c:
+   r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
+   assign_photo(m,target,image)
+   return {"revision":save(c,owner,m,state,files,r["revision"])}
+ @app.post("/api/personal/trips/{tid}/photo/upload")
+ def upload_photo(tid:str,req:Request,target:str="cover",file:UploadFile=File(...)):
+  owner=allowed(req,True);image=tools.photo(file.file.read(5*1024*1024+1))
+  with db() as c:
+   r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
+   assign_photo(m,target,image)
+   return {"revision":save(c,owner,m,state,files,r["revision"])}
  @app.post("/api/personal/trips/{tid}/cover/commons")
  def cover_commons(tid:str,req:Request,b:dict):
   owner=allowed(req,True)
@@ -313,8 +381,10 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
    return {"revision":save(c,owner,m,state,files,r["revision"])}
  @app.post("/api/personal/geocode")
  def geocode(req:Request,b:dict):
-  allowed(req,True)
-  return tools.geocode(b.get("query"),b.get("key"))
+  owner=allowed(req,True)
+  key=service(owner,"geoapify") or b.get("key")
+  if not key:fail("Configura la chiave Geoapify in Servizi Viaggi")
+  return tools.geocode(b.get("query"),key)
  @app.get("/api/personal/trips/{tid}/documents/{name}/text")
  def pdf_text(tid:str,name:str,req:Request):
   owner=allowed(req)

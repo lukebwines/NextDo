@@ -57,3 +57,36 @@ def test_wikimedia_error_is_not_empty(monkeypatch):
  monkeypatch.setattr(tools,"json_fetch",lambda *a,**kw:{"error":{"code":"test"}})
  with pytest.raises(HTTPException) as e:tools.photos_search("Test")
  assert e.value.status_code==502
+
+
+def test_pexels_services_private_and_photo(tmp_path,monkeypatch):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ assert c.post(p+"/services",headers=h,json={"pexels":"synthetic-secret","geoapify":"synthetic-geo"}).status_code==200
+ cfg=c.get(p+"/services").json()
+ assert cfg=={"pexels_configured":True,"geoapify_configured":True}
+ assert b"synthetic-secret" not in (tmp_path/"personal"/"trips.sqlite3").read_bytes()
+ raw,m=sample()
+ assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
+ url=p+"/trips/"+m["trip"]["id"]
+ img=io.BytesIO();Image.new("RGB",(300,200),"navy").save(img,"PNG")
+ pic=tools.photo(img.getvalue())
+ monkeypatch.setattr(tools,"pexels_search",lambda q,k:[{"pageid":42}] if k=="synthetic-secret" else [])
+ monkeypatch.setattr(tools,"pexels_photo",lambda id,k:pic)
+ assert c.post(p+"/photos/search",headers=h,json={"provider":"pexels","query":"Test"}).json()==[{"pageid":42}]
+ r=c.post(url+"/photo",headers=h,json={"provider":"pexels","pageid":42,"target":"day:2027-01-01"})
+ assert r.status_code==200,r.text
+ b=c.get(url).json()
+ assert b["manifest"]["travel_photos"]["day:2027-01-01"]==pic
+ assert b["manifest"]["bookings"]==m["bookings"]
+ assert b"synthetic-secret" not in c.get(url+"/export").content
+ assert c.post(url+"/photo",headers=h,json={"provider":"pexels","pageid":42,"target":"day:2027-02-01"}).status_code==400
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.get(p+"/services").status_code==423
+ c.close()
+
+def test_pexels_rejects_untrusted_image_hosts(monkeypatch):
+ def item(host):
+  return {"id":123,"alt":"test","photographer":"Test","url":"https://www.pexels.com/photo/test-123/","src":{"medium":"https://"+host+"/test.jpg","landscape":"https://"+host+"/test.jpg"}}
+ monkeypatch.setattr(tools,"pexels_request",lambda *a,**kw:{"photos":[item("images.pexels.com"),item("example.org")]})
+ assert len(tools.pexels_search("Test","test"))==1

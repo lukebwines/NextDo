@@ -111,6 +111,40 @@ def commons_photo(pageid):
  image=photo(fetch(r["preview"],limit=5*1024*1024))
  return {**image,"credit":r["credit"],"license":r["license"],"source":r["source"]}
 
+def service_key(value):
+ if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,250}",value):fail("Chiave API non valida")
+ return value
+
+def pexels_request(path,key,params=None):
+ key=service_key(key)
+ return json_fetch("https://api.pexels.com/v1/"+path+("?" + urllib.parse.urlencode(params) if params else ""),headers={"Authorization":key})
+
+def pexels_result(item):
+ if not isinstance(item,dict) or type(item.get("id"))!=int:return None
+ src=item.get("src",{})
+ if not isinstance(src,dict):return None
+ def trusted(url,host):
+  try:
+   parsed=urllib.parse.urlsplit(url)
+   return isinstance(url,str) and parsed.scheme=="https" and parsed.hostname==host and not parsed.username and not parsed.password and parsed.port in (None,443)
+  except (ValueError,TypeError,AttributeError):return False
+ preview=src.get("medium","");image=src.get("landscape","");source=item.get("url","")
+ if not trusted(preview,"images.pexels.com") or not trusted(image,"images.pexels.com") or not trusted(source,"www.pexels.com"):return None
+ return {"pageid":item["id"],"title":str(item.get("alt") or "Foto Pexels")[:400],"preview":preview,"image":image,"credit":str(item.get("photographer") or "Fotografo Pexels")[:300]+" · Pexels","license":"Pexels","source":source,"provider":"pexels"}
+
+def pexels_search(query,key):
+ q=query_text(query)
+ result=pexels_request("search",key,{"query":q,"orientation":"landscape","per_page":12,"locale":"en-US"})
+ if not isinstance(result,dict) or not isinstance(result.get("photos"),list):fail("Risposta Pexels non valida",502)
+ return [r for item in result["photos"] if (r:=pexels_result(item))][:12]
+
+def pexels_photo(pageid,key):
+ if type(pageid)!=int or not 0<pageid<10**12:fail("Foto non valida")
+ r=pexels_result(pexels_request("photos/"+str(pageid),key))
+ if not r:fail("Foto Pexels non disponibile")
+ image=photo(fetch(r["image"],limit=5*1024*1024))
+ return {**image,"credit":r["credit"],"license":r["license"],"source":r["source"]}
+
 def geocode(query,key):
  q=query_text(query);key=query_text(key,160)
  if not re.fullmatch(r"[A-Za-z0-9_-]+",key):fail("Chiave Geoapify non valida")
