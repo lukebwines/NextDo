@@ -350,7 +350,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   target=b.get("target","cover")
   if not isinstance(target,str):fail("Destinazione foto non valida")
   with db() as c:load(c,owner,tid)
-  provider=b.get("provider","pexels")
+  provider=b.get("provider","commons")
   if provider=="pexels":
    key=service(owner,"pexels")
    if not key:fail("Configura la chiave Pexels in Servizi Viaggi")

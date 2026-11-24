@@ -90,3 +90,19 @@ def test_pexels_rejects_untrusted_image_hosts(monkeypatch):
   return {"id":123,"alt":"test","photographer":"Test","url":"https://www.pexels.com/photo/test-123/","src":{"medium":"https://"+host+"/test.jpg","landscape":"https://"+host+"/test.jpg"}}
  monkeypatch.setattr(tools,"pexels_request",lambda *a,**kw:{"photos":[item("images.pexels.com"),item("example.org")]})
  assert len(tools.pexels_search("Test","test"))==1
+
+
+def test_default_photo_provider_without_api_key(tmp_path,monkeypatch):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ monkeypatch.setattr(tools,"photos_search",lambda q:[{"pageid":42,"title":"Synthetic photo"}])
+ assert c.post(p+"/photos/search",headers=h,json={"query":"Test"}).json()==[{"pageid":42,"title":"Synthetic photo"}]
+ raw,m=sample()
+ assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
+ img=io.BytesIO();Image.new("RGB",(80,60),"navy").save(img,"PNG")
+ pic=tools.photo(img.getvalue())
+ monkeypatch.setattr(tools,"commons_photo",lambda id:pic)
+ url=p+"/trips/"+m["trip"]["id"]
+ assert c.post(url+"/photo",headers=h,json={"pageid":42,"target":"cover"}).status_code==200
+ assert c.get(url).json()["manifest"]["cover"]==pic
+ c.close()
