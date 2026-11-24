@@ -1,5 +1,6 @@
 """Read-only device-scoped travel API. Pairing requires an unlocked web account."""
 import hashlib,secrets,re,time
+from . import travel_diary
 from fastapi import Request,HTTPException
 from fastapi.responses import Response
 from argon2.exceptions import VerificationError
@@ -38,6 +39,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
   if not row:fail(401,"Sessione scaduta o dispositivo revocato")
   active(row["owner"])
   return row
+ travel_diary.register(app,db=db,allowed=allowed,auth=auth,load=load)
  @app.get("/api/personal/mobile/devices")
  def devices(req:Request):
   owner=allowed(req)
