@@ -44,12 +44,16 @@ def test_photo_search_fallback_and_licences(monkeypatch):
   return {"pageid":id,"title":"Test photo","imageinfo":[{"thumburl":"https://upload.wikimedia.org/test.jpg","mime":"image/jpeg","extmetadata":{"LicenseShortName":{"value":license},"Artist":{"value":"Author"}}}]}
  def fake(params):
   calls.append(params)
-  if params["gsrsearch"].startswith("filetype:"):return {"query":{"pages":[candidate(1,"CC BY-NC 4.0")]}}
+  if params.get("list")=="search":
+   ids=[1] if params["srsearch"].startswith("filetype:") else [2,3]
+   return {"query":{"search":[{"pageid":i} for i in ids]}}
+  if params["pageids"]=="1":return {"query":{"pages":[candidate(1,"CC BY-NC 4.0")]}}
   return {"query":{"pages":[candidate(2,"CC BY-SA 4.0"),candidate(3,"CC BY-ND 4.0")]}}
  monkeypatch.setattr(tools,"commons",fake)
- result=tools.photos_search("Los Angeles")
- assert [r["pageid"] for r in result]==[2]
- assert len(calls)==2 and calls[0]["gsrlimit"]==30
+ result=tools.commons_diagnostics("Los Angeles")
+ assert [r["pageid"] for r in result["results"]]==[2]
+ assert result["found"]==3 and result["with_license"]==3
+ assert len(calls)==4 and calls[0]["srlimit"]==30
 
 def test_wikimedia_error_is_not_empty(monkeypatch):
  import pytest

@@ -1,0 +1,31 @@
+name: Wikimedia live photo search
+on:
+  pull_request:
+    paths:
+      - 'nextdo/app/personal_travel_tools.py'
+      - '.github/workflows/wikimedia-live.yml'
+  workflow_dispatch:
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r nextdo/requirements.txt
+      - name: Actual Wikimedia search and image download
+        env:
+          PYTHONPATH: nextdo
+        run: |
+          python - <<'PY'
+          from app import personal_travel_tools as t
+          for q in ("Los Angeles skyline", "San Diego California"):
+              d=t.commons_diagnostics(q)
+              print(q, {k:v for k,v in d.items() if k!="results"}, "accepted", len(d["results"]), flush=True)
+              assert d["results"], "Real Wikimedia search returned no compatible photographs"
+              pic=t.commons_photo(d["results"][0]["pageid"])
+              t.validate_cover(pic)
+              print("Download and image validation passed",flush=True)
+          PY
