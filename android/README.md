@@ -31,3 +31,6 @@ Vedi [Configurazione firma e release Android](SIGNING.md). L'app verifica le rel
 
 ## Modifiche online (0.1.5-test / server 0.1.36-test)
 Import ZIP dal selettore Android con conferma, creazione viaggio con date, modifica titolo/sottotitolo, giornate, eventi e dati principali prenotazioni; aggiunta eventi e prenotazioni. I PDF, i campi avanzati, le foto e i riferimenti esistenti restano intatti. Le modifiche richiedono Internet; su conflitto annullare e riaprire il viaggio. La copia offline resta un'istantanea da riscaricare. Date di viaggi esistenti, allegati, eliminazioni e campi avanzati non sono modificabili da questa prima interfaccia. Il selettore documenti può richiedere un nuovo sblocco al ritorno.
+
+## Diario di bordo (0.1.5-test / server 0.1.36-test)
+Vedi [Diario di bordo](../docs/travel-timeline.md). Import JSON con filtro locale, anteprima e conferma; visualizzazione del tracciato schematico e statistiche sul web. Nessun GPS autonomo. Collaudo del formato reale del Samsung necessario. Il diario non è incluso nel pacchetto offline o nello ZIP.

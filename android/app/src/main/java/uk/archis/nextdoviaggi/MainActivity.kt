@@ -48,6 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.time.LocalDate
@@ -112,6 +113,7 @@ class MainActivity : ComponentActivity() {
     private var trips by mutableStateOf<List<JSONObject>>(emptyList())
     private var current by mutableStateOf<TripPackage?>(null)
     private var pendingZip by mutableStateOf<Uri?>(null)
+    private var zipScope = ""
     private var editor by mutableStateOf<TravelEditor?>(null)
     private val zipPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if(uri != null) pendingZip = uri
@@ -119,6 +121,16 @@ class MainActivity : ComponentActivity() {
     private var offline by mutableStateOf(false)
     private var offlineMeta by mutableStateOf<JSONObject?>(null)
     private var section by mutableStateOf("Home")
+    // Only retain the picker URI, not the raw history, across the normal app lock.
+    private var timelineFile by mutableStateOf<Uri?>(null)
+    private var timelineTrip = ""
+    private var timelineScope = ""
+    private val timelinePicker=registerForActivityResult(ActivityResultContracts.GetContent()){uri->
+        timelineFile=uri
+    }
+    private fun timelineOwner(cfg:JSONObject)=java.security.MessageDigest.getInstance("SHA-256")
+        .digest((cfg.str("url")+"\n"+cfg.str("token")).toByteArray()).joinToString(""){"%02x".format(it.toInt() and 255)}
+
     private var selectedDay by mutableStateOf("")
     private var pdf by mutableStateOf<ByteArray?>(null)
     private var pdfName by mutableStateOf("")
@@ -283,7 +295,7 @@ class MainActivity : ComponentActivity() {
         val uri = pendingZip ?: return
         val cfg = connection ?: return
         val s = session
-        if(s.isBlank()) return
+        if(s.isBlank() || zipScope != timelineOwner(cfg)) return
         task({
             val bytes = contentResolver.openInputStream(uri)?.use { readLimited(it, 32 * 1024 * 1024) }
                 ?: error("Impossibile leggere lo ZIP")
@@ -350,7 +362,8 @@ class MainActivity : ComponentActivity() {
         task({ TripPackage.parse(vault.read("offline")) }) { openTrip(it, true) }
     }
     private fun forget() {
-        pendingZip=null
+        timelineFile=null;timelineTrip="";timelineScope=""
+        pendingZip=null;zipScope=""
         task({ vault.clear() }) { lockLocal() }
     }
     private fun viewPdf(name: String) {
@@ -428,12 +441,13 @@ class MainActivity : ComponentActivity() {
             },
             bottomBar = {
                 if(t != null && !locked && pdf == null) NavigationBar(containerColor=Panel) {
-                    listOf("Home","Oggi","Prenota","PDF","Guide").forEach { label ->
+                    listOf("Home","Oggi","Prenota","PDF","Guide","Diario").forEach { label ->
                         val image = when(label) {
                             "Home" -> Icons.Default.Home
                             "Oggi" -> Icons.Default.CalendarToday
                             "Prenota" -> Icons.Default.ConfirmationNumber
                             "PDF" -> Icons.Default.Folder
+                            "Diario" -> Icons.Default.Place
                             else -> Icons.Default.Book
                         }
                         NavigationBarItem(selected=section==label,onClick={section=label},icon={Icon(image,label)},label={Text(label,fontSize=11.sp)},
@@ -464,6 +478,7 @@ class MainActivity : ComponentActivity() {
                             "Prenota" -> BookingScreen(t)
                             "PDF" -> Documents(t)
                             "Guide" -> Guides(t)
+                            "Diario" -> TimelineScreen(t)
                         }
                     }
                     else -> ConnectionScreen()
@@ -501,6 +516,52 @@ class MainActivity : ComponentActivity() {
     @Composable private fun Action(text: String, enabled: Boolean=!busy, onClick: () -> Unit) {
         Button(onClick=onClick,enabled=enabled,shape=RoundedCornerShape(15.dp)) { Text(text,fontWeight=FontWeight.SemiBold) }
     }
+    @Composable private fun TimelineScreen(t:TripPackage) {
+        var from by remember(t.id){mutableStateOf(t.info.str("start"))}
+        var to by remember(t.id){mutableStateOf(t.info.str("end"))}
+        var preview by remember(t.id){mutableStateOf<JSONObject?>(null)}
+        var result by remember(t.id){mutableStateOf("")}
+        var confirm by remember{mutableStateOf(false)}
+        val cfg=connection
+        val file=timelineFile?.takeIf{cfg!=null&&timelineTrip==t.id&&timelineScope==timelineOwner(cfg)}
+        TravelCard("Diario di bordo","Importa la cronologia esportata da Google Maps. Nessuna registrazione GPS aggiuntiva.") {
+            OutlinedTextField(from,{from=it;preview=null},label={Text("Dal (AAAA-MM-GG)")},singleLine=true,enabled=!busy)
+            OutlinedTextField(to,{to=it;preview=null},label={Text("Al (incluso, AAAA-MM-GG)")},singleLine=true,enabled=!busy)
+            Text("Le date seguono il fuso presente nei singoli eventi di Google. Gli eventi a cavallo dei limiti vengono esclusi; i punti del percorso vengono filtrati singolarmente.",color=Muted,fontSize=12.sp)
+            Action("Scegli file JSON",!busy&&cfg!=null){
+                preview=null;timelineFile=null;timelineTrip=t.id;timelineScope=timelineOwner(cfg!!)
+                timelinePicker.launch("*/*")
+            }
+            Text(if(file!=null)"File selezionato. Puoi analizzarlo." else "Dopo la scelta del file, se richiesto, sblocca l’app e riapri questo viaggio e Diario.",color=Muted,fontSize=12.sp)
+            Action("Analizza sul telefono",!busy&&file!=null){
+                val uri=file ?: return@Action
+                val a=from;val b=to
+                preview=null;result=""
+                task({
+                    try{contentResolver.openInputStream(uri)?.use{TimelineImport.parse(it,a,b)}?:error("File non leggibile")}
+                    catch(e:Exception){throw IllegalArgumentException(if(e is IllegalArgumentException)e.message?.takeIf{it in listOf("Intervallo non valido","Troppi dati: seleziona un periodo più breve","Formato Cronologia Google non supportato","Nessuno spostamento compatibile nell’intervallo","Archivio troppo grande")} ?: "File o date non validi" else "Impossibile leggere la cronologia")}
+                }){preview=it}
+            }
+            preview?.let{p->
+                val paths=p.getJSONArray("paths")
+                val points=(0 until paths.length()).sumOf{paths.getJSONArray(it).length()}
+                Text(p.getString("from")+" — "+p.getString("to"),color=Teal)
+                Text("Visite: "+p.getJSONArray("visits").length()+" · Spostamenti: "+p.getJSONArray("activities").length()+" · Punti: "+points)
+                for(v in p.arr("visits").take(5))Text(v.str("startTime")+" · "+v.getJSONObject("location").optDouble("lat")+", "+v.getJSONObject("location").optDouble("lon"),color=Muted,fontSize=12.sp)
+                Text("Il file originale e gli altri periodi non vengono inviati. Un nuovo import sostituisce il diario precedente di questo viaggio.",color=Sand,fontSize=12.sp)
+                Action("Conferma e sincronizza",!busy&&cfg!=null&&session.isNotBlank()){confirm=true}
+            }
+            if(result.isNotBlank())Text(result,color=Teal)
+            if(confirm) AlertDialog(onDismissRequest={confirm=false},title={Text("Salvare la cronologia filtrata?")},text={Text("Il diario precedente di questo viaggio verrà sostituito. Il file originale non viene inviato.")},
+                confirmButton={TextButton(onClick={
+                    confirm=false;val p=preview;val c=connection;val s=session
+                    if(p!=null&&c!=null&&s.isNotBlank())task({
+                        require(p.toString().toByteArray(Charsets.UTF_8).size<=5*1024*1024){"Importazione troppo grande"}
+                        TravelApi(c.getString("url")).obj("/trips/"+segment(t.id)+"/timeline",s,p)
+                    }){preview=null;timelineFile=null;result="Cronologia salvata. Apri il Diario di bordo nel portale web."}
+                }){Text("Salva")}},dismissButton={TextButton(onClick={confirm=false}){Text("Annulla")}})
+        }
+    }
     @Composable private fun LockedScreen() {
         Box(Modifier.fillMaxWidth().height(260.dp).clip(RoundedCornerShape(28.dp)).background(Brush.linearGradient(listOf(Color(0xFF1B5271),Color(0xFF163E4B),Panel))), contentAlignment=Alignment.Center) {
             Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -534,8 +595,12 @@ class MainActivity : ComponentActivity() {
         } else {
             Text("I tuoi viaggi",fontSize=26.sp,fontWeight=FontWeight.ExtraBold,color=White)
             Action("Nuovo viaggio", !busy) { editor=TravelEditor("new") }
-            Action("Seleziona itinerario ZIP", !busy) { zipPicker.launch(arrayOf("application/zip","application/x-zip-compressed","application/octet-stream")) }
-            if(pendingZip!=null) TravelCard("Itinerario selezionato","Il file verrà importato nel tuo archivio privato sul Raspberry. Un viaggio esistente non sarà sovrascritto.") {
+            Action("Seleziona itinerario ZIP", !busy) {
+                pendingZip=null
+                zipScope=timelineOwner(cfg)
+                zipPicker.launch(arrayOf("application/zip","application/x-zip-compressed","application/octet-stream"))
+            }
+            if(pendingZip!=null && zipScope==timelineOwner(cfg)) TravelCard("Itinerario selezionato","Il file verrà importato nel tuo archivio privato sul Raspberry. Un viaggio esistente non sarà sovrascritto.") {
                 Action("Conferma importazione", !busy) { importZip() }
                 TextButton(onClick={pendingZip=null},enabled=!busy){Text("Annulla")}
             }
