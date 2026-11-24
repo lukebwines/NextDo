@@ -35,3 +35,6 @@ Ordine e numerazioni successive indicativi, non impegni di consegna. La priorit�
 
 ## Integrazione fase 2 — proposta 0.1.37-test / Android 0.1.6-test
 Consultazione diario web/Android, confronto visivo previsto/effettivo, mappa Geoapify su richiesta con overlay locale, export ZIP con diario e ripristino atomico, copia offline cifrata con storico. Test e collaudo reale ancora necessari. Non è calcolo automatico del percorso stradale né rilevazione automatica delle deviazioni. In seguito completare campi avanzati mobile e inbox.
+
+## Priorità sospesa — app NextDo generale
+La roadmap Viaggi è temporaneamente sospesa: prima consolidare NextDo Android con home modulare, area professionale e personale, agenda e notifiche professionali. Viaggi resta modulo personale; il collaudo reale della versione Diario rimane necessario. Vedi [roadmap Android](android-roadmap.md).
