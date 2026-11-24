@@ -34,6 +34,7 @@ internal object WorkAlerts {
     private const val id=7001
     private const val day=86400L
     private val keyPattern=Regex("[a-f0-9]{64}")
+    private var testSent=0L
     private fun now()=System.currentTimeMillis()/1000
     private fun manager(c:Context)=c.getSystemService(NotificationManager::class.java)
     private fun vault(c:Context)=Vault(c,true)
@@ -118,6 +119,22 @@ internal object WorkAlerts {
         val mark=state.optJSONObject("marks")?.optJSONObject(key)?:return@synchronized false
         !mark.optBoolean("ack")
     }
+    fun playbackAllowed(c:Context,key:String,fresh:Boolean=false):Boolean=synchronized(lock){
+        if(!alarmActive(c,key))return@synchronized false
+        if(key==CriticalAlarm.TEST)return@synchronized !fresh||now()-testSent in 0L..10L
+        val mark=read(c,"state")?.optJSONObject("marks")?.optJSONObject(key)?:return@synchronized false
+        val sent=mark.optLong("sent",0)
+        !mark.optBoolean("silenced")&&(!fresh||now()-sent in 0L..10L)
+    }
+    fun silence(c:Context,key:String){
+        if(!CriticalAlarm.valid(key))return
+        if(key==CriticalAlarm.TEST){CriticalAlarm.finishTest(c);return}
+        synchronized(lock){
+            val state=read(c,"state")?:return
+            val mark=state.optJSONObject("marks")?.optJSONObject(key)?:return
+            mark.put("silenced",true);write(c,"state",state);CriticalAlarm.stop(c,key)
+        }
+    }
     fun test(c:Context){
         channels(c)
         if(!permission(c))return
@@ -130,7 +147,7 @@ internal object WorkAlerts {
             .setOngoing(o.persistent).setTimeoutAfter((o.duration+15)*1000L)
             .addAction(0,"Termina prova",CriticalAlarm.action(c,CriticalAlarm.TEST,"uk.archis.nextdo.ALERT_SILENCE"))
         if(o.screen&&CriticalAlarm.fullScreenAllowed(c))b.setFullScreenIntent(pi,true)
-        manager(c).notify(tag+CriticalAlarm.TEST,id,b.build())
+        synchronized(lock){testSent=now();manager(c).notify(tag+CriticalAlarm.TEST,id,b.build())}
         CriticalAlarm.launch(c,CriticalAlarm.TEST)
     }
     private fun notice(c:Context,item:JSONObject,loud:Boolean){
@@ -165,7 +182,7 @@ internal object WorkAlerts {
             entry.put("ack",true).put("pending",true);marks.put(key,entry)
             write(c,"state",state);CriticalAlarm.stop(c,key);manager(c).cancel(tag+key,id)
         }
-        kick(c)
+        kickPush(c)
     }
     fun pendingCount(c:Context):Int=synchronized(lock){try{val marks=read(c,"state")?.optJSONObject("marks")?:return@synchronized 0;marks.keys().asSequence().count{marks.optJSONObject(it)?.optBoolean("pending")==true}}catch(_:Exception){0}}
     private data class Remote(val items:JSONArray,val expires:Long)
@@ -242,7 +259,7 @@ internal object WorkAlerts {
                 if(needs&&sent<10&&permission(c)){
                     val loud=critical&&loudKey==null
                     notice(c,item,loud);if(loud)loudKey=key
-                    mark.put("stage",p.stage).put("sent",t);sent++
+                    mark.put("stage",p.stage).put("sent",t).put("silenced",false);sent++
                 }else if(needs&&permission(c))upcoming(t+60)
                 if(critical&&p.stage>0&&permission(c))upcoming(maxOf(t+60,mark.optLong("sent",t)+repeat))
             }
@@ -274,8 +291,8 @@ class WorkAlertReceiver:BroadcastReceiver(){
             "uk.archis.nextdo.ALERT_TICK"->WorkAlerts.kick(context)
             "uk.archis.nextdo.ALERT_SILENCE"->{
                 val key=intent.data?.lastPathSegment?:return
-                if(key==CriticalAlarm.TEST)CriticalAlarm.finishTest(context)
-                else if(CriticalAlarm.valid(key))CriticalAlarm.stop(context,key)
+                val pending=goAsync()
+                Thread{try{WorkAlerts.silence(context,key)}finally{pending.finish()}}.start()
             }
             "uk.archis.nextdo.ALERT_ACK"->{
                 val key=intent.data?.lastPathSegment?:return

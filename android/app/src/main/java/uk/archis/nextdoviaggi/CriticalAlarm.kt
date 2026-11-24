@@ -114,7 +114,7 @@ class CriticalAlarmService:Service(){
     private val watchdog=object:Runnable{
         override fun run(){
             val k=playing?:return
-            if(!WorkAlerts.alarmActive(this@CriticalAlarmService,k)||!CriticalAlarm.channelAllowed(this@CriticalAlarmService)||
+            if(!WorkAlerts.playbackAllowed(this@CriticalAlarmService,k)||!CriticalAlarm.channelAllowed(this@CriticalAlarmService)||
                 CriticalAlarm.manager(this@CriticalAlarmService).currentInterruptionFilter !in listOf(NotificationManager.INTERRUPTION_FILTER_ALL,NotificationManager.INTERRUPTION_FILTER_ALARMS)){end();return}
             handler.postDelayed(this,1000)
         }
@@ -134,7 +134,7 @@ class CriticalAlarmService:Service(){
                 .addAction(0,"Silenzia",CriticalAlarm.action(this,key,"uk.archis.nextdo.ALERT_SILENCE"))
                 .setOngoing(true).setSilent(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
             startForeground(7103,notification)
-            if(!CriticalAlarm.valid(key)||!WorkAlerts.alarmActive(this,key)||!CriticalAlarm.channelAllowed(this)){
+            if(!CriticalAlarm.valid(key)||!WorkAlerts.playbackAllowed(this,key)||!CriticalAlarm.channelAllowed(this)){
                 end();return START_NOT_STICKY
             }
             val manager=CriticalAlarm.manager(this)
@@ -222,13 +222,17 @@ class CriticalAlarmActivity:Activity(){
             else unlockAndAcknowledge()
         }
         button("Silenzia questo suono"){
-            CriticalAlarm.stop(this,key)
-            if(key==CriticalAlarm.TEST)CriticalAlarm.finishTest(this)
+            WorkAlerts.silence(this,key)
             finish()
         }
         button("Apri NextDo"){startActivity(Intent(this,MainActivity::class.java));finish()}
         setContentView(layout)
         handler.post(monitor)
+    }
+    override fun onResume(){
+        super.onResume()
+        // A system-authorized visible full-screen alarm can start playback even if a background start was denied.
+        if(CriticalAlarm.options(this).screen&&CriticalAlarmService.current==null&&WorkAlerts.playbackAllowed(this,key,true))CriticalAlarm.launch(this,key)
     }
     private fun unlockAndAcknowledge(){
         val km=getSystemService(KeyguardManager::class.java)
