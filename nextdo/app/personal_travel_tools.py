@@ -76,7 +76,7 @@ def photo_results(payload):
   def value(k):return plain(meta.get(k,{}).get("value",""))
   license=value("LicenseShortName").strip()
   code=value("License").strip().lower()
-  if re.fullmatch(r"cc-by(?:-sa)?-[1-4]\.0",code):license=code.upper().replace("-SA-","-SA ").replace("BY-","BY ")
+  if re.fullmatch(r"cc-by(?:-sa)?-[1-4]\.0",code):license=("CC BY-SA " if code.startswith("cc-by-sa-") else "CC BY ")+code.rsplit("-",1)[1]
   elif code in ("cc-zero","cc0"):license="CC0 1.0"
   elif code in ("pd","public-domain"):license="Public domain"
   # Exclude non-commercial/no-derivatives variants; keep clear reusable licences.
