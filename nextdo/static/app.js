@@ -121,6 +121,7 @@ async function downloadICS(ids,includeDetails){
  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
  msg('File ICS scaricato. Aprirlo nel calendario desiderato.');
 }
+function outboundRequestId(){return Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('')}
 async function sendCalendarMail(ids,details){
  const cfg=await api('/outbound-mail/config');
  if(!cfg.enabled)return msg('Collaudare e abilitare Posta in uscita nelle Impostazioni',true);
@@ -132,7 +133,7 @@ async function sendCalendarMail(ids,details){
   if(!confirm('Inviare '+ids.length+' voci di calendario a '+recipient.value+'?'+(details?' Sono inclusi descrizione e collegamenti.':'')))return;
   send.disabled=true;recipient.disabled=true;
   try{
-   const result=await api('/outbound-mail/send-ics',{method:'POST',body:JSON.stringify({request_id:crypto.randomUUID(),recipient:recipient.value,task_ids:ids,include_details:details,confirmed:true})});
+   const result=await api('/outbound-mail/send-ics',{method:'POST',body:JSON.stringify({request_id:outboundRequestId(),recipient:recipient.value,task_ids:ids,include_details:details,confirmed:true})});
    status.textContent=result.detail;msg(result.detail,!['delivered','queued'].includes(result.status));
   }catch(e){status.textContent=e.message+' — Controllare il registro prima di un nuovo invio.';msg(e.message,true)}
  },'primary');
@@ -691,7 +692,7 @@ function outboundMailSettings(main){
      if(!recipient.value)return msg('Seleziona destinatario di prova',true);
      if(!confirm('Inviare un solo evento fittizio a '+recipient.value+'?'))return;
      test.disabled=true;
-     try{const result=await api('/outbound-mail/test',{method:'POST',body:JSON.stringify({recipient:recipient.value,request_id:crypto.randomUUID()})});msg(result.detail,!['delivered','queued'].includes(result.status));await load()}catch(e){msg(e.message,true);await showHistory()}finally{test.disabled=false}
+     try{const result=await api('/outbound-mail/test',{method:'POST',body:JSON.stringify({recipient:recipient.value,request_id:outboundRequestId()})});msg(result.detail,!['delivered','queued'].includes(result.status));await load()}catch(e){msg(e.message,true);await showHistory()}finally{test.disabled=false}
     },'small');
     form.append(field('Destinatario test',recipient),test);
     if(cfg.tested&&!cfg.enabled){
