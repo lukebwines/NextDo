@@ -453,6 +453,86 @@ function emailIntakeSettings(main){
   },'primary'));
  }).catch(e=>msg(e.message,true));
 }
+function emailPromptSettings(main){
+ if(S.me.role!=='admin')return;
+ const card=el('section',{class:'card',style:'margin-top:15px'});
+ card.append(node('h2','','Intelligenza artificiale · Prompt email'),
+  node('p','sub','Personalizza le istruzioni operative per GroqCloud. La prova usa il prompt presente nell’editor, anche prima di salvarlo, e non crea attività. Le regole tecniche rimangono obbligatorie.'));
+ const body=el('div');card.append(body);main.append(card);
+ api('/email-intake/prompt').then(cfg=>{
+  const prompt=el('textarea',{class:'field',rows:'12',maxlength:'12000'});prompt.value=cfg.prompt;
+  const subject=input('subject','Oggetto email di prova');
+  const sample=el('textarea',{class:'field',rows:'7',maxlength:'14000',placeholder:'Incolla il testo da analizzare (senza allegati)'});
+  const result=el('div');
+  const actions=el('div',{class:'actions'});
+  const details=el('details',{},[node('summary','','Regole obbligatorie (sola lettura)'),el('pre',{style:'white-space:pre-wrap;overflow-wrap:anywhere'},cfg.fixed_rules)]);
+  actions.append(btn('Salva prompt',async()=>{
+   try{const r=await api('/email-intake/prompt',{method:'POST',body:JSON.stringify({prompt:prompt.value})});prompt.value=r.prompt;msg('Prompt salvato')}
+   catch(e){msg(e.message,true)}
+  },'primary'),btn('Ripristina predefinito',async()=>{
+   if(!confirm('Ripristinare il prompt predefinito? Il prompt personalizzato verrà sostituito.'))return;
+   try{const r=await api('/email-intake/prompt/reset',{method:'POST'});prompt.value=r.prompt;msg('Prompt predefinito ripristinato')}catch(e){msg(e.message,true)}
+  },'small'));
+  const test=btn('Prova prompt',async()=>{
+   if(!prompt.value.trim()||!sample.value.trim())return msg('Inserire il prompt e un testo di prova',true);
+   test.disabled=true;result.replaceChildren(node('p','sub','Analisi in corso…'));
+   try{const r=await api('/email-intake/prompt/test',{method:'POST',body:JSON.stringify({prompt:prompt.value,subject:subject.value,text:sample.value})});
+    showMailProposals(result,r);
+   }catch(e){result.replaceChildren(node('p','sub',e.message))}finally{test.disabled=false}
+  },'primary');
+  body.append(field('Prompt personalizzabile',prompt),actions,details,node('h3','','Simulazione senza salvataggio'),
+    node('p','sub','Il testo di prova viene inviato a GroqCloud. Usare dati autorizzati, preferibilmente anonimizzati.'),
+    field('Oggetto',subject),field('Testo email',sample),test,result);
+ }).catch(e=>body.append(node('p','sub',e.message)));
+}
+function showMailProposals(target,result){
+ target.replaceChildren(node('h3','','Risultato simulazione · nessuna attività creata'));
+ const proposals=result.proposals||[];
+ if(!proposals.length)target.append(node('p','sub','Nessuna proposta verificabile'));
+ for(const p of proposals)target.append(el('div',{class:'rowtask'},[el('div',{class:'taskmain'},[
+  node('strong','',p.title),node('p','sub',(p.manual_review?'Revisione manuale':p.kind==='appointment'?'Appuntamento':'Attività')+' · '+(p.due_date||'Senza data')+(p.appointment_time?' · '+p.appointment_time:'')),
+  node('p','sub',p.evidence||''),node('p','sub',p.description||'')
+ ])]));
+}
+function openRetainedMail(entry,refreshHistory){
+ const {box,back}=modal('Email ricevuta');
+ const content=el('div');box.append(content,btn('Chiudi',()=>back.remove(),'small'));
+ const base='/cloudflare-mail/history/'+encodeURIComponent(entry.message_hash);
+ api(base).then(r=>{
+  const src=r.source||{};
+  content.append(node('h3','',src.subject||'Senza oggetto'),
+    node('p','sub','Mittente: '+(src.sender||'Non disponibile')+' · '+(src.date||'')),
+    node('p','sub','Testo disponibile fino al '+r.retained_until+' UTC. Allegati non conservati; testo analizzabile fino a 14.000 caratteri.'),
+    el('pre',{style:'white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto'},src.text||''));
+  const linked=el('div');linked.append(node('h3','','Attività già generate'));
+  if(!r.linked_tasks?.length)linked.append(node('p','sub','Nessuna attività collegata'));
+  for(const t of r.linked_tasks||[]){
+   const row=el('div',{class:'rowtask'},[node('span','taskmain',t.task_id==null?'Attività eliminata':(t.title||'Attività')+' · '+t.status)]);
+   if(t.task_id!=null)row.append(btn('Apri attività',async()=>{try{const task=await api('/tasks/'+t.task_id);taskForm(task)}catch(e){msg(e.message,true)}},'small'));
+   linked.append(row);
+  }
+  content.append(linked);
+  if(!['queued','processing','retry'].includes(r.status)){
+   const result=el('div');
+   const preview=btn('Rianalizza con il prompt salvato',async()=>{
+    preview.disabled=true;result.replaceChildren(node('p','sub','Rianalisi in corso…'));
+    try{const a=await api(base+'/reanalyze',{method:'POST'});showMailProposals(result,a);
+     result.append(node('p','sub','Le attività già create non sono modificate. È possibile aprirle e correggerle manualmente.'))}
+    catch(e){result.replaceChildren(node('p','sub',e.message))}finally{preview.disabled=false}
+   },'primary');
+   const actions=el('div',{class:'actions'},[preview]);
+   if(['processed','failed'].includes(r.status)&&!r.linked_tasks?.length&&!entry.tasks_created&&!entry.duplicates)actions.append(btn('Rimetti in coda',async()=>{
+    if(!confirm('Rielaborare questo messaggio e creare le attività proposte, da verificare?'))return;
+    try{await api(base+'/requeue',{method:'POST'});back.remove();await refreshHistory();msg('Email rimessa in coda')}catch(e){msg(e.message,true)}
+   },'small'));
+   actions.append(btn('Elimina testo email',async()=>{
+    if(!confirm('Eliminare il testo conservato? Il registro e le attività generate rimarranno.'))return;
+    try{await api(base+'/text',{method:'DELETE'});back.remove();await refreshHistory();msg('Testo eliminato')}catch(e){msg(e.message,true)}
+   },'small'));
+   content.append(actions,result);
+  }
+ }).catch(e=>content.append(node('p','sub',e.message)));
+}
 function gmailAutoSettings(main){
  if(S.me.role!=='admin')return;
  const panel=el('section',{class:'card',style:'margin-top:15px'});
@@ -544,7 +624,7 @@ function cloudflareMailSettings(main){
  card.append(grid,secretArea,historyArea);
  main.append(card);
  async function showHistory(){
-  historyArea.replaceChildren(node('h3','','Registro email ricevute'));
+  historyArea.replaceChildren(node('h3','','Registro email ricevute'),node('p','sub','Testo cifrato per 30 giorni; nessun allegato conservato. Le attività e il registro restano dopo la scadenza del testo.'));
   try{
    const history=await api('/cloudflare-mail/history');
    if(!history.length){historyArea.append(node('p','sub','Nessun messaggio ricevuto.'));return}
@@ -554,10 +634,14 @@ function cloudflareMailSettings(main){
     const meta=(names[e.status]||e.status)+' · '+(e.received_at||'')+
        ' · attività create: '+e.tasks_created+
        (e.error?' · '+e.error:'');
-    historyArea.append(el('div',{class:'rowtask'},[
-      node('span','taskmain',meta),
-      node('span','sub',e.message_hash.slice(0,12))
-    ]));
+    const row=el('div',{class:'rowtask'},[el('div',{class:'taskmain'},[
+      node('strong','',e.subject||'Oggetto non disponibile'),
+      node('p','sub',meta),
+      node('p','sub',e.message_hash.slice(0,12)+' · '+(e.text_available?'Testo disponibile':'Testo non conservato'))
+    ])]);
+    if(e.text_available)row.append(btn('Visualizza / rianalizza',()=>openRetainedMail(e,showHistory),'small'));
+    else if(e.status==='processed'&&!e.tasks_created&&!e.duplicates)row.append(node('p','sub','Reinoltrare l’email per analizzarla di nuovo.'));
+    historyArea.append(row);
    }
   }catch(e){historyArea.append(node('p','sub','Registro non disponibile: '+e.message))}
  }
@@ -627,7 +711,7 @@ function cloudflareMailSettings(main){
  load();
 }
 
-function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);cloudflareMailSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
+function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);emailPromptSettings(main);cloudflareMailSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
 
 function restoreForm(){
  const {box,back}=modal('Ripristina un backup NextDo');

@@ -195,3 +195,40 @@ def test_appointment_uses_original_thread_date_and_time(monkeypatch):
  assert item["due_date"]=="2026-11-25"
  assert item["appointment_time"]=="09:00"
  assert intake.appointment_date(source,"Riunione di domani.","")=="2026-11-25"
+
+
+def test_prompt_editor_preview_and_reset(tmp_path,monkeypatch):
+ c,h=init(tmp_path);configure(c,h)
+ from app import email_intake as intake
+ p="/api/email-intake/prompt"
+ initial=c.get(p).json()
+ assert initial["prompt"]==initial["default_prompt"] and initial["fixed_rules"]
+ assert c.post(p,headers=h,json={"prompt":"Cerca richieste senza data"}).status_code==200
+ assert c.get(p).json()["prompt"]=="Cerca richieste senza data"
+ def fake(cfg,source):
+  assert cfg["groq_prompt"]=="Prompt non ancora salvato"
+  assert "Regole obbligatorie" in intake.effective_prompt(cfg["groq_prompt"])
+  return {"proposals":[]}
+ monkeypatch.setattr(intake,"_call_groq",fake)
+ r=c.post(p+"/test",headers=h,json={"prompt":"Prompt non ancora salvato","subject":"Prova","text":"Potremmo sentirci nei prossimi giorni?"})
+ assert r.status_code==200,r.text
+ assert r.json()["proposals"][0]["manual_review"]
+ assert not c.get("/api/tasks").json()
+ assert c.get(p).json()["prompt"]=="Cerca richieste senza data"
+ assert c.post(p+"/reset",headers=h).json()["prompt"]==initial["default_prompt"]
+ create_user(c,h,"colleague");sign_in(c,h,"colleague")
+ assert c.get(p).status_code==403
+ assert c.post(p,headers=h,json={"prompt":"No"}).status_code==403
+ c.close()
+
+def test_historical_date_and_unconfirmed_meeting(monkeypatch):
+ from app import email_intake as intake
+ text="Il verbale è stato approvato il 19 ottobre 2026. Può aiutarmi nella compilazione del quadro?\nPotremmo concordare un incontro nei prossimi giorni."
+ source={"subject":"Assistenza","sender":"","date":"Tue, 24 Nov 2026 09:00:00 +0100","text":text,"source_hash":"synthetic"}
+ monkeypatch.setattr(intake,"_call_groq",lambda cfg,src:{"proposals":[
+  {"title":"Assistenza","kind":"task","date":"2026-10-19","evidence":"Il verbale è stato approvato il 19 ottobre 2026. Può aiutarmi nella compilazione del quadro?"},
+  {"title":"Incontro","kind":"appointment","date":None,"evidence":"Potremmo concordare un incontro nei prossimi giorni."}
+ ]})
+ items=intake.analyze({},source)["proposals"]
+ assert len(items)==2
+ assert all(x["kind"]=="task" and x["due_date"]=="" for x in items)

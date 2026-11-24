@@ -12,6 +12,7 @@ LOG=logging.getLogger(__name__)
 MAX_BYTES=6_000_000
 RETRY_LIMIT=3
 INTERVAL=10
+RETENTION_DAYS=30
 PATH="/api/cloudflare-mail/inbound"
 RUN_LOCK=threading.Lock()
 START_LOCK=threading.Lock()
@@ -50,7 +51,7 @@ def save_config(data,cfg):
 def public(cfg):
  return {"enabled":bool(cfg.get("enabled")),"secret_configured":bool(cfg.get("secret")),
   "recipient":cfg.get("recipient",""),"allowed_sender":cfg.get("allowed_sender",""),
-  "ingest_path":PATH,"interval_seconds":INTERVAL,"requires_gmail":False}
+  "ingest_path":PATH,"interval_seconds":INTERVAL,"requires_gmail":False,"retention_days":RETENTION_DAYS}
 
 def email_ok(s):return bool(re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}",s))
 
@@ -85,6 +86,24 @@ def upgrade(db_path):
     created_at TEXT DEFAULT CURRENT_TIMESTAMP);
   """)
 
+def purge_expired(c):
+ # Delete message text, never the operational tasks or deduplication ledger.
+ c.execute("""UPDATE cloudflare_mail_inbox SET payload_encrypted=NULL,
+  status=CASE WHEN status IN ('queued','retry') THEN 'failed' ELSE status END,
+  error=CASE WHEN status IN ('queued','retry') THEN 'Testo scaduto: inoltrare nuovamente' ELSE error END
+  WHERE payload_encrypted IS NOT NULL AND received_at<=datetime('now','-30 days') AND status!='processing'""")
+
+def decode_source(data,row):
+ if not row["payload_encrypted"]:fail("Testo non disponibile: reinoltrare l'email",410)
+ try:return json.loads(email_intake._cipher(data).decrypt(row["payload_encrypted"].encode()).decode("utf-8"))
+ except Exception:fail("Testo cifrato non leggibile",409)
+
+def represented(c,source_digest,exclude=None):
+ # A previous empty successful analysis must not suppress a new forwarding.
+ return c.execute("""SELECT 1 FROM cloudflare_mail_inbox WHERE source_digest=? AND message_hash!=?
+  AND (tasks_created>0 OR duplicates>0 OR EXISTS(SELECT 1 FROM cloudflare_mail_tasks l WHERE l.message_hash=cloudflare_mail_inbox.message_hash))
+  LIMIT 1""",(source_digest,exclude or "")).fetchone()
+
 def verify(headers,raw,cfg):
  if not cfg.get("enabled") or not cfg.get("secret"):fail("Ricezione Cloudflare disattivata",503)
  ts=headers.get("x-nextdo-timestamp","")
@@ -113,21 +132,28 @@ def enqueue(conn,data,raw,sender,recipient):
  sha=hashlib.sha256(raw).hexdigest()
  fingerprint=digest(source)
  with conn() as c:
-  row=c.execute("SELECT status FROM cloudflare_mail_inbox WHERE message_hash=?",(sha,)).fetchone()
-  if row:return {"accepted":True,"duplicate":True,"state":row["status"]}
-  existing=c.execute("SELECT 1 FROM cloudflare_mail_inbox WHERE source_digest=? AND status IN ('processed','duplicate') LIMIT 1",(fingerprint,)).fetchone()
-  if existing:
-   c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,completed_at) VALUES(?,?,?,?,'duplicate',?)",
-    (sha,fingerprint,sender,recipient,stamp()))
-   return {"accepted":True,"duplicate":True,"state":"duplicate"}
+  purge_expired(c)
+  row=c.execute("SELECT * FROM cloudflare_mail_inbox WHERE message_hash=?",(sha,)).fetchone()
+  if row:
+   if row["status"] in ("processed","failed") and row["tasks_created"]==0 and row["duplicates"]==0 and not row["payload_encrypted"] and not represented(c,fingerprint,sha):
+    encrypted=email_intake._cipher(data).encrypt(json.dumps(source,ensure_ascii=False).encode()).decode()
+    c.execute("""UPDATE cloudflare_mail_inbox SET status='queued',payload_encrypted=?,received_at=CURRENT_TIMESTAMP,
+      attempt_count=0,next_attempt_epoch=0,started_at=NULL,completed_at=NULL,error=NULL WHERE message_hash=?""",(encrypted,sha))
+    return {"accepted":True,"duplicate":False,"state":"queued"}
+   return {"accepted":True,"duplicate":True,"state":row["status"]}
   encrypted=email_intake._cipher(data).encrypt(json.dumps(source,ensure_ascii=False).encode()).decode()
+  if represented(c,fingerprint):
+   c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,completed_at,payload_encrypted) VALUES(?,?,?,?,'duplicate',?,?)",
+    (sha,fingerprint,sender,recipient,stamp(),encrypted))
+   return {"accepted":True,"duplicate":True,"state":"duplicate"}
   c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,payload_encrypted) VALUES(?,?,?,?,'queued',?)",
    (sha,fingerprint,sender,recipient,encrypted))
  return {"accepted":True,"duplicate":False,"state":"queued"}
 
 def _claim(conn):
  with conn() as c:
-  r=c.execute("SELECT message_hash,source_digest,payload_encrypted,sender,recipient,attempt_count FROM cloudflare_mail_inbox WHERE status IN ('queued','retry') AND attempt_count<? AND next_attempt_epoch<=? ORDER BY received_at,message_hash LIMIT 1",(RETRY_LIMIT,sec())).fetchone()
+  purge_expired(c)
+  r=c.execute("SELECT message_hash,source_digest,payload_encrypted,sender,recipient,attempt_count FROM cloudflare_mail_inbox WHERE status IN ('queued','retry') AND payload_encrypted IS NOT NULL AND attempt_count<? AND next_attempt_epoch<=? ORDER BY received_at,message_hash LIMIT 1",(RETRY_LIMIT,sec())).fetchone()
   if r:c.execute("UPDATE cloudflare_mail_inbox SET status='processing',attempt_count=attempt_count+1,started_at=?,error=NULL WHERE message_hash=?",(stamp(),r["message_hash"]))
   return dict(r) if r else None
 
@@ -135,13 +161,14 @@ def process_one(conn,data,row):
  sha=row["message_hash"]
  try:
   with conn() as c:
-   previous=c.execute("SELECT 1 FROM cloudflare_mail_inbox WHERE source_digest=? AND message_hash<>? AND status IN ('processed','duplicate') LIMIT 1",(row["source_digest"],sha)).fetchone()
+   previous=represented(c,row["source_digest"],sha)
    if previous:
-    c.execute("UPDATE cloudflare_mail_inbox SET status='duplicate',payload_encrypted=NULL,completed_at=? WHERE message_hash=?",(stamp(),sha))
+    c.execute("UPDATE cloudflare_mail_inbox SET status='duplicate',completed_at=? WHERE message_hash=?",(stamp(),sha))
     return {"created":0,"duplicate":True}
   raw=email_intake._cipher(data).decrypt(row["payload_encrypted"].encode())
   source=json.loads(raw.decode("utf-8"))
   proposals=email_intake.analyze(email_intake.load_config(data),source)["proposals"]
+  if not proposals:proposals=[email_intake.manual_proposal(source)]
   cfg=load_config(data)
   owner=cfg.get("owner_id")
   created=duplicate_count=0
@@ -155,6 +182,7 @@ def process_one(conn,data,row):
     if kind=="appointment" and due and item.get("appointment_time"):
      due+="T"+item["appointment_time"]+":00"
     fp=hashlib.sha256((title.casefold()+"\n"+(due or "")+"\n"+evidence.casefold()).encode()).hexdigest()
+    if item.get("manual_review"):fp=hashlib.sha256(("manual-review:"+row["source_digest"]).encode()).hexdigest()
     if c.execute("SELECT 1 FROM cloudflare_mail_tasks WHERE fingerprint=?",(fp,)).fetchone():
      duplicate_count+=1;continue
     description=("[DA VERIFICARE] Scadenza generata automaticamente, non convalidata.\n"
@@ -163,8 +191,8 @@ def process_one(conn,data,row):
      "\nMittente intestazione: "+source["sender"]+"\nOggetto: "+source["subject"]+
      "\nData email: "+source["date"]+"\nFrase originale: "+evidence+
      "\nOra, CdS e incaricati: [DA VERIFICARE].")
-    if kind=="appointment":
-     description+="\n"+item.get("description","")
+    description+="\n"+item.get("description","")
+    if item.get("manual_review"):description+="\nNessuna data assegnata. Aprire il registro email per esaminare il testo disponibile."
     cur=c.execute(
      "INSERT INTO tasks(title,description,kind,priority,status,due_at,start_at,owner_id,"
      "assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id)"
@@ -175,19 +203,36 @@ def process_one(conn,data,row):
     c.execute("INSERT INTO audit(actor_id,action,object_type,object_id) VALUES(?,?,?,?)",
      (owner,"cloudflare_mail_create_unverified","task",tid))
     created+=1
-   c.execute("UPDATE cloudflare_mail_inbox SET status='processed',payload_encrypted=NULL,completed_at=?,tasks_created=?,duplicates=? WHERE message_hash=?",
+   c.execute("UPDATE cloudflare_mail_inbox SET status='processed',completed_at=?,tasks_created=?,duplicates=? WHERE message_hash=?",
     (stamp(),created,duplicate_count,sha))
   return {"created":created}
  except Exception as exc:
   attempts=row["attempt_count"]+1
   final=attempts>=RETRY_LIMIT
   reason="Errore elaborazione messaggio"
+  fallback_created=0
   if isinstance(exc,HTTPException):reason="Errore GroqCloud HTTP "+str(exc.status_code)
   with conn() as c:
+   if final and isinstance(exc,HTTPException):
+    try:
+     owner=load_config(data).get("owner_id")
+     source=decode_source(data,row)
+     if c.execute("SELECT 1 FROM users WHERE id=? AND role='admin' AND active=1",(owner,)).fetchone():
+      fp=hashlib.sha256(("manual-review:"+row["source_digest"]).encode()).hexdigest()
+      if not c.execute("SELECT 1 FROM cloudflare_mail_tasks WHERE fingerprint=?",(fp,)).fetchone():
+       proposal=email_intake.manual_proposal(source,"Analisi AI non riuscita dopo tre tentativi.")
+       desc="[DA VERIFICARE] Analisi AI non riuscita. Origine: Cloudflare Email Routing\nMessaggio: "+sha+"\nOggetto: "+source["subject"]+"\nConsultare il registro email per il testo. Nessuna data assegnata."
+       cur=c.execute("""INSERT INTO tasks(title,description,kind,priority,status,owner_id,scope,labels)
+         VALUES(?,?,'task','normal','review',?,'personal',?)""",(proposal["title"],desc,owner,json.dumps(["Cloudflare Mail","Da verificare"])))
+       c.execute("INSERT INTO cloudflare_mail_tasks(fingerprint,message_hash,task_id) VALUES(?,?,?)",(fp,sha,cur.lastrowid))
+       c.execute("INSERT INTO audit(actor_id,action,object_type,object_id) VALUES(?,?,?,?)",(owner,"cloudflare_mail_create_unverified","task",cur.lastrowid))
+       c.execute("UPDATE cloudflare_mail_inbox SET tasks_created=tasks_created+1 WHERE message_hash=?",(sha,))
+       fallback_created=1
+    except (HTTPException,ValueError,KeyError):pass
    c.execute("UPDATE cloudflare_mail_inbox SET status=?,error=?,next_attempt_epoch=?,completed_at=? WHERE message_hash=?",
     ("failed" if final else "retry",reason,sec()+300*attempts,stamp() if final else None,sha))
   LOG.warning("Cloudflare email processing failed (attempt %d)",attempts)
-  return {"created":0,"error":True}
+  return {"created":fallback_created,"error":True}
 
 def run_queue(conn,data):
  if not RUN_LOCK.acquire(blocking=False):return {"busy":True,"processed":0,"created":0,"errors":0}
@@ -206,14 +251,13 @@ def worker_loop(conn,data):
  while True:
   time.sleep(INTERVAL)
   try:
-   cfg=load_config(data)
-   if not cfg.get("enabled"):continue
+   # Purge retained text even when automatic intake is disabled or config is unreadable.
    # Requeue stale processing claims after interrupted launches.
    with conn() as c:
     c.execute("UPDATE cloudflare_mail_inbox SET status=CASE WHEN attempt_count>=? THEN 'failed' ELSE 'retry' END,next_attempt_epoch=?,completed_at=CASE WHEN attempt_count>=? THEN ? ELSE NULL END WHERE status='processing' AND started_at<?",
      (RETRY_LIMIT,sec(),RETRY_LIMIT,stamp(),datetime.fromtimestamp(time.time()-180,timezone.utc).isoformat()))
-    c.execute("UPDATE cloudflare_mail_inbox SET payload_encrypted=NULL WHERE status='failed' AND received_at<datetime('now','-7 days')")
-   run_queue(conn,data)
+    purge_expired(c)
+   if load_config(data).get("enabled"):run_queue(conn,data)
   except Exception:LOG.warning("NextDo Cloudflare email queue retry deferred")
 
 def register_routes(app,*,conn,user,csrf,data_path):
@@ -270,11 +314,71 @@ def register_routes(app,*,conn,user,csrf,data_path):
  def retry_failed(req:Request):
   admin(req);csrf(req)
   with conn() as c:
-   result=c.execute("UPDATE cloudflare_mail_inbox SET status='retry',attempt_count=0,next_attempt_epoch=0,error=NULL,completed_at=NULL WHERE status='failed' AND payload_encrypted IS NOT NULL")
+   purge_expired(c)
+   result=c.execute("UPDATE cloudflare_mail_inbox SET status='retry',attempt_count=0,next_attempt_epoch=0,error=NULL,completed_at=NULL WHERE status='failed' AND payload_encrypted IS NOT NULL AND tasks_created=0 AND duplicates=0")
    return {"queued":result.rowcount}
+ def get_entry(c,sha):
+  if not re.fullmatch(r"[a-f0-9]{64}",sha):fail("Messaggio non valido",404)
+  purge_expired(c)
+  row=c.execute("SELECT * FROM cloudflare_mail_inbox WHERE message_hash=?",(sha,)).fetchone()
+  if not row:fail("Messaggio non trovato",404)
+  return row
+ def links(c,row):
+  return [dict(t) for t in c.execute("""SELECT l.task_id,t.title,t.status FROM cloudflare_mail_tasks l
+   JOIN cloudflare_mail_inbox i ON i.message_hash=l.message_hash
+   LEFT JOIN tasks t ON t.id=l.task_id WHERE i.source_digest=? ORDER BY l.created_at""",(row["source_digest"],))]
  @app.get("/api/cloudflare-mail/history")
  def history(req:Request):
   admin(req)
   with conn() as c:
-   return [dict(r) for r in c.execute(
-    "SELECT message_hash,sender,recipient,status,attempt_count,tasks_created,duplicates,received_at,completed_at,error FROM cloudflare_mail_inbox ORDER BY received_at DESC LIMIT 40")]
+   purge_expired(c)
+   rows=c.execute("""SELECT message_hash,source_digest,sender,recipient,status,attempt_count,tasks_created,duplicates,
+     received_at,completed_at,error,payload_encrypted,datetime(received_at,'+30 days') AS retained_until
+     FROM cloudflare_mail_inbox ORDER BY received_at DESC LIMIT 40""").fetchall()
+   output=[]
+   for row in rows:
+    item={k:row[k] for k in row.keys() if k!="payload_encrypted"}
+    item["subject"]=None;item["text_available"]=False
+    if row["payload_encrypted"]:
+     try:item["subject"]=decode_source(data_path,row)["subject"];item["text_available"]=True
+     except HTTPException:pass
+    item["linked_tasks"]=links(c,row)
+    output.append(item)
+   return JSONResponse(output,headers={"Cache-Control":"no-store"})
+ @app.get("/api/cloudflare-mail/history/{sha}")
+ def original(sha:str,req:Request):
+  admin(req)
+  with conn() as c:
+   row=get_entry(c,sha);source=decode_source(data_path,row)
+   return JSONResponse({"source":source,"linked_tasks":links(c,row),"status":row["status"],
+     "retained_until":c.execute("SELECT datetime(?,'+30 days')",(row["received_at"],)).fetchone()[0]},headers={"Cache-Control":"no-store"})
+ @app.post("/api/cloudflare-mail/history/{sha}/reanalyze")
+ def reanalyze(sha:str,req:Request):
+  admin(req);csrf(req)
+  with conn() as c:
+   row=get_entry(c,sha)
+   if row["status"] in ("queued","retry","processing"):fail("Attendere la fine dell'elaborazione",409)
+   source=decode_source(data_path,row);associated=links(c,row)
+  result=email_intake.analyze(email_intake.load_config(data_path),source)
+  if not result["proposals"]:result["proposals"]=[email_intake.manual_proposal(source)]
+  result["linked_tasks"]=associated
+  # Preview only: never overwrite or duplicate already generated activities.
+  return JSONResponse(result,headers={"Cache-Control":"no-store"})
+ @app.post("/api/cloudflare-mail/history/{sha}/requeue")
+ def requeue(sha:str,req:Request):
+  admin(req);csrf(req)
+  with conn() as c:
+   row=get_entry(c,sha);decode_source(data_path,row)
+   if row["status"] not in ("processed","failed") or row["tasks_created"] or row["duplicates"] or represented(c,row["source_digest"]):
+    fail("Attività già generate o messaggio in elaborazione: usare la rianalisi in anteprima",409)
+   c.execute("""UPDATE cloudflare_mail_inbox SET status='queued',attempt_count=0,next_attempt_epoch=0,error=NULL,completed_at=NULL
+     WHERE message_hash=?""",(sha,))
+   return {"queued":True}
+ @app.delete("/api/cloudflare-mail/history/{sha}/text")
+ def delete_text(sha:str,req:Request):
+  admin(req);csrf(req)
+  with conn() as c:
+   row=get_entry(c,sha)
+   if row["status"] in ("queued","retry","processing"):fail("Attendere la fine dell'elaborazione",409)
+   c.execute("UPDATE cloudflare_mail_inbox SET payload_encrypted=NULL WHERE message_hash=?",(sha,))
+  return {"ok":True}
