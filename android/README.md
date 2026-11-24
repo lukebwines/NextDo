@@ -28,3 +28,6 @@ Il primo PIN NextDo rilascia un segreto casuale dedicato al dispositivo, cifrato
 
 ## Distribuzione con firma stabile
 Vedi [Configurazione firma e release Android](SIGNING.md). L'app verifica le release Android pubbliche all'avvio o su richiesta; controlla SHA-256, nome pacchetto, versione e firma prima di passare al programma di installazione Android. Nessun token GitHub o dato dei viaggi viene inviato. Le build debug non sono aggiornabili con una firma di produzione differente; il primo passaggio alla firma stabile richiede una reinstallazione, con nuova associazione e download offline. I dati centrali restano sul Raspberry. Il codice server 0.1.35-test non cambia.
+
+## Modifiche online (0.1.5-test / server 0.1.36-test)
+Import ZIP dal selettore Android con conferma, creazione viaggio con date, modifica titolo/sottotitolo, giornate, eventi e dati principali prenotazioni; aggiunta eventi e prenotazioni. I PDF, i campi avanzati, le foto e i riferimenti esistenti restano intatti. Le modifiche richiedono Internet; su conflitto annullare e riaprire il viaggio. La copia offline resta un'istantanea da riscaricare. Date di viaggi esistenti, allegati, eliminazioni e campi avanzati non sono modificabili da questa prima interfaccia. Il selettore documenti può richiedere un nuovo sblocco al ritorno.

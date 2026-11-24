@@ -18,6 +18,7 @@ import android.util.Base64
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -110,6 +111,11 @@ class MainActivity : ComponentActivity() {
     private var session by mutableStateOf("")
     private var trips by mutableStateOf<List<JSONObject>>(emptyList())
     private var current by mutableStateOf<TripPackage?>(null)
+    private var pendingZip by mutableStateOf<Uri?>(null)
+    private var editor by mutableStateOf<TravelEditor?>(null)
+    private val zipPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if(uri != null) pendingZip = uri
+    }
     private var offline by mutableStateOf(false)
     private var offlineMeta by mutableStateOf<JSONObject?>(null)
     private var section by mutableStateOf("Home")
@@ -178,7 +184,7 @@ class MainActivity : ComponentActivity() {
         authenticating = false
         pending?.cancel()
         locked = true; busy = false; connection = null; session = ""; trips = emptyList()
-        current = null; offlineMeta = null; offline = false; pdf = null; pageBitmap = null; pdfName = ""; error = ""
+        editor = null; current = null; offlineMeta = null; offline = false; pdf = null; pageBitmap = null; pdfName = ""; error = ""
         section = "Home"
     }
     private fun deviceUnlock() {
@@ -272,12 +278,52 @@ class MainActivity : ComponentActivity() {
             Triple(s, api.trips(s),updated)
         }) { (s, list, updated) -> connection=updated;session = s; trips = list; offline = false }
     }
+    private fun canEdit() = !locked && !offline && session.isNotBlank() && current?.revision?.let { it >= 0 } == true
+    private fun importZip() {
+        val uri = pendingZip ?: return
+        val cfg = connection ?: return
+        val s = session
+        if(s.isBlank()) return
+        task({
+            val bytes = contentResolver.openInputStream(uri)?.use { readLimited(it, 32 * 1024 * 1024) }
+                ?: error("Impossibile leggere lo ZIP")
+            val api = TravelApi(cfg.getString("url"))
+            val result = api.importZip(s, bytes)
+            Pair(result.getString("id"), api.trips(s))
+        }) { (_, list) -> pendingZip=null; trips=list }
+    }
+    private fun submitEditor(e: TravelEditor, values: JSONObject) {
+        val cfg = connection ?: return
+        val s = session
+        if(s.isBlank() || offline || locked) return
+        if(e.kind == "new") {
+            task({
+                val api=TravelApi(cfg.getString("url"))
+                api.obj("/trips",s,values)
+                api.trips(s)
+            }) { list -> trips=list; editor=null }
+        } else {
+            val t=current ?: return
+            if(t.revision != e.revision || t.id != e.tripId) { error="Ricarica il viaggio";return }
+            val payload=JSONObject().put("revision",e.revision).put("kind",e.kind).put("fields",values)
+            e.target.keys().forEach { k -> payload.put(k,e.target.get(k)) }
+            task({
+                val api=TravelApi(cfg.getString("url"))
+                val r=api.obj("/trips/"+segment(t.id)+"/edit",s,payload)
+                TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision")) to api.trips(s)
+            }) { (updated,list) -> current=updated;trips=list;editor=null }
+        }
+    }
+    private fun edit(kind:String, data:JSONObject, target:JSONObject=JSONObject()) {
+        val t=current ?: return
+        if(canEdit()) editor=TravelEditor(kind,t.id,t.revision,data,target)
+    }
     private fun selectTrip(id: String) {
         val cfg = connection ?: return
         val s = session
         task({
             val r = TravelApi(cfg.getString("url")).obj("/trips/" + segment(id), s)
-            TripPackage(r.getJSONObject("manifest"), r.optJSONObject("state") ?: JSONObject(), emptyMap())
+            TripPackage(r.getJSONObject("manifest"), r.optJSONObject("state") ?: JSONObject(), emptyMap(), r.getInt("revision"))
         }) { openTrip(it, false) }
     }
     private fun openTrip(t: TripPackage, cached: Boolean) {
@@ -304,6 +350,7 @@ class MainActivity : ComponentActivity() {
         task({ TripPackage.parse(vault.read("offline")) }) { openTrip(it, true) }
     }
     private fun forget() {
+        pendingZip=null
         task({ vault.clear() }) { lockLocal() }
     }
     private fun viewPdf(name: String) {
@@ -361,6 +408,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable private fun App() {
         val t = current
+        if(!locked) editor?.let { e -> TravelEditDialog(e,busy,error,{editor=null;error=""},{submitEditor(e,it)}) }
         Scaffold(containerColor = Navy,
             topBar = {
                 Surface(color = Navy) {
@@ -408,7 +456,10 @@ class MainActivity : ComponentActivity() {
                     t != null -> {
                         if (offline) Pill("OFFLINE · copia scaricata",Sand)
                         when(section) {
-                            "Home" -> Home(t)
+                            "Home" -> {
+                                if(canEdit()) Action("Modifica dati viaggio",!busy){edit("trip",t.info)}
+                                Home(t)
+                            }
                             "Oggi" -> DayScreen(t)
                             "Prenota" -> BookingScreen(t)
                             "PDF" -> Documents(t)
@@ -482,6 +533,12 @@ class MainActivity : ComponentActivity() {
             }
         } else {
             Text("I tuoi viaggi",fontSize=26.sp,fontWeight=FontWeight.ExtraBold,color=White)
+            Action("Nuovo viaggio", !busy) { editor=TravelEditor("new") }
+            Action("Seleziona itinerario ZIP", !busy) { zipPicker.launch(arrayOf("application/zip","application/x-zip-compressed","application/octet-stream")) }
+            if(pendingZip!=null) TravelCard("Itinerario selezionato","Il file verrà importato nel tuo archivio privato sul Raspberry. Un viaggio esistente non sarà sovrascritto.") {
+                Action("Conferma importazione", !busy) { importZip() }
+                TextButton(onClick={pendingZip=null},enabled=!busy){Text("Annulla")}
+            }
             if(trips.isEmpty()) Text("Nessun viaggio disponibile",color=Muted)
             for (item in trips) TravelCard(item.str("title"),item.str("start")+"  —  "+item.str("end")) {
                 Action("Apri viaggio") { selectTrip(item.str("id")) }
@@ -553,12 +610,16 @@ class MainActivity : ComponentActivity() {
             IconButton(onClick={if(i>=0&&i<t.days.lastIndex)selectedDay=t.days[i+1].str("date")},enabled=i>=0&&i<t.days.lastIndex){Icon(Icons.Default.ArrowForward,"Giorno successivo")}
         }
         val d=t.days.firstOrNull{it.str("date")==selectedDay}?:return
+        if(canEdit()) {
+            Action("Modifica giornata",!busy){edit("day",d,JSONObject().put("date",selectedDay))}
+            Action("Aggiungi evento",!busy){edit("event",JSONObject(),JSONObject().put("date",selectedDay))}
+        }
         TravelCard(d.str("headline").ifBlank{d.str("place").ifBlank{"Giornata"}},d.str("description")) {
             Photo(t.manifest.optJSONObject("travel_photos")?.optJSONObject("day:"+selectedDay))
             if(d.str("place").isNotBlank())Pill(d.str("place"))
             d.arr("route_points").forEach { point -> Location(point) }
         }
-        for(e in d.arr("events")) {
+        for((eventIndex,e) in d.arr("events").withIndex()) {
             val booking=t.bookings.firstOrNull{it.str("id")==e.str("bid")}
             val guide=t.guides.firstOrNull{it.str("id")==e.str("gid")}
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
@@ -569,6 +630,7 @@ class MainActivity : ComponentActivity() {
                 }
                 Column(Modifier.weight(1f)) {
                     TravelCard(e.str("title"),e.str("details")) {
+                        if(canEdit()) TextButton(onClick={edit("event",e,JSONObject().put("date",selectedDay).put("index",eventIndex))},enabled=!busy){Text("Modifica evento")}
                         if(e.optBoolean("warning")) Pill("ATTENZIONE",Sand)
                         if(booking!=null) BookingActions(booking)
                         if(guide!=null && guide.str("doc").isNotBlank()) Action("PDF guida"){viewPdf(guide.str("doc"))}
@@ -606,7 +668,9 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun BookingScreen(t:TripPackage) {
         Text("Le tue prenotazioni",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
+        if(canEdit()) Action("Aggiungi prenotazione",!busy){edit("booking",JSONObject())}
         for(b in t.bookings)TravelCard(b.str("title"),listOf(b.str("type"),b.str("date"),b.str("place")).filter{it.isNotBlank()}.joinToString(" · ")) {
+            if(canEdit()) TextButton(onClick={edit("booking",b,JSONObject().put("id",b.str("id")))},enabled=!busy){Text("Modifica prenotazione")}
             Photo(t.manifest.optJSONObject("travel_photos")?.optJSONObject("booking:"+b.str("id")))
             if(b.str("status").isNotBlank())Pill(b.str("status"))
             if(b.str("ref").isNotBlank())Text("Riferimento: "+b.str("ref"),color=Sand,fontSize=13.sp)

@@ -55,3 +55,7 @@ App companion dedicata esclusivamente a Area personale → Viaggi, senza accesso
 - Acquisizione da condivisione Android di PDF/email con conferma, spese e ricevute, ricerca POI/meteo, assistente AI.
 - Distribuzione iniziale APK di test, poi valutazione Play Store. Firma APK persistente custodita fuori da Git.
 - Prima del rilascio: collaudo remoto reale, test su smartphone e verifica privacy/offline.
+
+## Aggiornamento priorità — Android
+
+Dopo il collaudo della firma permanente (Android 0.1.4-test / server 0.1.35-test), il prossimo rilascio accorpa le tre funzioni richieste: import ZIP originale, creazione nuovo viaggio e modifica online di dati del viaggio, giornate, eventi e prenotazioni. Controllo revisioni, niente sovrascrittura di un ZIP duplicato. L'inbox email resta alla fase successiva. Nessun cambio di formato. Rilascio proposto server 0.1.36-test / Android 0.1.5-test, subordinato ai test.

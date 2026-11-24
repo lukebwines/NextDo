@@ -160,6 +160,13 @@ def make_archive(m,state,files):
  if len(raw)>LIMIT:fail("Archivio oltre 32 MB",413)
  return raw
 
+def new_manifest(b):
+ start,end=parse_date(b.get("start")),parse_date(b.get("end"))
+ if not 0<=(end-start).days<180:fail("Periodo non valido (massimo 180 giorni)")
+ tid="trip-"+secrets.token_hex(8)
+ m={"format_version":1,"trip":{"id":tid,"title":b.get("title"),"subtitle":b.get("subtitle",""),"start":start.isoformat(),"end":end.isoformat()},"bookings":[],"documents":[],"guides":[],"days":[{"date":(start+timedelta(days=i)).isoformat(),"place":"","headline":"","description":"","events":[],"checks":[]} for i in range((end-start).days+1)]}
+ return m
+
 def register_routes(app,*,user,csrf,conn,data_path,ph):
  root=Path(data_path)/"personal";root.mkdir(mode=0o700,exist_ok=True)
  database=root/"trips.sqlite3"
@@ -217,7 +224,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   cur=c.execute("UPDATE trips SET archive=?,title=?,start=?,end=?,revision=revision+1 WHERE owner=? AND id=? AND revision=?",(archive,t["title"],t["start"],t["end"],owner,t["id"],revision))
   if not cur.rowcount:fail("Il viaggio è stato modificato: ricaricare",409)
   return revision+1
- travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive)
+ travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive,save=save,new_manifest=new_manifest,limit=LIMIT)
  @app.middleware("http")
  async def private_cache(req:Request,call_next):
   res=await call_next(req)
@@ -273,10 +280,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  @app.post("/api/personal/trips")
  def new_trip(req:Request,b:dict):
   owner=allowed(req,True)
-  start,end=parse_date(b.get("start")),parse_date(b.get("end"))
-  if not 0<=(end-start).days<180:fail("Periodo non valido (massimo 180 giorni)")
-  tid="trip-"+secrets.token_hex(8)
-  m={"format_version":1,"trip":{"id":tid,"title":b.get("title"),"subtitle":b.get("subtitle",""),"start":start.isoformat(),"end":end.isoformat()},"bookings":[],"documents":[],"guides":[],"days":[{"date":(start+timedelta(days=i)).isoformat(),"place":"","headline":"","description":"","events":[],"checks":[]} for i in range((end-start).days+1)]}
+  m=new_manifest(b);tid=m["trip"]["id"]
   with db() as c:save(c,owner,m,{"notes":{},"checks":{}},{})
   return {"id":tid}
  @app.get("/api/personal/trips/{tid}")
