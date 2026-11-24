@@ -129,7 +129,9 @@ def register(app,*,conn,user,csrf,accessible,tz,data_path,record):
   with LOCK:
    cfg=load(data_path)
    if b.enabled and (not cfg.get("tested") or not b.confirmed_received):fail("Confermare la ricezione e apertura del file ICS di prova")
-   cfg["enabled"]=b.enabled;save(data_path,cfg)
+   cfg["enabled"]=b.enabled
+   if not b.enabled:cfg.pop("automatic_ics",None)
+   save(data_path,cfg)
   with conn() as c:record(c,u["id"],"enable" if b.enabled else "disable","outbound_mail",None)
   return public(cfg)
  @app.get("/api/outbound-mail/history")

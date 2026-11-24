@@ -54,7 +54,7 @@ def meeting_link(desc):
  except ValueError:return ""
  return value
 
-def calendar(tasks,tz,include_details=False,now=None):
+def calendar(tasks,tz,include_details=False,now=None,*,tentative=False):
  stamp=utc_value(now or datetime.now(timezone.utc))
  lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//NextDo//Calendar export//IT","CALSCALE:GREGORIAN","METHOD:PUBLISH"]
  for task in tasks:
@@ -67,14 +67,17 @@ def calendar(tasks,tz,include_details=False,now=None):
   title=task["title"]
   if not appointment:title="Scadenza — "+title
   elif not timed:title=title+" (orario da definire)"
+  if tentative:title="[DA VERIFICARE] "+title
   lines.extend(["BEGIN:VEVENT","UID:"+uid,"DTSTAMP:"+stamp,"SUMMARY:"+escaped(title)])
+  if tentative:lines.append("STATUS:TENTATIVE")
   if timed:
    lines.append("DTSTART:"+utc_value(due))
    # A start is known; no invented duration or end.
   else:
    lines.extend(["DTSTART;VALUE=DATE:"+day.strftime("%Y%m%d"),"DTEND;VALUE=DATE:"+(day+timedelta(days=1)).strftime("%Y%m%d")])
-  lines.append("TRANSP:OPAQUE" if timed else "TRANSP:TRANSPARENT")
+  lines.append("TRANSP:OPAQUE" if timed and not tentative else "TRANSP:TRANSPARENT")
   desc="Appuntamento NextDo" if appointment else "Scadenza NextDo"
+  if tentative:desc+="\nProposta AI da verificare: non costituisce una conferma."
   if appointment and not timed:desc+="\nOrario non definito."
   if not appointment and isinstance(due,datetime):
    desc+="\nData/ora registrata in NextDo: "+due.astimezone(tz).strftime("%d/%m/%Y %H:%M")

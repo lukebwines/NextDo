@@ -172,6 +172,7 @@ def process_one(conn,data,row):
   cfg=load_config(data)
   owner=cfg.get("owner_id")
   created=duplicate_count=0
+  auto_items=[]
   with conn() as c:
    if not c.execute("SELECT 1 FROM users WHERE id=? AND role='admin' AND active=1",(owner,)).fetchone():
     raise ValueError("Owner inactive")
@@ -202,9 +203,18 @@ def process_one(conn,data,row):
     c.execute("INSERT INTO cloudflare_mail_tasks(fingerprint,message_hash,task_id) VALUES(?,?,?)",(fp,sha,tid))
     c.execute("INSERT INTO audit(actor_id,action,object_type,object_id) VALUES(?,?,?,?)",
      (owner,"cloudflare_mail_create_unverified","task",tid))
-    created+=1
+    created+=1;auto_items.append((tid,item))
    c.execute("UPDATE cloudflare_mail_inbox SET status='processed',completed_at=?,tasks_created=?,duplicates=? WHERE message_hash=?",
     (stamp(),created,duplicate_count,sha))
+   # Outbox creation is atomic with tasks; an optional feature failure never rolls back intake.
+   c.execute("SAVEPOINT automatic_ics")
+   try:
+    from . import automatic_ics
+    automatic_ics.enqueue(c,data,row,source,owner,auto_items)
+    c.execute("RELEASE automatic_ics")
+   except Exception:
+    c.execute("ROLLBACK TO automatic_ics");c.execute("RELEASE automatic_ics")
+    LOG.warning("Automatic ICS enqueue failed")
   return {"created":created}
  except Exception as exc:
   attempts=row["attempt_count"]+1
@@ -258,6 +268,8 @@ def worker_loop(conn,data):
      (RETRY_LIMIT,sec(),RETRY_LIMIT,stamp(),datetime.fromtimestamp(time.time()-180,timezone.utc).isoformat()))
     purge_expired(c)
    if load_config(data).get("enabled"):run_queue(conn,data)
+   from . import automatic_ics
+   automatic_ics.run_one(conn,data)
   except Exception:LOG.warning("NextDo Cloudflare email queue retry deferred")
 
 def register_routes(app,*,conn,user,csrf,data_path):
