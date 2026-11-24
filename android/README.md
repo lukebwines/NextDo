@@ -20,5 +20,5 @@ GitHub Actions: Android Viaggi APK. Artifact NextDo-Viaggi-Android-test. I test 
 ## Limiti della prima versione
 Niente modifiche alle prenotazioni/checklist sul server, promemoria push, AI o sincronizzazione in background. La copia offline è un'istantanea, non si aggiorna automaticamente. Non è inclusa un'app Play Store o una configurazione automatica del tunnel remoto.
 
-## Sblocco biometrico (0.1.1-test)
-Prompt biometrico di sistema Android con biometria forte (impronta se disponibile) oppure PIN, password o sequenza del telefono. Nessuna impronta acquisita dall’app. Blocco in background e dopo 5 minuti dallo sblocco. Il PIN NextDo resta obbligatorio per la sessione server. Collaudare impronta, annullamento, fallback e offline sul dispositivo reale. Non richiede un aggiornamento server ulteriore rispetto a 0.1.34-test.
+## Accesso solo con codice (0.1.2-test)
+Il client non richiede permessi biometrici né usa BiometricPrompt. Usa la conferma del codice di blocco Android (PIN/password/sequenza), mantenendo il PIN NextDo sul server. Nuove chiavi Keystore richiedono esclusivamente la credenziale dispositivo; le chiavi create dalle precedenti versioni sono mantenute per non perdere la copia offline e restano utilizzabili dopo la conferma del codice. Il blocco automatico dopo 5 minuti e in background rimane attivo. Verificare sul dispositivo reale il codice, l'annullamento e l'accesso offline. Server 0.1.34-test invariato.

@@ -1,8 +1,7 @@
 package uk.archis.nextdoviaggi
 
-import android.hardware.biometrics.BiometricManager
-import android.hardware.biometrics.BiometricPrompt
-import android.os.CancellationSignal
+import android.app.Activity
+import android.app.KeyguardManager
 import android.os.Handler
 import android.os.Looper
 import android.content.Intent
@@ -16,6 +15,7 @@ import android.util.Base64
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -77,10 +77,15 @@ class MainActivity : ComponentActivity() {
     private var pageCount by mutableStateOf(0)
     private var pageBitmap by mutableStateOf<Bitmap?>(null)
     private var epoch = 0
-    private var authCancel: CancellationSignal? = null
     private val authHandler = Handler(Looper.getMainLooper())
     private val autoLock = Runnable { lockLocal() }
-    private val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    private val authenticate = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (authenticating) {
+            authenticating = false
+            if (result.resultCode == Activity.RESULT_OK) finishDeviceUnlock()
+            else error = "Sblocco annullato"
+        }
+    }
     private fun finishDeviceUnlock() {
         task({
             val cfg = if (vault.exists("connection")) JSONObject(String(vault.read("connection"), Charsets.UTF_8)) else null
@@ -112,59 +117,28 @@ class MainActivity : ComponentActivity() {
     private fun lockLocal() {
         epoch++
         authHandler.removeCallbacks(autoLock)
-        val pending = authCancel
-        authCancel = null
         authenticating = false
-        pending?.cancel()
         locked = true; busy = false; connection = null; session = ""; trips = emptyList()
         current = null; offlineMeta = null; offline = false; pdf = null; pageBitmap = null; pdfName = ""; error = ""
         section = "Home"
     }
+    @Suppress("DEPRECATION")
     private fun deviceUnlock() {
         if (authenticating || busy) return
-        val bm = getSystemService(BiometricManager::class.java)
-        when (bm.canAuthenticate(authenticators)) {
-            BiometricManager.BIOMETRIC_SUCCESS -> Unit
-            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
-                error = "Configura un’impronta digitale o il blocco schermo nelle impostazioni del telefono."
-                return
-            }
-            else -> { error = "Autenticazione sicura non disponibile. Controlla il blocco schermo."; return }
+        val km = getSystemService(KeyguardManager::class.java)
+        if (!km.isDeviceSecure) {
+            error = "Configura il PIN, la password o la sequenza di blocco del telefono."
+            return
         }
-        val signal = CancellationSignal()
-        authCancel = signal
+        val intent = km.createConfirmDeviceCredentialIntent("NextDo Viaggi", "Inserisci il codice di blocco del telefono")
+        if (intent == null) {
+            error = "Verifica del codice di blocco non disponibile"
+            return
+        }
         authenticating = true
         error = ""
-        val prompt = BiometricPrompt.Builder(this)
-            .setTitle("NextDo Viaggi")
-            .setSubtitle("Sblocca il tuo archivio personale")
-            .setDescription("Usa l’impronta digitale o il metodo di blocco del telefono.")
-            .setAllowedAuthenticators(authenticators)
-            .setConfirmationRequired(false)
-            .build()
-        try {
-            prompt.authenticate(signal, mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    if (authCancel !== signal) return
-                    authCancel = null
-                    authenticating = false
-                    finishDeviceUnlock()
-                }
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    if (authCancel !== signal) return
-                    authCancel = null
-                    authenticating = false
-                    error = if (errorCode == BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED ||
-                        errorCode == BiometricPrompt.BIOMETRIC_ERROR_CANCELED) "Sblocco annullato" else errString.toString()
-                }
-                override fun onAuthenticationFailed() {
-                    // The system prompt remains open; never unlock on a failed match.
-                }
-            })
-        } catch (e: Exception) {
-            authCancel = null; authenticating = false
-            error = "Impossibile avviare l’autenticazione Android"
-        }
+        try { authenticate.launch(intent) }
+        catch (_: Exception) { authenticating = false; error = "Impossibile aprire lo sblocco Android" }
     }
     override fun onDestroy() {
         lockLocal()
@@ -372,14 +346,14 @@ class MainActivity : ComponentActivity() {
     @Composable private fun LockedScreen() {
         Box(Modifier.fillMaxWidth().height(260.dp).clip(RoundedCornerShape(28.dp)).background(Brush.linearGradient(listOf(Color(0xFF1B5271),Color(0xFF163E4B),Panel))), contentAlignment=Alignment.Center) {
             Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Default.Fingerprint,null,Modifier.size(64.dp),tint=Teal)
+                Icon(Icons.Default.Lock,null,Modifier.size(64.dp),tint=Teal)
                 Text("Il mondo, con te.",color=White,fontSize=30.sp,fontWeight=FontWeight.ExtraBold)
                 Text("I tuoi viaggi. I tuoi documenti. La tua privacy.",color=Muted,fontSize=12.sp)
                 Action("Sblocca archivio",!busy&&!authenticating) { deviceUnlock() }
-                Text("Impronta digitale o blocco schermo",color=Muted,fontSize=12.sp)
+                Text("PIN, password o sequenza del telefono",color=Muted,fontSize=12.sp)
             }
         }
-        Text("Accesso protetto da Android. Blocco automatico quando esci dall’app o dopo 5 minuti dallo sblocco. Foto e voucher offline restano cifrati.",color=Muted,fontSize=13.sp)
+        Text("Accesso con il codice di blocco del telefono, senza autenticazione biometrica nell’app. Blocco automatico all’uscita o dopo 5 minuti. Foto e voucher offline restano cifrati.",color=Muted,fontSize=13.sp)
     }
     @Composable private fun ConnectionScreen() {
         var url by remember { mutableStateOf("") }
