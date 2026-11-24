@@ -13,6 +13,9 @@ import org.json.JSONObject
 
 data class TravelUpdate(val version: String, val code: Long, val sha256: String, val apkUrl: String, val notes: String)
 
+internal fun newestUpdate(current: Long, candidates: Sequence<TravelUpdate>): TravelUpdate? =
+    candidates.filter { it.code > current }.maxByOrNull { it.code }
+
 object AppUpdates {
     private const val REPO = "lukebwines/NextDo"
     private const val LIMIT = 64 * 1024 * 1024
@@ -32,6 +35,7 @@ object AppUpdates {
                 c.connectTimeout = 12000
                 c.readTimeout = 30000
                 c.useCaches = false
+                c.setRequestProperty("Cache-Control", "no-cache")
                 c.setRequestProperty("User-Agent", "NextDo-Viaggi-Android")
                 val code = c.responseCode
                 if (code in 300..399) {
@@ -52,26 +56,35 @@ object AppUpdates {
     @Suppress("DEPRECATION")
     fun check(context: Context): TravelUpdate? {
         val current = context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
-        val releases = JSONArray(text("https://api.github.com/repos/$REPO/releases?per_page=30", 2 * 1024 * 1024))
-        for (i in 0 until releases.length()) {
-            val r = releases.getJSONObject(i)
-            val tag = r.optString("tag_name")
-            if (r.optBoolean("draft") || !tagPattern.matches(tag)) continue
-            val assets = r.optJSONArray("assets") ?: continue
-            val names = (0 until assets.length()).map { assets.getJSONObject(it).optString("name") }
-            if (!names.containsAll(listOf("nextdo-viaggi.apk", "nextdo-viaggi.json"))) continue
-            val base = "https://github.com/$REPO/releases/download/$tag/"
-            val meta = JSONObject(text(base + "nextdo-viaggi.json", 8192))
-            val version = meta.getString("versionName")
-            val code = meta.getLong("versionCode")
-            val sha = meta.getString("sha256")
-            require("android-v$version" == tag && hashPattern.matches(sha) &&
-                meta.getString("packageName") == context.packageName) { "Metadati aggiornamento non validi" }
-            if (code <= current) return null
-            return TravelUpdate(version, code, sha, base + "nextdo-viaggi.apk",
-                r.optString("body").take(1600))
+        // GitHub's listing is not guaranteed to be ordered by Android versionCode.
+        // Read all pages before selecting, even when an older release appears first.
+        val candidates = sequence {
+            var page = 1
+            while (true) {
+                val releases = JSONArray(text("https://api.github.com/repos/$REPO/releases?per_page=100&page=$page", 4 * 1024 * 1024))
+                for (i in 0 until releases.length()) {
+                    val r = releases.getJSONObject(i)
+                    val tag = r.optString("tag_name")
+                    if (r.optBoolean("draft") || !tagPattern.matches(tag)) continue
+                    val assets = r.optJSONArray("assets") ?: continue
+                    val names = (0 until assets.length()).map { assets.getJSONObject(it).optString("name") }
+                    if (!names.containsAll(listOf("nextdo-viaggi.apk", "nextdo-viaggi.json"))) continue
+                    val base = "https://github.com/$REPO/releases/download/$tag/"
+                    val meta = JSONObject(text(base + "nextdo-viaggi.json", 8192))
+                    val version = meta.getString("versionName")
+                    val code = meta.getLong("versionCode")
+                    val sha = meta.getString("sha256")
+                    require("android-v$version" == tag && code > 0 && hashPattern.matches(sha) &&
+                        meta.getString("packageName") == context.packageName) { "Metadati aggiornamento non validi" }
+                    yield(TravelUpdate(version, code, sha, base + "nextdo-viaggi.apk",
+                        r.optString("body").take(1600)))
+                }
+                if (releases.length() < 100) break
+                check(page < 10) { "Elenco aggiornamenti incompleto" }
+                page++
+            }
         }
-        return null
+        return newestUpdate(current, candidates)
     }
 
     private fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 255) }
