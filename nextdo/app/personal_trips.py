@@ -77,9 +77,19 @@ def validate_manifest(m,available):
   try:p=urlsplit(v)
   except ValueError:fail("Link non valido")
   if p.scheme!="https" or not p.hostname or p.username or p.password:fail("Sono ammessi soltanto link HTTPS")
+ def locations(items):
+  if not isinstance(items,list) or len(items)>30 or any(not isinstance(x,dict) for x in items):fail("Elenco luoghi non valido")
+  ids(items)
+  for loc in items:
+   if not isinstance(loc.get("label"),str) or not loc["label"].strip():fail("Nome luogo obbligatorio")
+   for field in ("role","address","code","time","notes"):
+    if field in loc and not isinstance(loc[field],str):fail("Campo luogo non valido")
+   if loc.get("lat") is not None or loc.get("lon") is not None:tools.coordinates(loc.get("lat"),loc.get("lon"))
+   link(loc.get("map"))
  bookings=rows("bookings",160);bids=ids(bookings)
  for b in bookings:
   doc(b.get("doc"));pairs(b.get("lines",[]))
+  locations(b.get("locations",[]));pairs(b.get("fields",[]))
   for key in ("source","map","extraLink"):link(b.get(key))
  guides=rows("guides",50);gids=ids(guides)
  for g in guides:
@@ -92,6 +102,8 @@ def validate_manifest(m,available):
   dt=parse_date(d.get("date"))
   if dt in seen or not start<=dt<=end:fail("Giornata duplicata o fuori periodo")
   seen.add(dt)
+  locations(d.get("route_points",[]))
+  if d.get("route_mode","drive") not in ("drive","walk","bicycle"):fail("Modalità percorso non valida")
   events=d.get("events",[]);checks=d.get("checks",[])
   if not isinstance(events,list) or not isinstance(checks,list) or len(events)>100 or len(checks)>100 or any(not isinstance(x,str) for x in checks):fail("Eventi o checklist non validi")
   for e in events:
@@ -347,6 +359,18 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   key=service(owner,"geoapify") or b.get("key")
   if not key:fail("Configura la chiave Geoapify in Servizi Viaggi")
   return tools.geocode(b.get("query"),key)
+ @app.post("/api/personal/trips/{tid}/route")
+ def calculate_route(tid:str,req:Request,b:dict):
+  owner=allowed(req,True)
+  with db() as c:
+   r=load(c,owner,tid);m,_,_=read_archive(r["archive"])
+   day=next((d for d in m.get("days",[]) if d["date"]==b.get("date")),None)
+   if day is None:fail("Giornata non trovata",404)
+   points=day.get("route_points",[])
+   mode=day.get("route_mode","drive")
+  key=service(owner,"geoapify")
+  if not key:fail("Configura la chiave Geoapify in Servizi Viaggi")
+  return tools.route(points,mode,key)
  @app.get("/api/personal/trips/{tid}/documents/{name}/text")
  def pdf_text(tid:str,name:str,req:Request):
   owner=allowed(req)

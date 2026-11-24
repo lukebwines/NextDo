@@ -40,3 +40,5 @@
 .travel-spot-photo img{display:block;width:100%;height:clamp(160px,30vw,320px);object-fit:cover}
 .travel-spot-credit{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:5px 10px;font-size:11px;color:white;background:#102638}
 .travel-spot-credit .btn{font-size:11px;padding:2px 6px}
+
+.travel-mini .sub{margin:4px 0;font-size:12px}.travel-mini>div{min-width:0;overflow-wrap:anywhere}.travel-card .formgrid{gap:12px}

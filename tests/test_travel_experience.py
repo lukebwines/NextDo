@@ -61,3 +61,46 @@ def test_manual_photo_for_day_and_booking(tmp_path):
  assert c.post(p+"/lock",headers=h).status_code==200
  assert c.post(url+"/photo/upload",headers=h,files={"file":("photo.png",img.getvalue(),"image/png")}).status_code==423
  c.close()
+
+
+def test_multi_locations_and_daily_route(tmp_path,monkeypatch):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ raw,m=sample()
+ assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
+ url=p+"/trips/"+m["trip"]["id"]
+ b=c.get(url).json()
+ first={"id":"loc-first","role":"Partenza","label":"Airport A","lat":45.5,"lon":11.0}
+ second={"id":"loc-second","role":"Arrivo","label":"Airport B","lat":45.8,"lon":11.2}
+ b["manifest"]["bookings"][0]["locations"]=[first,second]
+ b["manifest"]["bookings"][0]["fields"]=[["Terminal","T1"]]
+ b["manifest"]["days"][0]["route_points"]=[first,second]
+ b["manifest"]["days"][0]["route_mode"]="drive"
+ assert c.put(url,headers=h,json=b).status_code==200
+ assert c.post(p+"/services",headers=h,json={"geoapify":"synthetic-key"}).status_code==200
+ monkeypatch.setattr(tools,"route",lambda pts,mode,key:{"distance_m":1000,"duration_s":120,"legs":[{"distance_m":1000,"duration_s":120}]} if pts==[first,second] and key=="synthetic-key" and mode=="drive" else {})
+ result=c.post(url+"/route",headers=h,json={"date":b["manifest"]["days"][0]["date"]})
+ assert result.status_code==200,result.text
+ assert result.json()["distance_m"]==1000
+ saved=c.get(url).json()
+ assert saved["manifest"]["bookings"][0]["title"]==m["bookings"][0]["title"]
+ assert saved["manifest"]["bookings"][0]["locations"]==[first,second]
+ saved["manifest"]["bookings"][0]["locations"][0]["lat"]=100
+ assert c.put(url,headers=h,json=saved).status_code==400
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.post(url+"/route",headers=h,json={"date":b["manifest"]["days"][0]["date"]}).status_code==423
+ c.close()
+
+def test_geoapify_route_order(monkeypatch):
+ calls=[]
+ def fake(url,**kwargs):
+  calls.append(url)
+  return {"features":[{"properties":{"distance":1200,"time":300,"legs":[{"distance":1200,"time":300}]}}]}
+ monkeypatch.setattr(tools,"json_fetch",fake)
+ pts=[{"lat":45.5,"lon":11.0},{"lat":45.6,"lon":11.2}]
+ result=tools.route(pts,"walk","test-key")
+ assert result["distance_m"]==1200 and result["duration_s"]==300
+ from urllib.parse import urlsplit,parse_qs
+ params=parse_qs(urlsplit(calls[0]).query)
+ assert params["waypoints"]==["45.5,11.0|45.6,11.2"]
+ assert params["mode"]==["walk"]

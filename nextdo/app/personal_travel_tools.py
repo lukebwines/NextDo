@@ -1,5 +1,5 @@
 """Opt-in external travel lookups; no external requests during import or page load."""
-import base64,io,json,re,urllib.request,urllib.parse,urllib.error,html
+import base64,io,json,re,urllib.request,urllib.parse,urllib.error,html,math
 from decimal import Decimal, InvalidOperation
 from datetime import date
 from fastapi import HTTPException
@@ -70,6 +70,31 @@ def geocode(query,key):
   if type(lat) not in (float,int) or type(lon) not in (float,int) or not -90<=lat<=90 or not -180<=lon<=180:continue
   out.append({"address":str(r.get("formatted",""))[:500],"lat":lat,"lon":lon,"map":"https://www.google.com/maps/search/?api=1&query="+urllib.parse.quote(str(lat)+","+str(lon)),"source":"Geoapify / OpenStreetMap"})
  return out
+
+def coordinates(lat,lon):
+ if type(lat) not in (int,float) or type(lon) not in (int,float) or not math.isfinite(lat) or not math.isfinite(lon) or not -90<=lat<=90 or not -180<=lon<=180:fail("Coordinate non valide")
+ return lat,lon
+
+def route(points,mode,key):
+ if mode not in ("drive","walk","bicycle"):fail("Modalità di percorso non valida")
+ if not isinstance(points,list) or not 2<=len(points)<=15:fail("Selezionare da 2 a 15 tappe")
+ coords=[]
+ for point in points:
+  if not isinstance(point,dict):fail("Tappa non valida")
+  coords.append(coordinates(point.get("lat"),point.get("lon")))
+ key=service_key(key)
+ params={"waypoints":"|".join(str(lat)+","+str(lon) for lat,lon in coords),"mode":mode,"apiKey":key}
+ data=json_fetch("https://api.geoapify.com/v1/routing?"+urllib.parse.urlencode(params),limit=4*1024*1024)
+ try:
+  props=data["features"][0]["properties"]
+  distance,seconds=props["distance"],props["time"]
+  legs=props["legs"]
+  def metric(value):
+   if type(value) not in (int,float) or not math.isfinite(value) or value<0:raise ValueError()
+   return value
+  if len(legs)!=len(coords)-1:raise ValueError()
+  return {"mode":mode,"distance_m":metric(distance),"duration_s":metric(seconds),"legs":[{"distance_m":metric(x["distance"]),"duration_s":metric(x["time"])} for x in legs],"source":"Geoapify / OpenStreetMap","calculated_at":__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}
+ except (KeyError,TypeError,IndexError,ValueError):fail("Nessun percorso valido restituito da Geoapify",502)
 
 def pdf_text(raw):
  if len(raw)>8*1024*1024:fail("PDF oltre 8 MB per l'estrazione")
