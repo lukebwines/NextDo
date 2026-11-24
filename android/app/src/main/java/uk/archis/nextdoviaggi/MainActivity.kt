@@ -510,12 +510,14 @@ class MainActivity : ComponentActivity() {
         var pending by remember(t.id){mutableStateOf(0)}
         var running by remember(t.id){mutableStateOf(false)}
         var wanted by remember(t.id){mutableStateOf(false)}
+        var autoSyncAttempted by remember(t.id,session){mutableStateOf(false)}
         val cfg=connection
         LaunchedEffect(t.id,cfg){
             while(true){
                 running=DiaryState.running && DiaryState.trip(this@MainActivity)==t.id
                 wanted=DiaryState.wanted(this@MainActivity) && DiaryState.trip(this@MainActivity)==t.id
                 if(cfg!=null) pending=withContext(Dispatchers.IO){DiaryStore(this@MainActivity).use{it.count(DiaryStore.scope(cfg),t.id)}}
+                if(pending>0 && session.isNotBlank() && !busy && !autoSyncAttempted){autoSyncAttempted=true;diarySync(t)}
                 delay(2000)
             }
         }
@@ -529,7 +531,7 @@ class MainActivity : ComponentActivity() {
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+packageName)))
             }){Text("Autorizza posizione sempre per ripresa dopo riavvio")}
             if(diaryMessage.isNotBlank())Text(diaryMessage,color=Sand)
-            Text("La mappa dello storico è consultabile nel portale web. La sincronizzazione richiede una sessione sbloccata.",color=Muted)
+            Text("La mappa dello storico è consultabile nel portale web. La sincronizzazione parte all’apertura del diario con sessione sbloccata; puoi anche avviarla manualmente.",color=Muted)
         }
     }
     @Composable private fun LockedScreen() {

@@ -16,7 +16,10 @@ def test_diary_recorder_and_deduplication(tmp_path):
     did,session=pair();other,other_session=pair()
     pt={"id":"a","segment":"s","timestamp":int(time.time()*1000),"latitude":45.0,"longitude":10.0,"accuracy":10.0}
     assert c.post(mobile,headers=session,json={"points":[pt]}).status_code==403
+    assert c.get(m+"/trips/"+tid+"/diary",headers=session).json()["can_record"] is False
     assert c.post(web+"/recorder",headers=h,json={"device_id":did}).status_code==200
+    assert c.get(m+"/trips/"+tid+"/diary",headers=session).json()["can_record"] is True
+    assert c.get(m+"/trips/"+tid+"/diary",headers=other_session).json()["can_record"] is False
     assert c.post(mobile,headers=other_session,json={"points":[pt]}).status_code==403
     assert c.post(mobile,headers=session,json={"points":[dict(pt,latitude=100)]}).status_code==400
     for _ in range(2):

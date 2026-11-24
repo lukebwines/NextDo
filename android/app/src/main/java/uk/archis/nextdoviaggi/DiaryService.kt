@@ -76,7 +76,7 @@ object DiaryState {
     fun wanted(c:Context)=prefs(c).getBoolean("wanted",false)
     @Volatile var running=false
     fun start(c:Context,scope:String,trip:String){
-        check(!wanted(c) || (trip(c)==trip && scope(c)==scope)){"Sospendi prima il diario già attivo"}
+        check(!wanted(c) || (DiaryState.trip(c)==trip && DiaryState.scope(c)==scope)){"Sospendi prima il diario già attivo"}
         check(prefs(c).edit().putString("scope",scope).putString("trip",trip).putBoolean("wanted",true).commit())
         try{c.startForegroundService(Intent(c,DiaryService::class.java))}
         catch(e:Exception){stop(c);throw e}
@@ -113,7 +113,7 @@ class DiaryService:Service(),LocationListener {
             val n=Notification.Builder(this,"diary").setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setContentTitle("NextDo · Diario di bordo").setContentText("Registrazione GPS attiva").setOngoing(true)
                 .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open)
-                .addAction(Notification.Action.Builder(null,"Sospendi",stop).build()).build()
+                .addAction(Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this,android.R.drawable.ic_media_pause),"Sospendi",stop).build()).build()
             startForeground(412,n,ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
             segment=UUID.randomUUID().toString();last=null
             lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,30_000L,20f,this,Looper.getMainLooper())

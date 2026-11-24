@@ -193,6 +193,15 @@ const NextDoPersonal=(()=>{
    const h=Math.sin(dlat/2)**2+Math.cos(a.latitude*rad)*Math.cos(b.latitude*rad)*Math.sin(dlon/2)**2;
    return 6371*2*Math.asin(Math.sqrt(Math.min(1,h)));
   }
+  function exportGpx(){
+   if(!points.length)return;
+   const xml=document.implementation.createDocument('http://www.topografix.com/GPX/1/1','gpx');
+   const ns=xml.documentElement.namespaceURI,gpx=xml.documentElement;gpx.setAttribute('version','1.1');gpx.setAttribute('creator','NextDo Viaggi');
+   const add=(parent,name,text)=>{const n=xml.createElementNS(ns,name);if(text!==undefined)n.textContent=text;parent.append(n);return n};
+   const track=add(gpx,'trk');add(track,'name',tr.title||'NextDo');
+   for(const group of segments(points)){const seg=add(track,'trkseg');for(const p of group){const n=add(seg,'trkpt');n.setAttribute('lat',p.latitude);n.setAttribute('lon',p.longitude);add(n,'time',new Date(p.timestamp).toISOString())}}
+   const href=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(xml)],{type:'application/gpx+xml'}));const a=el('a',{href,download:'nextdo-diario-'+(date.value||'viaggio')+'.gpx'});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(href),1000);
+  }
   function draw(){
    plot.replaceChildren();if(!points.length){plot.append(paragraph('Nessun punto GPS per il periodo selezionato.'));return}
    const groups=segments(points),lat0=points[0].latitude*Math.PI/180,lon0=points[0].longitude;
@@ -217,7 +226,7 @@ const NextDoPersonal=(()=>{
    svg.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY,x,y];svg.setPointerCapture(e.pointerId)});
    svg.addEventListener('pointermove',e=>{if(!drag)return;const r=svg.getBoundingClientRect();x=drag[2]-(e.clientX-drag[0])*w/r.width;y=drag[3]-(e.clientY-drag[1])*h/r.height;update()});
    for(const ev of ['pointerup','pointercancel','lostpointercapture'])svg.addEventListener(ev,()=>drag=null);
-   plot.append(paragraph(points.length+' punti · '+groups.length+' segmenti · '+km.toFixed(1)+' km GPS stimati'),toolbar(btn('+ Zoom',()=>zoom(.7),'small'),btn('− Zoom',()=>zoom(1/.7),'small'),btn('Centra',()=>{x=0;y=0;w=800;h=720;update()},'small')),svg,paragraph('Tracciato geografico schematico senza cartografia esterna; i vuoti non vengono collegati.'));
+   plot.append(paragraph(points.length+' punti · '+groups.length+' segmenti · '+km.toFixed(1)+' km GPS stimati'),toolbar(btn('+ Zoom',()=>zoom(.7),'small'),btn('− Zoom',()=>zoom(1/.7),'small'),btn('Centra',()=>{x=0;y=0;w=800;h=720;update()},'small'),btn('Esporta GPX',exportGpx,'small')),svg,paragraph('Tracciato geografico schematico senza cartografia esterna; i vuoti non vengono collegati.'));
    const format=p=>new Date(p.timestamp).toLocaleString('it-IT');
    plot.append(card('Cronologia dei segmenti',...groups.slice(0,200).map(g=>paragraph(format(g[0])+' — '+format(g[g.length-1])+' · '+g.length+' punti'))));
   }
