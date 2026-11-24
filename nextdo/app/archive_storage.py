@@ -219,7 +219,10 @@ def register(app,*,conn,user,csrf,accessible,can_edit,taskdetail,record,data,db,
   temp=None
   try:
    with conn() as c:
-    tasks=list(candidates(c,u,state=state,period=period,month=month,kind=kind,course_id=course_id,project_id=project_id,label=label,query=query))
+    tasks=[]
+    for t in candidates(c,u,state=state,period=period,month=month,kind=kind,course_id=course_id,project_id=project_id,label=label,query=query):
+     if len(tasks)>=MAX_TASKS:fail('Selezione troppo ampia: restringere i filtri',413)
+     tasks.append(t)
     if not tasks:fail('Nessuna attività corrisponde ai filtri')
     if len(tasks)>MAX_TASKS:fail('Selezione troppo ampia: restringere i filtri',413)
     selected=[];size=0;count=0
@@ -234,10 +237,11 @@ def register(app,*,conn,user,csrf,accessible,can_edit,taskdetail,record,data,db,
     if size>MAX_SOURCE or len(tasks)+count+2>MAX_ENTRIES:fail('Selezione troppo ampia: esportare per intervalli o progetti (massimo 500 MiB per ZIP)',413)
     if shutil.disk_usage(data).free<size+20*1024**2:fail('Spazio temporaneo insufficiente: restringere i filtri',507)
     temp=Path(tempfile.mkdtemp(prefix='.archive-export-',dir=data));target=temp/'NextDo_Archivio.zip'
-    book=Workbook(write_only=True);ts=book.create_sheet('Attività');fs=book.create_sheet('Allegati')
+    book=Workbook(write_only=True);ts=book.create_sheet('Attività');fs=book.create_sheet('Allegati');ps=book.create_sheet('Avanzamenti')
     ts.freeze_panes='A2';fs.freeze_panes='A2'
     excel_row(ts,['ID','Titolo','Tipo','Stato','Data completamento UTC','Creato UTC','Scadenza','Progetto','CdS','Etichette','Descrizione (testo completo nella scheda)','Cartella','Allegati'])
     excel_row(fs,['ID allegato','ID attività','Nome originale','Dimensione byte','SHA-256','Percorso ZIP'])
+    excel_row(ps,['ID attività','Data UTC','Operatore','Stato precedente','Nuovo stato','Nota'])
     manifest={'format':'nextdo-archive-v1','attachments':[]}
     with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED,compresslevel=3) as z:
      for t,rows in selected:
@@ -250,9 +254,11 @@ def register(app,*,conn,user,csrf,accessible,can_edit,taskdetail,record,data,db,
       info=[('ID',str(t['id'])),('Titolo',t['title']),('Tipo',t['kind']),('Stato',t['status']),('Completamento UTC',t['completed_at'] or 'Non disponibile'),('Creazione UTC',t['created_at'] or ''),('Scadenza',t['due_at'] or ''),('Progetto',project[0] if project else ''),('CdS',courses),('Etichette',labels)]
       z.writestr(folder+'/Scheda_attivita.txt','\n'.join(k+': '+str(v) for k,v in info)+'\n\nDescrizione:\n'+(t['description'] or ''))
       excel_row(ts,[t['id'],t['title'],t['kind'],t['status'],t['completed_at'] or '',t['created_at'],t['due_at'] or '',project[0] if project else '',courses,labels,t['description'] or '',folder,len(rows)])
+      for event in c.execute('SELECT tp.created_at,u.display_name,tp.old_status,tp.new_status,tp.note FROM task_progress tp LEFT JOIN users u ON u.id=tp.actor_id WHERE tp.task_id=? ORDER BY tp.id',(t['id'],)):
+       excel_row(ps,[t['id'],*event])
       for a,p,n in rows:
        # Numeric prefix prevents collisions; preserve original extension after truncation.
-       leaf=clean_name(Path(a['filename']).stem,70)+clean_name(Path(a['filename']).suffix,15) if Path(a['filename']).suffix else clean_name(a['filename'])
+       leaf=clean_name(Path(a['filename']).stem,70)+'.'+clean_name(Path(a['filename']).suffix,15) if Path(a['filename']).suffix else clean_name(a['filename'])
        member=folder+'/Allegati/'+str(a['id'])+'_'+leaf
        hh=hashlib.sha256();actual=0
        with p.open('rb') as inp,z.open(member,'w') as out:
