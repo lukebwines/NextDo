@@ -7,6 +7,7 @@ import hashlib, io, json, os, re, secrets, sqlite3, threading, time, zipfile
 from fastapi import HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 from argon2.exceptions import VerificationError
+from . import personal_travel_tools as tools
 
 LIMIT=32*1024*1024
 MAX_EXPANDED=120*1024*1024
@@ -36,7 +37,10 @@ def validate_shape(v,depth=0):
  elif v is not None and not isinstance(v,(bool,int,float)):fail("Valore non valido")
 
 def validate_manifest(m,available):
- validate_shape(m)
+ if isinstance(m,dict):
+  tools.validate_cover(m.get('cover'))
+  validate_shape({k:v for k,v in m.items() if k!='cover'})
+ else:validate_shape(m)
  if not isinstance(m,dict) or m.get("format_version")!=1:fail("Richiesto manifest.json formato 1")
  t=m.get("trip")
  if not isinstance(t,dict) or not ID.fullmatch(str(t.get("id",""))) or not isinstance(t.get("title"),str) or not t["title"].strip():fail("Viaggio non valido")
@@ -86,6 +90,10 @@ def validate_manifest(m,available):
   for e in events:
    if not isinstance(e,dict) or (e.get("bid") and e["bid"] not in bids) or (e.get("gid") and e["gid"] not in gids):fail("Collegamento evento non valido")
  for d in rows("documents",160):doc(d.get("file"))
+ for e in rows("expenses",160):
+  if not isinstance(e.get("title"),str) or not e["title"].strip():fail("Spesa non valida")
+  tools.validate_expense(e)
+  doc(e.get("doc"))
  if refs!=set(available):fail("PDF mancanti o non dichiarati")
  return m
 
@@ -281,6 +289,45 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
    if name not in files:fail("Documento non trovato",404)
    from urllib.parse import quote
    return Response(files[name],media_type="application/pdf",headers={"Content-Disposition":"inline; filename*=UTF-8''"+quote(name,safe=""),"Content-Security-Policy":"sandbox"})
+ @app.post("/api/personal/trips/{tid}/cover")
+ def cover(tid:str,req:Request,file:UploadFile=File(...)):
+  owner=allowed(req,True)
+  image=tools.photo(file.file.read(5*1024*1024+1))
+  with db() as c:
+   r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
+   m["cover"]=image
+   return {"revision":save(c,owner,m,state,files,r["revision"])}
+ @app.post("/api/personal/photos/search")
+ def photos_search(req:Request,b:dict):
+  allowed(req,True)
+  return tools.photos_search(b.get("query"))
+ @app.post("/api/personal/trips/{tid}/cover/commons")
+ def cover_commons(tid:str,req:Request,b:dict):
+  owner=allowed(req,True)
+  with db() as c:load(c,owner,tid)
+  image=tools.commons_photo(b.get("pageid"))
+  if allowed(req,True)!=owner:fail("Sessione cambiata",403)
+  with db() as c:
+   r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
+   m["cover"]=image
+   return {"revision":save(c,owner,m,state,files,r["revision"])}
+ @app.post("/api/personal/geocode")
+ def geocode(req:Request,b:dict):
+  allowed(req,True)
+  return tools.geocode(b.get("query"),b.get("key"))
+ @app.get("/api/personal/trips/{tid}/documents/{name}/text")
+ def pdf_text(tid:str,name:str,req:Request):
+  owner=allowed(req)
+  with db() as c:
+   r=load(c,owner,tid);_,_,files=read_archive(r["archive"])
+   if name not in files:fail("Documento non trovato",404)
+   raw=files[name]
+  return {"text":tools.pdf_text(raw)}
+ @app.post("/api/personal/analyze-booking")
+ def analyze_booking(req:Request,b:dict):
+  allowed(req,True)
+  if user(req)["role"]!="admin":fail("Analisi AI disponibile all'amministratore",403)
+  return tools.analyze_booking(data_path,b.get("text"))
  @app.get("/api/personal/trips/{tid}/export")
  def export_trip(tid:str,req:Request):
   owner=allowed(req)
