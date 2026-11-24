@@ -30,7 +30,7 @@ const NextDoPersonal=(()=>{
   const file=el('input',{type:'file',accept:'.zip',class:'field'});
   const importBtn=btn('Importa ZIP',async()=>{if(!file.files[0])return msg('Seleziona un archivio ZIP',true);const data=new FormData();data.append('file',file.files[0]);try{const r=await api(path+'/trips/import',{method:'POST',body:data});await load(r.id);msg('Importato: '+r.bookings+' prenotazioni, '+r.days+' giornate, '+r.pdfs+' PDF')}catch(e){report(e)}},'primary');
   pick.addEventListener('change',()=>pick.value?load(pick.value):(trip=null,render(main)));
-  root.classList.add('travel-shell');const imports=el('details',{class:'travel-import'},[node('summary','','Importa / trasferisci viaggio'),toolbar(file,importBtn)]);root.replaceChildren(el('div',{class:'travel-picker'},[el('div',{},[node('div','travel-kicker','AREA PERSONALE · VIAGGI'),pick]),toolbar(btn('+ Nuovo viaggio',newTrip,'primary'),btn('Servizi Viaggi',servicesEditor,'small'),btn('Blocca',async()=>{await lock();render(main)})),imports]));
+  root.classList.add('travel-shell');const imports=el('details',{class:'travel-import'},[node('summary','','Importa / trasferisci viaggio'),toolbar(file,importBtn)]);root.replaceChildren(el('div',{class:'travel-picker'},[el('div',{},[node('div','travel-kicker','AREA PERSONALE · VIAGGI'),pick]),toolbar(btn('+ Nuovo viaggio',newTrip,'primary'),btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',async()=>{await lock();render(main)})),imports]));
   if(trip)show(root);else root.append(paragraph('Seleziona un viaggio oppure importane uno.'));
  }
  async function load(id){const token=generation;try{const result=await api(path+'/trips/'+encodeURIComponent(id));if(token!==generation||S.view!=='personal')return;trip=result;selected=trip.manifest.days[0]?.date||'';tab='panoramica';render(main)}catch(e){report(e)}}
@@ -86,6 +86,12 @@ const NextDoPersonal=(()=>{
  const switchTab=k=>{tab=k;render(main)};
  const tripURL=()=>path+'/trips/'+encodeURIComponent(trip.manifest.trip.id);
  async function reloadView(){const token=generation,id=trip.manifest.trip.id;const r=await api(path+'/trips/'+encodeURIComponent(id));if(token!==generation)return;trip=r;render(main)}
+ function mobileEditor(){
+  const {box,back}=modal('NextDo Viaggi · Android');back.setAttribute('data-personal-modal','');
+  const token=generation,list=el('div'),code=el('div');
+  const reload=async()=>{try{const ds=await api(path+'/mobile/devices');if(token!==generation||!back.isConnected)return;list.replaceChildren(...ds.map(d=>card(d.label,paragraph(d.revoked?'Revocato':new Date(d.expires*1000)<new Date()?'Scaduto':'Associato fino al '+new Date(d.expires*1000).toLocaleDateString('it-IT')),d.revoked?null:btn('Revoca',async()=>{if(!confirm('Revocare questo dispositivo? I dati offline già scaricati restano sul telefono fino alla cancellazione locale.'))return;try{await api(path+'/mobile/devices/'+encodeURIComponent(d.id)+'/revoke',{method:'POST'});reload()}catch(e){report(e)}},'small'))));if(!ds.length)list.append(paragraph('Nessun dispositivo associato'))}catch(e){report(e)}};
+  box.append(paragraph('Usa l’app Android solo con un URL HTTPS diretto e sicuro di NextDo, raggiungibile dal telefono. L’ingress di Home Assistant non è un URL API autonomo. L’app legge soltanto i tuoi viaggi.'),btn('Genera codice di associazione',async()=>{try{const r=await api(path+'/mobile/pair',{method:'POST'});if(token!==generation||!back.isConnected)return;const value=input('pair','',r.code);value.readOnly=true;code.replaceChildren(paragraph('Codice monouso valido 5 minuti. Non condividerlo.'),value,btn('Copia codice',async()=>{try{await navigator.clipboard.writeText(value.value);msg('Codice copiato')}catch{value.select();msg('Copia manualmente il codice selezionato')}},'small'))}catch(e){report(e)}},'primary'),code,list);reload();
+ }
  function servicesEditor(){
   const {box,back}=modal('Servizi Viaggi');back.setAttribute('data-personal-modal','');
   const token=generation;
