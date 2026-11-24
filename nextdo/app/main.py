@@ -741,3 +741,6 @@ from . import cloudflare_mail
 cloudflare_mail.upgrade(DB)
 cloudflare_mail.register_routes(app,conn=conn,user=user,csrf=csrf,data_path=DATA)
 collaborators.register_routes(app,conn=conn,user=user,csrf=csrf,ph=PH,record=record,data_path=DATA)
+
+from . import outbound_mail
+outbound_mail.register(app,conn=conn,user=user,csrf=csrf,accessible=accessible,tz=TZ,data_path=DATA,record=record)
