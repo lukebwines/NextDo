@@ -72,7 +72,16 @@ class MainActivity : ComponentActivity() {
     private var workError by mutableStateOf("")
     private var workBusy by mutableStateOf(false)
     private var alertsEnabled by mutableStateOf(false)
-    private var alertsRepeat by mutableIntStateOf(15)
+    private var alarmOptions by mutableStateOf(AlarmOptions())
+    private var fullScreenAllowed by mutableStateOf(false)
+    private var exactAlarmAllowed by mutableStateOf(false)
+    private val ringtonePicker=registerForActivityResult(ActivityResultContracts.StartActivityForResult()){result->
+        if(result.resultCode==RESULT_OK){
+            @Suppress("DEPRECATION")
+            val uri=result.data?.getParcelableExtra<Uri>(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            if(uri!=null&&uri.scheme=="content")saveAlarmOptions(alarmOptions.copy(sound="custom",custom=uri.toString()))
+        }
+    }
     private var alertPermission by mutableStateOf(false)
     private val notificationPermission=registerForActivityResult(ActivityResultContracts.RequestPermission()){ alertPermission=WorkAlerts.permission(this) }
     private var availableUpdate by mutableStateOf<TravelUpdate?>(null)
@@ -203,12 +212,17 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshAlertStatus()
+        if(alertsEnabled)WorkAlerts.kick(this)
     }
     private fun refreshAlertStatus(){
         alertPermission=WorkAlerts.permission(this)
         alertsEnabled=WorkAlerts.enabled(this)
-        alertsRepeat=WorkAlerts.interval(this)
+        alarmOptions=CriticalAlarm.options(this)
+        fullScreenAllowed=CriticalAlarm.fullScreenAllowed(this)
+        exactAlarmAllowed=CriticalAlarm.exactAllowed(this)
     }
+    private fun saveAlarmOptions(o:AlarmOptions){CriticalAlarm.save(this,o);alarmOptions=o}
+    private fun alarmSettings(action:String){try{startActivity(Intent(action,Uri.parse("package:"+packageName)))}catch(_:Exception){workError="Impostazione non disponibile su questo dispositivo."}}
     override fun onStop() {
         super.onStop()
         if (!authenticating) lockLocal()
@@ -624,10 +638,7 @@ class MainActivity : ComponentActivity() {
             if(!alertsEnabled)Action("Attiva avvisi in background",workConnection!=null&&alertPermission&&!workBusy){enableWorkAlerts()}
             else {
                 Text("Le notifiche critiche si ripetono fino alla presa visione sul telefono. La presa visione viene sincronizzata con il web e non completa l’attività.",fontSize=12.sp,color=Muted)
-                Text("Ripetizione avvisi critici",fontWeight=FontWeight.Bold)
-                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    for(n in listOf(15,30,60))FilterChip(selected=alertsRepeat==n,onClick={WorkAlerts.setRepeat(this@MainActivity,n);alertsRepeat=n},label={Text(n.toString()+" min")})
-                }
+                Text("Gli allarmi critici possono essere silenziati senza confermare la presa visione.",fontSize=12.sp,color=Muted)
                 Action("Disattiva avvisi",!workBusy){disableWorkAlerts()}
                 TextButton(onClick={WorkAlerts.kick(this@MainActivity);refreshAlertStatus()}){Text("Sincronizza avvisi ora")}
             }
@@ -636,8 +647,55 @@ class MainActivity : ComponentActivity() {
             Text(if(WorkPush.active(this@MainActivity))"Push: registrato" else "Push: non ancora registrato (configura Firebase sul web e sincronizza gli avvisi).",fontSize=12.sp,color=Muted)
             val pending=WorkAlerts.pendingCount(this@MainActivity)
             if(pending>0)Text("Prese visione in attesa di sincronizzazione: "+pending,color=Sand,fontSize=12.sp)
-            Action("Prova avviso critico",alertPermission){WorkAlerts.test(this@MainActivity)}
             TextButton(onClick={startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName))}){Text("Suoni e vibrazione in Android")}
+        }
+        CriticalAlarmSettings()
+    }
+    @Composable private fun CriticalAlarmSettings(){
+        TravelCard("Allarmi critici","Suono prolungato, ripetizione e schermata dedicata. Rispetta volume, canali e Non disturbare di Android.") {
+            Text("Suoneria",fontWeight=FontWeight.Bold)
+            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                FilterChip(selected=alarmOptions.sound=="alarm",onClick={saveAlarmOptions(alarmOptions.copy(sound="alarm"))},label={Text("Sveglia")})
+                FilterChip(selected=alarmOptions.sound=="siren",onClick={saveAlarmOptions(alarmOptions.copy(sound="siren"))},label={Text("Sirena")})
+            }
+            FilterChip(selected=alarmOptions.sound=="custom",onClick={
+                try{ringtonePicker.launch(Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER)
+                    .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE,android.media.RingtoneManager.TYPE_ALARM)
+                    .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT,false)
+                    .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT,true)
+                    .putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TITLE,"Suoneria allarme NextDo"))}
+                catch(_:Exception){workError="Selettore suoneria non disponibile"}
+            },label={Text("Scegli suoneria…")})
+            Text("Durata del suono",fontWeight=FontWeight.Bold)
+            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                for(n in listOf(10,30,60))FilterChip(selected=alarmOptions.duration==n,onClick={saveAlarmOptions(alarmOptions.copy(duration=n))},label={Text("$n s")})
+            }
+            Text("Ripetizione fino alla presa visione",fontWeight=FontWeight.Bold)
+            for(group in listOf(listOf(1,5,10),listOf(15,30,60))){
+                Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                    for(n in group)FilterChip(selected=alarmOptions.repeat==n,onClick={saveAlarmOptions(alarmOptions.copy(repeat=n))},label={Text("$n min")})
+                }
+            }
+            Row(verticalAlignment=Alignment.CenterVertically){
+                Text("Vibrazione prolungata",Modifier.weight(1f));Switch(checked=alarmOptions.vibrate,onCheckedChange={saveAlarmOptions(alarmOptions.copy(vibrate=it))})
+            }
+            Row(verticalAlignment=Alignment.CenterVertically){
+                Text("Schermata allarme e risveglio",Modifier.weight(1f));Switch(checked=alarmOptions.screen,onCheckedChange={saveAlarmOptions(alarmOptions.copy(screen=it))})
+            }
+            Row(verticalAlignment=Alignment.CenterVertically){
+                Text("Notifica persistente",Modifier.weight(1f));Switch(checked=alarmOptions.persistent,onCheckedChange={saveAlarmOptions(alarmOptions.copy(persistent=it))})
+            }
+            if(android.os.Build.VERSION.SDK_INT>=34&&alarmOptions.screen&&!fullScreenAllowed){
+                Text("Schermo intero non autorizzato: resta il banner Android.",color=Sand,fontSize=12.sp)
+                Action("Consenti schermata allarme"){alarmSettings(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)}
+            }
+            if(android.os.Build.VERSION.SDK_INT>=31&&!exactAlarmAllowed){
+                Text("Allarmi esatti non autorizzati: la ripetizione può essere ritardata.",color=Sand,fontSize=12.sp)
+                Action("Autorizza allarmi e promemoria"){alarmSettings(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)}
+            }
+            Text("Se Android non consente l’audio prolungato in background, resta la notifica sonora normale. Gli intervalli sono indicativi in modalità risparmio energia.",color=Muted,fontSize=12.sp)
+            Action("Prova allarme critico",alertPermission){WorkAlerts.test(this@MainActivity)}
+            TextButton(onClick={startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName).putExtra(Settings.EXTRA_CHANNEL_ID,CriticalAlarm.CHANNEL))}){Text("Impostazioni canale allarmi Android")}
         }
     }
     @Composable private fun UpdatePanel() {
