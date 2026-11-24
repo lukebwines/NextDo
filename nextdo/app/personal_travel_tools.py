@@ -75,6 +75,10 @@ def photo_results(payload):
   info=(p.get("imageinfo") or [{}])[0];meta=info.get("extmetadata",{})
   def value(k):return plain(meta.get(k,{}).get("value",""))
   license=value("LicenseShortName").strip()
+  code=value("License").strip().lower()
+  if re.fullmatch(r"cc-by(?:-sa)?-[1-4]\.0",code):license=("CC BY-SA " if code.startswith("cc-by-sa-") else "CC BY ")+code.rsplit("-",1)[1]
+  elif code in ("cc-zero","cc0"):license="CC0 1.0"
+  elif code in ("pd","public-domain"):license="Public domain"
   # Exclude non-commercial/no-derivatives variants; keep clear reusable licences.
   if not re.fullmatch(r"(?:CC BY(?:-SA)?(?: [1-4]\.0(?: [A-Za-z ]+)?)?|CC0(?: 1\.0)?|Public domain(?: mark(?: 1\.0)?)?)",license,re.I):continue
   if re.search(r"\b(?:NC|ND)\b",license,re.I):continue
@@ -86,26 +90,49 @@ def photo_results(payload):
   out.append({"pageid":p["pageid"],"title":p.get("title",""),"preview":thumb,"credit":value("Artist") or value("Credit") or "Autore indicato nella fonte","license":license,"source":"https://commons.wikimedia.org/?curid="+str(p["pageid"])})
  return out
 
-def photos_search(query):
+def commons_diagnostics(query):
  q=query_text(query)
- # Fetch more candidates with only the metadata we actually use.
- common={"generator":"search","gsrnamespace":6,"gsrlimit":30,"prop":"imageinfo","iiprop":"url|mime|size|extmetadata","iiextmetadatafilter":"LicenseShortName|Artist|Credit","iiurlwidth":500}
- out={}
+ # Resolve search IDs first, then fetch file metadata in small batches. This
+ # avoids generator/imageinfo continuation interactions and expensive batches.
+ common={"prop":"imageinfo","iiprop":"url|mime|size|extmetadata","iiextmetadatafilter":"LicenseShortName|License|Artist|Credit","iiurlwidth":500}
+ out={};seen=set();found=0;with_info=0;with_license=0;with_url=0
  for term in ("filetype:bitmap "+q,q):
-  params={**common,"gsrsearch":term}
+  params={"list":"search","srnamespace":6,"srlimit":30,"srsearch":term}
   for _ in range(2):
    payload=commons(params)
-   for r in photo_results(payload):out.setdefault(r["pageid"],r)
-   if len(out)>=8:return list(out.values())[:8]
+   hits=payload.get("query",{}).get("search",[])
+   if not isinstance(hits,list):fail("Wikimedia: formato risultati inatteso",502)
+   ids=[r["pageid"] for r in hits if isinstance(r,dict) and type(r.get("pageid"))==int and r["pageid"] not in seen]
+   ids=list(dict.fromkeys(ids));seen.update(ids);found+=len(ids)
+   for offset in range(0,len(ids),10):
+    page=commons({**common,"pageids":"|".join(map(str,ids[offset:offset+10]))})
+    pages=page.get("query",{}).get("pages",[])
+    if isinstance(pages,dict):pages=list(pages.values())
+    for entry in pages:
+     info=(entry.get("imageinfo") or [{}])[0]
+     if not info:continue
+     with_info+=1
+     meta=info.get("extmetadata",{})
+     if meta.get("LicenseShortName") or meta.get("License"):with_license+=1
+     if info.get("thumburl") or info.get("url"):with_url+=1
+    for r in photo_results(page):out.setdefault(r["pageid"],r)
+    if len(out)>=8:break
+   if len(out)>=8:break
    continuation=payload.get("continue",{})
-   if not isinstance(continuation,dict) or "gsroffset" not in continuation:break
-   params={**common,"gsrsearch":term,**continuation}
+   if not isinstance(continuation,dict) or "sroffset" not in continuation:break
+   params={"list":"search","srnamespace":6,"srlimit":30,"srsearch":term,**continuation}
   if len(out)>=4:break
- return list(out.values())[:8]
+ return {"results":list(out.values())[:8],"found":found,"with_info":with_info,"with_license":with_license,"with_url":with_url}
+
+def photos_search(query):
+ diagnostic=commons_diagnostics(query)
+ if not diagnostic["results"] and diagnostic["found"]:
+  fail("Wikimedia: "+str(diagnostic["found"])+" file trovati; "+str(diagnostic["with_info"])+" con metadati, "+str(diagnostic["with_license"])+" con licenza, "+str(diagnostic["with_url"])+" con URL. Nessuno compatibile con il filtro fotografico.",422)
+ return diagnostic["results"]
 
 def commons_photo(pageid):
  if type(pageid)!=int or pageid<=0:fail("Foto non valida")
- result=photo_results(commons({"pageids":pageid,"prop":"imageinfo","iiprop":"url|mime|size|extmetadata","iiextmetadatafilter":"LicenseShortName|Artist|Credit","iiurlwidth":1280}))
+ result=photo_results(commons({"pageids":pageid,"prop":"imageinfo","iiprop":"url|mime|size|extmetadata","iiextmetadatafilter":"LicenseShortName|License|Artist|Credit","iiurlwidth":1280}))
  if not result:fail("Foto non disponibile con licenza riutilizzabile")
  r=result[0]
  image=photo(fetch(r["preview"],limit=5*1024*1024))
