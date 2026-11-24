@@ -29,3 +29,6 @@ Opt-in in Impostazioni dopo pairing e permesso Android. Credenziale limitata ai 
 
 ## Push e presa visione — server 0.1.41-test / Android 0.1.10-test
 Presa visione per utente e revisione (non completamento); Android, notifica e web condividono lo stesso stato; offline accoda la presa visione e ritenta. Push opzionale FCM HTTP v1: amministratore carica i due JSON Firebase sul Raspberry, chiave privata fuori dal repository e APK. Il server verifica le modifiche visibili per dispositivo ogni 5 secondi e invia solo un segnale generico; WorkManager aggiorna dal Raspberry e mantiene il fallback periodico. Nessuna garanzia di latenza, FCM/Android possono ritardare. Il token di background non può leggere dettagli; revoca/disattivazione e restore eliminano iscrizioni. Configurazione reale e test fisico ancora necessari. Rinvio e completamento attività da Android rimangono successivi.
+
+### Pubblicazione 0.1.10-test
+Per questa sola versione, la pipeline firmata può partire anche da un merge esplicitamente marcato `Publish Android 0.1.10-test:` su main, dopo i test PR superati. Mantiene la firma permanente, il package ID e il normale comando manuale per i rilasci successivi. Nessuna modifica alle chiavi.
