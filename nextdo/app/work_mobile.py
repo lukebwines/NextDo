@@ -12,6 +12,7 @@ def hashed(s):
 def ensure(c):
  c.execute("""CREATE TABLE IF NOT EXISTS work_mobile_pairs(hash TEXT PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,password_hash TEXT NOT NULL,expires REAL NOT NULL)""")
  c.execute("""CREATE TABLE IF NOT EXISTS work_mobile_devices(id TEXT PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,label TEXT NOT NULL,hash TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,expires REAL NOT NULL,created REAL NOT NULL,revoked INTEGER NOT NULL DEFAULT 0)""")
+ c.execute("""CREATE TABLE IF NOT EXISTS work_mobile_alert_tokens(hash TEXT PRIMARY KEY,device_id TEXT NOT NULL UNIQUE REFERENCES work_mobile_devices(id) ON DELETE CASCADE)""")
 def day_info(value,tz):
  if not value:return None,None
  try:
@@ -102,3 +103,44 @@ def register(app,*,conn,user,csrf,accessible,tz,record):
    u,d=auth(c,req);t=c.execute("SELECT * FROM tasks WHERE id=? AND kind IN ('task','appointment')",(tid,)).fetchone()
    if not t or not accessible(c,u,t):fail(404,"Voce non disponibile")
    return {"id":t["id"],"title":t["title"],"description":t["description"] or "","kind":t["kind"],"status":t["status"],"priority":t["priority"],"due_at":t["due_at"],"start_at":t["start_at"]}
+
+ @app.post("/api/mobile/v1/work/alerts/enable")
+ def enable_alerts(req:Request):
+  raw=token()
+  with conn() as c:
+   u,d=auth(c,req)
+   c.execute("DELETE FROM work_mobile_alert_tokens WHERE device_id=?",(d["id"],))
+   c.execute("INSERT INTO work_mobile_alert_tokens VALUES(?,?)",(digest(raw),d["id"]))
+   return {"alert_token":raw,"expires":d["expires"]}
+ @app.post("/api/mobile/v1/work/alerts/disable")
+ def disable_alerts(req:Request):
+  with conn() as c:
+   u,d=auth(c,req)
+   c.execute("DELETE FROM work_mobile_alert_tokens WHERE device_id=?",(d["id"],))
+  return {"ok":True}
+ @app.get("/api/mobile/v1/work/alerts")
+ def alerts(req:Request,after:int=0):
+  if after<0:fail(400,"Cursore non valido")
+  h=req.headers.get("authorization","")
+  if not h.startswith("Bearer "):fail(401,"Autorizzazione avvisi richiesta")
+  with conn() as c:
+   ensure(c)
+   d=c.execute("""SELECT d.* FROM work_mobile_alert_tokens a JOIN work_mobile_devices d ON d.id=a.device_id WHERE a.hash=? AND d.revoked=0 AND d.expires>?""",(hashed(h[7:]),time.time())).fetchone()
+   if not d:fail(401,"Autorizzazione avvisi scaduta o revocata")
+   u=credentials(c,d["user_id"])
+   if not secrets.compare_digest(d["password_hash"],digest(u["password"])):fail(401,"Credenziali cambiate")
+   rows=[]
+   now=datetime.now(tz)
+   for t in c.execute("SELECT * FROM tasks WHERE id>? AND kind IN ('task','appointment') AND status!='done' ORDER BY id",(after,)):
+    if not accessible(c,u,t):continue
+    day,instant=day_info(t["due_at"],tz)
+    # A date-only reminder is explicitly a reminder at 09:00, never an appointment time.
+    when=None
+    if instant:when=datetime.fromisoformat(instant)
+    elif day:when=datetime.combine(date.fromisoformat(day),datetime.min.time().replace(hour=9),tzinfo=tz)
+    # Opaque per-device, per-revision key; never send title, description, person, or source.
+    key=digest(d["id"]+":"+str(t["id"])+":"+str(t["updated_at"])+":"+str(t["due_at"])+":"+t["priority"]+":"+t["status"]+":"+t["kind"])
+    rows.append((t["id"],{"key":key,"kind":t["kind"],"priority":t["priority"],"review":t["status"]=="review","when":int(when.timestamp()) if when else None,"date_only":bool(day and not instant)}))
+    if len(rows)>200:break
+   more=len(rows)>200;rows=rows[:200]
+   return {"items":[a for _,a in rows],"next_after":rows[-1][0] if more else None,"expires":d["expires"]}

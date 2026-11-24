@@ -128,21 +128,21 @@ data class TripPackage(val manifest: JSONObject, val state: JSONObject, val docs
         }
     }
 }
-class Vault(private val context: Context) {
-    private val alias = "nextdo_travel_v1"
+class Vault(private val context: Context, private val background:Boolean=false) {
+    private val alias = if(background) "nextdo_alerts_v1" else "nextdo_travel_v1"
     private val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     private fun key(): SecretKey {
         (store.getKey(alias, null) as? SecretKey)?.let { return it }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
             init(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setUserAuthenticationRequired(true)
-                .setUserAuthenticationParameters(300, KeyProperties.AUTH_DEVICE_CREDENTIAL or KeyProperties.AUTH_BIOMETRIC_STRONG)
+                .setUserAuthenticationRequired(!background)
+                .apply { if(!background)setUserAuthenticationParameters(300, KeyProperties.AUTH_DEVICE_CREDENTIAL or KeyProperties.AUTH_BIOMETRIC_STRONG) }
                 .build())
             generateKey()
         }
     }
-    private fun file(name: String) = File(context.filesDir, "travel_" + name + ".enc")
+    private fun file(name: String) = File(context.filesDir, (if(background)"alerts_" else "travel_") + name + ".enc")
     fun exists(name: String) = file(name).exists()
     fun write(name: String, raw: ByteArray) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

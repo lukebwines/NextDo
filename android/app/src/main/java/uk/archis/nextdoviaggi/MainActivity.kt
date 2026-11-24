@@ -71,6 +71,10 @@ class MainActivity : ComponentActivity() {
     private var workDetail by mutableStateOf<JSONObject?>(null)
     private var workError by mutableStateOf("")
     private var workBusy by mutableStateOf(false)
+    private var alertsEnabled by mutableStateOf(false)
+    private var alertsRepeat by mutableIntStateOf(15)
+    private var alertPermission by mutableStateOf(false)
+    private val notificationPermission=registerForActivityResult(ActivityResultContracts.RequestPermission()){ alertPermission=WorkAlerts.permission(this) }
     private var availableUpdate by mutableStateOf<TravelUpdate?>(null)
     private var updateBusy by mutableStateOf(false)
     private var updateMessage by mutableStateOf("")
@@ -185,6 +189,8 @@ class MainActivity : ComponentActivity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         vault = Vault(this)
         checkUpdates()
+        WorkAlerts.channels(this)
+        refreshAlertStatus()
         // Any leftovers from an interrupted PDF render are local and deleted on startup.
         cacheDir.listFiles()?.filter { it.name.startsWith("travel-pdf-") }?.forEach { it.delete() }
         setContent {
@@ -193,6 +199,15 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = Navy) { App() }
             }
         }
+    }
+    override fun onResume() {
+        super.onResume()
+        refreshAlertStatus()
+    }
+    private fun refreshAlertStatus(){
+        alertPermission=WorkAlerts.permission(this)
+        alertsEnabled=WorkAlerts.enabled(this)
+        alertsRepeat=WorkAlerts.interval(this)
     }
     override fun onStop() {
         super.onStop()
@@ -448,7 +463,7 @@ class MainActivity : ComponentActivity() {
             val cfg=WorkApi(url).pair(code)
             vault.write("work_connection",cfg.toString().toByteArray())
             cfg
-        }){workConnection=it;workAgenda=null}
+        }){workConnection=it;workAgenda=null;refreshAlertStatus()}
     }
     private fun refreshWork(){
         val cfg=workConnection?:return
@@ -461,10 +476,11 @@ class MainActivity : ComponentActivity() {
     private fun disconnectWork(){
         val cfg=workConnection?:return
         workTask({
+            WorkAlerts.disable(this)
             val revoked=try{WorkApi(cfg.getString("url")).revoke(cfg.getString("token"));true}catch(_:Exception){false}
             vault.remove("work_connection")
             revoked
-        }){revoked->workConnection=null;workAgenda=null;workDetail=null;workError=if(revoked)"" else "Dati locali rimossi. Revoca il dispositivo anche dal web."}
+        }){revoked->workConnection=null;workAgenda=null;workDetail=null;refreshAlertStatus();workError=if(revoked)"" else "Dati locali rimossi. Revoca il dispositivo anche dal web."}
     }
     private fun openArea(next:NextDoArea) {
         if(locked || busy) return
@@ -557,6 +573,21 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun enableWorkAlerts(){
+        val cfg=workConnection?:return
+        if(!WorkAlerts.permission(this)){alertPermission=false;return}
+        workTask({
+            val result=TravelApi(cfg.getString("url")).obj("/work/alerts/enable",cfg.getString("token"),JSONObject())
+            WorkAlerts.enable(this,cfg.getString("url"),result.getString("alert_token"),result.getDouble("expires").toLong())
+        }){refreshAlertStatus()}
+    }
+    private fun disableWorkAlerts(){
+        val cfg=workConnection
+        workTask({
+            WorkAlerts.disable(this)
+            if(cfg!=null)try{TravelApi(cfg.getString("url")).obj("/work/alerts/disable",cfg.getString("token"),JSONObject());true}catch(_:Exception){false} else false
+        }){revoked->refreshAlertStatus();if(!revoked)workError="Avvisi locali disattivati. Per revocare la credenziale sul server, disassocia il dispositivo dal web."}
+    }
     @Composable private fun SettingsLanding() {
         Text("Impostazioni",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
         TravelCard("Applicazione","NextDo "+packageManager.getPackageInfo(packageName,0).versionName) {
@@ -572,8 +603,29 @@ class MainActivity : ComponentActivity() {
             Text(if(workConnection!=null)"Professionale: associato" else "Professionale: non associato",color=Muted,fontSize=12.sp)
             Action("Gestisci agenda professionale",!busy){openArea(NextDoArea.WORK)}
         }
-        TravelCard("Notifiche","Le notifiche professionali saranno configurabili nel prossimo sviluppo.") {
-            Text("Non ancora attive.",color=Muted,fontSize=12.sp)
+        TravelCard("Notifiche professionali","Avvisi generici, senza titoli o descrizioni. I promemoria funzionano anche con l’app chiusa, nei limiti di Android.") {
+            if(workError.isNotBlank())Text(workError,color=Sand,fontSize=12.sp)
+            Text(if(alertPermission)"Autorizzazione Android concessa" else "Autorizzazione Android mancante",color=Muted)
+            if(!alertPermission)Action("Consenti notifiche",!workBusy){
+                if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                else startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName))
+            }
+            Text(if(alertsEnabled)"Avvisi attivati" else "Avvisi disattivati",color=Teal,fontWeight=FontWeight.SemiBold)
+            if(!alertsEnabled)Action("Attiva avvisi in background",workConnection!=null&&alertPermission&&!workBusy){enableWorkAlerts()}
+            else {
+                Text("Le notifiche critiche si ripetono fino alla presa visione sul telefono. La presa visione non completa l’attività sul web.",fontSize=12.sp,color=Muted)
+                Text("Ripetizione avvisi critici",fontWeight=FontWeight.Bold)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    for(n in listOf(15,30,60))FilterChip(selected=alertsRepeat==n,onClick={WorkAlerts.setRepeat(this@MainActivity,n);alertsRepeat=n},label={Text(n.toString()+" min")})
+                }
+                Action("Disattiva avvisi",!workBusy){disableWorkAlerts()}
+                TextButton(onClick={WorkAlerts.kick(this@MainActivity);refreshAlertStatus()}){Text("Sincronizza avvisi ora")}
+            }
+            Text("Scadenze: 24 ore prima e al termine. Appuntamenti con orario: anche 1 ora e 15 minuti prima. Se manca l’orario, promemoria alle 09:00 (fuso NextDo). Urgenze e voci da verificare segnalate anche senza data.",color=Muted,fontSize=12.sp)
+            Text("Controllo in background ogni 15 minuti circa; non è push in tempo reale. Il risparmio energetico può ritardare gli avvisi.",color=Sand,fontSize=12.sp)
+            Action("Prova avviso critico",alertPermission){WorkAlerts.test(this@MainActivity)}
+            TextButton(onClick={startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName))}){Text("Suoni e vibrazione in Android")}
         }
     }
     @Composable private fun UpdatePanel() {
