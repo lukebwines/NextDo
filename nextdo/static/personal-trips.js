@@ -174,18 +174,84 @@ const NextDoPersonal=(()=>{
  function expenseEditor(e={},index=-1){
   editor('Ricevuta / spesa',[...fieldlist(e,[['title','Descrizione'],['date','Data','date'],['amount','Importo (es. 12.50)'],['currency','Valuta ISO (EUR, USD…)'],['category','Categoria'],['doc','Nome PDF già caricato'],['notes','Note','textarea']])],v=>save(t=>{v.currency=v.currency.toUpperCase();const arr=t.manifest.expenses||(t.manifest.expenses=[]);if(index<0)arr.push(v);else arr[index]=v}))
  }
+ function diaryView(root,tr){
+  const token=generation,url=path+'/trips/'+encodeURIComponent(tr.id)+'/diary';
+  const host=el('div'),plot=el('div'),status=paragraph('Caricamento…'),date=input('diary-day','','','date');
+  const picker=select('recorder',[['','Nessun registratore']],'');
+  const zone=Intl.DateTimeFormat().resolvedOptions().timeZone||'ora locale';
+  let points=[],serial=0;
+  const current=()=>token===generation&&host.isConnected;
+  function segments(ps){
+   const out=[];let last=null;
+   for(const p of ps){
+    if(!last||last.device_id!==p.device_id||last.segment!==p.segment||p.timestamp-last.timestamp>300000)out.push([]);
+    out[out.length-1].push(p);last=p;
+   }return out;
+  }
+  function distance(a,b){
+   const rad=Math.PI/180,dlat=(b.latitude-a.latitude)*rad,dlon=(b.longitude-a.longitude)*rad;
+   const h=Math.sin(dlat/2)**2+Math.cos(a.latitude*rad)*Math.cos(b.latitude*rad)*Math.sin(dlon/2)**2;
+   return 6371*2*Math.asin(Math.sqrt(Math.min(1,h)));
+  }
+  function draw(){
+   plot.replaceChildren();if(!points.length){plot.append(paragraph('Nessun punto GPS per il periodo selezionato.'));return}
+   const groups=segments(points),lat0=points[0].latitude*Math.PI/180,lon0=points[0].longitude;
+   const coords=points.map(p=>({x:((((p.longitude-lon0)+540)%360)-180)*Math.max(.01,Math.cos(lat0)),y:-p.latitude}));
+   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+   for(const p of coords){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y)}
+   const span=Math.max(maxX-minX,maxY-minY,.0002),scale=650/span,cx=(maxX+minX)/2,cy=(maxY+minY)/2;
+   const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
+   svg.setAttribute('viewBox','0 0 800 720');svg.setAttribute('width','100%');svg.setAttribute('role','img');svg.setAttribute('aria-label','Tracciato GPS registrato, nord in alto');svg.style.background='#15283b';svg.style.touchAction='none';
+   const make=(tag,attrs)=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);svg.append(n);return n};
+   const project=p=>[400+(p.x-cx)*scale,360+(p.y-cy)*scale];
+   const colors=['#69e0d2','#ffd49a','#a5b4fc','#f9a8d4'];let i=0,km=0;
+   groups.forEach((g,k)=>{
+    const coords2=g.map(()=>project(coords[i++]));
+    for(let j=1;j<g.length;j++)km+=distance(g[j-1],g[j]);
+    if(coords2.length>1)make('polyline',{points:coords2.map(p=>p.join(',')).join(' '),fill:'none',stroke:colors[k%colors.length],'stroke-width':3,'vector-effect':'non-scaling-stroke'});
+    const a=coords2[0],b=coords2[coords2.length-1];make('circle',{cx:a[0],cy:a[1],r:5,fill:'#fff'});make('circle',{cx:b[0],cy:b[1],r:4,fill:colors[k%colors.length]});
+   });
+   let x=0,y=0,w=800,h=720,drag=null;
+   const update=()=>svg.setAttribute('viewBox',[x,y,w,h].join(' '));
+   const zoom=f=>{const nw=w*f,nh=h*f;if(nw<25||nw>3200)return;x+=(w-nw)/2;y+=(h-nh)/2;w=nw;h=nh;update()};
+   svg.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY,x,y];svg.setPointerCapture(e.pointerId)});
+   svg.addEventListener('pointermove',e=>{if(!drag)return;const r=svg.getBoundingClientRect();x=drag[2]-(e.clientX-drag[0])*w/r.width;y=drag[3]-(e.clientY-drag[1])*h/r.height;update()});
+   for(const ev of ['pointerup','pointercancel','lostpointercapture'])svg.addEventListener(ev,()=>drag=null);
+   plot.append(paragraph(points.length+' punti · '+groups.length+' segmenti · '+km.toFixed(1)+' km GPS stimati'),toolbar(btn('+ Zoom',()=>zoom(.7),'small'),btn('− Zoom',()=>zoom(1/.7),'small'),btn('Centra',()=>{x=0;y=0;w=800;h=720;update()},'small')),svg,paragraph('Tracciato geografico schematico senza cartografia esterna; i vuoti non vengono collegati.'));
+   const format=p=>new Date(p.timestamp).toLocaleString('it-IT');
+   plot.append(card('Cronologia dei segmenti',...groups.slice(0,200).map(g=>paragraph(format(g[0])+' — '+format(g[g.length-1])+' · '+g.length+' punti'))));
+  }
+  async function refresh(){
+   const seq=++serial;status.textContent='Caricamento…';plot.replaceChildren();
+   try{
+    let start=0,end=4102444800000;
+    if(date.value){const d=new Date(date.value+'T00:00:00');start=d.getTime();d.setDate(d.getDate()+1);end=d.getTime()}
+    const all=[];let offset=0,r;
+    do{r=await api(url+'?start='+start+'&end='+end+'&limit=5000&offset='+offset);if(!current()||seq!==serial)return;all.push(...r.points);offset=r.next_offset}while(offset!==null&&all.length<50000);
+    const devices=await api(path+'/mobile/devices');if(!current()||seq!==serial)return;
+    picker.replaceChildren(...[['','Nessun registratore'],...devices.filter(d=>!d.revoked&&d.expires*1000>Date.now()).map(d=>[d.id,d.label])].map(([value,label])=>el('option',{value,text:label})));
+    picker.value=r.recorder||'';points=all;
+    status.textContent=offset!==null?'Limite di 50.000 punti: seleziona una giornata.':'Orari nel fuso del browser: '+zone;
+    draw();
+   }catch(e){if(current()&&seq===serial){status.textContent=e.message;report(e)}}
+  }
+  host.append(card('Diario di bordo',paragraph('Un solo telefono può caricare i percorsi del viaggio. La registrazione va avviata sul telefono.'),field('Registratore',picker),btn('Salva registratore',async()=>{try{await api(url+'/recorder',{method:'POST',body:JSON.stringify({device_id:picker.value||null})});if(current())refresh()}catch(e){report(e)}},'small'),field('Giornata (vuoto = intero viaggio)',date),toolbar(btn('Aggiorna',refresh,'primary'),btn('Cancella diario',async()=>{if(!confirm('Eliminare definitivamente lo storico GPS sul server e disattivare il registratore? I punti ancora sul telefono non vengono cancellati.'))return;try{await api(url+'/clear',{method:'POST'});if(current())refresh()}catch(e){report(e)}},'small')),status),plot);
+  date.addEventListener('change',refresh);root.append(host);refresh();
+ }
  function show(root){
   const m=trip.manifest,tr=m.trip,st=trip.state;
   const now=new Date(),today=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0'),delta=Math.round((new Date(tr.start+'T12:00:00')-new Date(today+'T12:00:00'))/86400000);
   const status=delta>0?delta+' giorni alla partenza':today<=tr.end?'In viaggio':'Viaggio concluso';
   const hero=el('section',{class:'travel-hero'+(m.cover?' has-photo':'')},[...(m.cover?[el('img',{class:'travel-cover',src:'data:image/jpeg;base64,'+m.cover.jpeg,alt:'Copertina del viaggio'})]:[]),el('div',{class:'travel-hero-inner'},[node('div','travel-kicker','IL TUO VIAGGIO'),node('h2','',tr.title),node('p','',tr.subtitle||''),el('div',{class:'travel-hero-meta'},[node('span','travel-status',status),node('span','',dayFmt(tr.start)+' — '+dayFmt(tr.end))]),toolbar(btn('Oggi / prossima giornata',()=>{selected=m.days.find(d=>d.date>=today)?.date||m.days[0]?.date;switchTab('giornata')},'primary'),btn('Cambia copertina',coverEditor,'small'))]),...(m.cover?[el('div',{class:'travel-credit'},[m.cover.credit||'',m.cover.license?' · '+m.cover.license:'',safeLink(m.cover.source,'Fonte')])]:[])]);
   root.append(hero);
-  const header=el('nav',{class:'travel-tabs'},[...[['panoramica','Panoramica'],['giornata','Itinerario'],['prenotazioni','Prenotazioni'],['guide','Guide e GPS'],['mappa','Mappa'],['spese','Spese'],['documenti','Documenti']].map(([k,l])=>btn(l,()=>switchTab(k),tab===k?'primary':'small')),el('a',{class:'btn small',href:'api/personal/trips/'+encodeURIComponent(tr.id)+'/export',download:'',text:'Esporta ZIP'})]);
+  const header=el('nav',{class:'travel-tabs'},[...[['panoramica','Panoramica'],['giornata','Itinerario'],['prenotazioni','Prenotazioni'],['guide','Guide e GPS'],['mappa','Mappa'],['diario','Diario di bordo'],['spese','Spese'],['documenti','Documenti']].map(([k,l])=>btn(l,()=>switchTab(k),tab===k?'primary':'small')),el('a',{class:'btn small',href:'api/personal/trips/'+encodeURIComponent(tr.id)+'/export',download:'',text:'Esporta ZIP'})]);
   root.append(header);
   if(tab==='panoramica'){
    const all=m.days.flatMap(d=>d.checks),checked=Object.values(st.checks).reduce((a,x)=>a+x.length,0),next=m.days.find(d=>d.date>=today)||m.days[0];
    root.append(el('div',{class:'travel-metrics'},[[m.days.length,'Giornate','giornata'],[m.bookings.length,'Prenotazioni','prenotazioni'],[allDocs(m).size,'Documenti','documenti'],[checked+'/'+all.length,'Checklist','giornata']].map(([n,l,k])=>el('button',{class:'travel-metric',onclick:()=>switchTab(k)},[node('strong','',String(n)),node('span','',l)]))));
    root.append(el('div',{class:'travel-grid'},[card('Prossima tappa',paragraph(next?dayFmt(next.date)+' · '+[next.place,next.headline].filter(Boolean).join(' — '):'Da pianificare'),paragraph(next?.description),btn('Apri programma',()=>{selected=next?.date;switchTab('giornata')},'primary')),card('Organizza in pochi passaggi',paragraph('Parti da una conferma di prenotazione, da un PDF o da un testo.'),toolbar(btn('Acquisisci con AI',aiEditor,'primary'),btn('+ Prenotazione',()=>bookingEdit({},-1),'small')),btn('Aggiungi spesa',()=>expenseEditor(),'small')),card('Guide per il viaggio',...m.guides.slice(0,4).map(g=>el('div',{class:'travel-mini'},[node('strong','',g.title),doc(g.doc,'PDF')])),btn('Tutte le guide',()=>switchTab('guide'),'small')),card('Prenotazioni',...m.bookings.slice(0,4).map(b=>el('div',{class:'travel-mini'},[node('strong','',b.title),navLink(b)])),btn('Tutte le prenotazioni',()=>switchTab('prenotazioni'),'small'))]));
+  }else if(tab==='diario'){
+   diaryView(root,tr);
   }else if(tab==='mappa'){
    root.append(card('Mappa e navigazione',paragraph('Apri le destinazioni sul navigatore. Le coordinate sono disponibili dopo la ricerca e la conferma di un luogo.')));
    for(const [i,b] of m.bookings.entries())root.append(card(b.title,paragraph(b.place||'Luogo originale non definito'),...(b.locations||[]).map(locationLine),toolbar(navLink(b),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'))));

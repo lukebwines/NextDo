@@ -6,6 +6,12 @@ import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.delay
+import org.json.JSONArray
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
@@ -304,7 +310,8 @@ class MainActivity : ComponentActivity() {
         task({ TripPackage.parse(vault.read("offline")) }) { openTrip(it, true) }
     }
     private fun forget() {
-        task({ vault.clear() }) { lockLocal() }
+        DiaryState.stop(this)
+        task({ DiaryStore(this).use { it.discardAll() };vault.clear() }) { lockLocal() }
     }
     private fun viewPdf(name: String) {
         val t = current ?: return
@@ -380,12 +387,13 @@ class MainActivity : ComponentActivity() {
             },
             bottomBar = {
                 if(t != null && !locked && pdf == null) NavigationBar(containerColor=Panel) {
-                    listOf("Home","Oggi","Prenota","PDF","Guide").forEach { label ->
+                    listOf("Home","Oggi","Prenota","PDF","Guide","Diario").forEach { label ->
                         val image = when(label) {
                             "Home" -> Icons.Default.Home
                             "Oggi" -> Icons.Default.CalendarToday
                             "Prenota" -> Icons.Default.ConfirmationNumber
                             "PDF" -> Icons.Default.Folder
+                            "Diario" -> Icons.Default.Place
                             else -> Icons.Default.Book
                         }
                         NavigationBarItem(selected=section==label,onClick={section=label},icon={Icon(image,label)},label={Text(label,fontSize=11.sp)},
@@ -413,6 +421,7 @@ class MainActivity : ComponentActivity() {
                             "Prenota" -> BookingScreen(t)
                             "PDF" -> Documents(t)
                             "Guide" -> Guides(t)
+                            "Diario" -> DiaryScreen(t)
                         }
                     }
                     else -> ConnectionScreen()
@@ -449,6 +458,79 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun Action(text: String, enabled: Boolean=!busy, onClick: () -> Unit) {
         Button(onClick=onClick,enabled=enabled,shape=RoundedCornerShape(15.dp)) { Text(text,fontWeight=FontWeight.SemiBold) }
+    }
+    private val diaryPermission=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+    private var diaryMessage by mutableStateOf("")
+    private fun diaryStart(t:TripPackage) {
+        if(!DiaryState.precise(this)){
+            diaryPermission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION))
+            diaryMessage="Autorizza la posizione precisa, poi premi di nuovo Avvia."
+            return
+        }
+        if(!DiaryState.notifications(this)){
+            if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
+                diaryPermission.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            else startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName))
+            diaryMessage="Abilita le notifiche, poi premi di nuovo Avvia."
+            return
+        }
+        val cfg=connection ?: return
+        val s=session
+        if(s.isBlank()){error="Accedi al server prima di avviare il diario.";return}
+        task({
+            val a=TravelApi(cfg.getString("url"))
+            require(a.obj("/trips/"+segment(t.id)+"/diary",s).optBoolean("can_record")){"Seleziona questo telefono come registratore nel diario web."}
+            DiaryStore.scope(cfg)
+        }){scope ->
+            try{DiaryState.start(this,scope,t.id);diaryMessage="Avvio richiesto. Controlla la notifica di registrazione."}
+            catch(e:Exception){error=e.message.orEmpty()}
+        }
+    }
+    private fun diarySync(t:TripPackage) {
+        val cfg=connection ?: return
+        if(session.isBlank()){diaryMessage="I punti restano sul telefono. Accedi al server per sincronizzare.";return}
+        val s=session
+        task({
+            val scope=DiaryStore.scope(cfg);val api=TravelApi(cfg.getString("url"))
+            DiaryStore(this).use { db ->
+                var total=0
+                repeat(20){
+                    val points=db.batch(scope,t.id)
+                    if(points.isEmpty())return@use total
+                    val a=JSONArray();points.forEach{a.put(it)}
+                    val result=api.obj("/trips/"+segment(t.id)+"/diary/points",s,JSONObject().put("points",a))
+                    require(result.optInt("accepted")==points.size){"Lotto non confermato"}
+                    db.ack(scope,t.id,points);total+=points.size
+                }
+                total
+            }
+        }){n -> diaryMessage="Sincronizzati "+n+" punti. Eventuali punti rimanenti restano salvati."}
+    }
+    @Composable private fun DiaryScreen(t:TripPackage) {
+        var pending by remember(t.id){mutableStateOf(0)}
+        var running by remember(t.id){mutableStateOf(false)}
+        var wanted by remember(t.id){mutableStateOf(false)}
+        val cfg=connection
+        LaunchedEffect(t.id,cfg){
+            while(true){
+                running=DiaryState.running && DiaryState.trip(this@MainActivity)==t.id
+                wanted=DiaryState.wanted(this@MainActivity) && DiaryState.trip(this@MainActivity)==t.id
+                if(cfg!=null) pending=withContext(Dispatchers.IO){DiaryStore(this@MainActivity).use{it.count(DiaryStore.scope(cfg),t.id)}}
+                delay(2000)
+            }
+        }
+        TravelCard("Diario di bordo",if(running)"Registrazione attiva" else if(wanted)"Registrazione interrotta · riprendi" else "Registrazione sospesa"){
+            Text("Punti da sincronizzare: "+pending,color=Muted)
+            Text("Il GPS si attiva solo su richiesta. Puoi interromperlo anche dalla notifica. Il diario continua offline.",color=Muted)
+            if(running || wanted) Action("Sospendi",!busy){DiaryState.stop(this);diaryMessage="Diario sospeso"}
+            if(!running)Action("Avvia / riprendi",!busy && cfg!=null){diaryStart(t)}
+            Action("Sincronizza con NextDo",!busy && session.isNotBlank() && pending>0){diarySync(t)}
+            if(!DiaryState.background(this))TextButton(onClick={
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+packageName)))
+            }){Text("Autorizza posizione sempre per ripresa dopo riavvio")}
+            if(diaryMessage.isNotBlank())Text(diaryMessage,color=Sand)
+            Text("La mappa dello storico è consultabile nel portale web. La sincronizzazione richiede una sessione sbloccata.",color=Muted)
+        }
     }
     @Composable private fun LockedScreen() {
         Box(Modifier.fillMaxWidth().height(260.dp).clip(RoundedCornerShape(28.dp)).background(Brush.linearGradient(listOf(Color(0xFF1B5271),Color(0xFF163E4B),Panel))), contentAlignment=Alignment.Center) {

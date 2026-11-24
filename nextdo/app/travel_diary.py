@@ -46,6 +46,13 @@ def register(app,*,db,allowed,auth,load):
                     fail(400,"Dispositivo non disponibile")
                 c.execute("INSERT OR REPLACE INTO diary_recorders VALUES(?,?,?)",(owner,tid,device))
         return {"ok":True}
+    @app.get("/api/mobile/v1/trips/{tid}/diary")
+    def mobile_status(tid:str,req:Request):
+        device=auth(req);owner=device["owner"]
+        with db() as c:
+            load(c,owner,tid)
+            row=c.execute("SELECT device_id FROM diary_recorders WHERE owner=? AND trip_id=?",(owner,tid)).fetchone()
+            return {"can_record":bool(row and row["device_id"]==device["id"])}
     @app.post("/api/mobile/v1/trips/{tid}/diary/points")
     def upload(tid:str,req:Request,b:dict):
         device=auth(req);owner=device["owner"];did=device["id"]
