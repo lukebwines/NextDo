@@ -241,7 +241,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  @app.middleware("http")
  async def private_cache(req:Request,call_next):
   res=await call_next(req)
-  if req.url.path.startswith(("/api/personal/","/api/mobile/v1/")):
+  if req.url.path.startswith(("/api/personal/","/api/mobile/v1/","/api/work-mobile/")):
    res.headers["Cache-Control"]="no-store, private"
    res.headers["Referrer-Policy"]="no-referrer"
    res.headers["X-Content-Type-Options"]="nosniff"

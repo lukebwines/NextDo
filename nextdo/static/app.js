@@ -51,6 +51,7 @@ function render(){
 function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:t.status==='review'?'Verificare la scadenza prima di completarla':'Completa attività'});if(t.can_complete===false||t.status==='review')cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[node('div','tasktitle',t.title),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),...(t.kind==='appointment'?[tag('Appuntamento')]:t.kind==='task'?[tag('Scadenza')]:[]),...(t.status==='review'?[tag('Da verificare','high')]:[]),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit);return row}
 function dashboard(main){
  main.classList.add('dashboard-page');
+ main.append(el('div',{class:'toolbar'},[btn('NextDo Android · Professionale',workMobileEditor,'small')]));
  const agendaItems=S.tasks.filter(t=>['task','appointment'].includes(t.kind));
  const pending=agendaItems.filter(t=>t.status!=='done');
  const urgent=pending.filter(t=>['high','critical'].includes(t.priority));
@@ -663,3 +664,11 @@ function userForm(){
 }
 function displayForm(){const {box}=modal('Crea un monitor NextDo');const name=input('name','Nome monitor'),group=select('group_id',[['','Tutti i gruppi con attività pubblicate'],...S.groups.map(g=>[String(g.id),g.name])]);box.append(field('Nome schermo',name),field('Filtro gruppo',group),btn('Genera link',async()=>{try{const d=await api('/displays',{method:'POST',body:JSON.stringify({name:name.value,group_id:group.value?Number(group.value):null})});const url=new URL('display/'+encodeURIComponent(d.token),location.href).href;box.append(el('p',{class:'message',text:'Copia il link e custodiscilo: chiunque lo possieda può visualizzare le scadenze pubblicate.'}),el('textarea',{class:'field code',rows:'4',readonly:'',value:url}));msg('Monitor creato')}catch(e){msg(e.message,true)}},'primary'))}
 init().catch(e=>{$('app').replaceChildren(node('div','authbox','Errore di avvio: '+e.message))});
+
+async function workMobileEditor(){
+ const {box,back}=modal('NextDo Android · Professionale');
+ const code=node('p','sub','Genera un codice monouso valido 5 minuti. Il dispositivo avrà accesso in sola lettura alle scadenze e agli appuntamenti visibili nel tuo account, per 30 giorni. L’associazione Viaggi non cambia.');
+ const list=el('div');
+ const refresh=async()=>{try{const devices=await api('/work-mobile/devices');list.replaceChildren();for(const d of devices){list.append(el('div',{class:'rowtask'},[node('div','taskmain',d.label+' · '+(d.revoked?'Revocato':d.expires*1000<=Date.now()?'Scaduto':'Attivo fino al '+new Date(d.expires*1000).toLocaleString('it-IT'))),...(!d.revoked?[btn('Revoca',async()=>{if(!confirm('Revocare questo dispositivo professionale?'))return;try{await api('/work-mobile/devices/'+encodeURIComponent(d.id)+'/revoke',{method:'POST'});await refresh()}catch(e){msg(e.message,true)}},'small')]:[])]))}}catch(e){msg(e.message,true)}};
+ box.append(code,btn('Genera codice',async()=>{try{const r=await api('/work-mobile/pair',{method:'POST'});const inputCode=el('input',{class:'field',value:r.code,readonly:'readonly'});code.replaceChildren(document.createTextNode('Codice monouso (5 minuti): '),inputCode);inputCode.select()}catch(e){msg(e.message,true)}},'primary'),list,btn('Chiudi',()=>back.remove(),'small'));await refresh();
+}
