@@ -22,3 +22,6 @@ Niente modifiche alle prenotazioni/checklist sul server, promemoria push, AI o s
 
 ## Sblocco biometrico (0.1.1-test)
 Prompt biometrico di sistema Android con biometria forte (impronta se disponibile) oppure PIN, password o sequenza del telefono. Nessuna impronta acquisita dall’app. Blocco in background e dopo 5 minuti dallo sblocco. Il PIN NextDo resta obbligatorio per la sessione server. Collaudare impronta, annullamento, fallback e offline sul dispositivo reale. Non richiede un aggiornamento server ulteriore rispetto a 0.1.34-test.
+
+## Accesso ricordato (Android 0.1.3-test / server 0.1.35-test)
+Il primo PIN NextDo rilascia un segreto casuale dedicato al dispositivo, cifrato con il Keystore Android e conservato sul server solo come hash. Non viene conservato il PIN. Lo sblocco locale tenta automaticamente una nuova sessione di lettura di 5 minuti. Il segreto scade al massimo dopo 30 giorni e non oltre l'associazione; la revoca elimina le sessioni e il segreto. In caso di mancata connessione l'archivio offline resta disponibile. La riassociazione o un nuovo PIN possono essere necessari alla scadenza. Test fisico e HTTPS richiesti.

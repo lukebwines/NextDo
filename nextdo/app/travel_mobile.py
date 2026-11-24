@@ -16,6 +16,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
   c.executescript("""CREATE TABLE IF NOT EXISTS mobile_pairings(code_hash TEXT PRIMARY KEY,owner TEXT NOT NULL,expires REAL NOT NULL);
   CREATE TABLE IF NOT EXISTS mobile_devices(id TEXT PRIMARY KEY,owner TEXT NOT NULL,label TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,expires REAL NOT NULL,created REAL NOT NULL,revoked INTEGER DEFAULT 0);
   CREATE TABLE IF NOT EXISTS mobile_sessions(token_hash TEXT PRIMARY KEY,device_id TEXT NOT NULL,expires REAL NOT NULL);
+  CREATE TABLE IF NOT EXISTS mobile_trust(device_id TEXT PRIMARY KEY,token_hash TEXT NOT NULL,expires REAL NOT NULL);
   """)
  def active(owner):
   with conn() as c:
@@ -25,6 +26,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
   now=time.time()
   c.execute("DELETE FROM mobile_pairings WHERE expires<=?",(now,))
   c.execute("DELETE FROM mobile_sessions WHERE expires<=?",(now,))
+  c.execute("DELETE FROM mobile_trust WHERE expires<=?",(now,))
  def auth(req,session=True):
   h=req.headers.get("authorization","")
   if not h.startswith("Bearer "):fail(401,"Accesso dispositivo richiesto")
@@ -54,6 +56,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
    r=c.execute("UPDATE mobile_devices SET revoked=1 WHERE id=? AND owner=?",(device_id,owner))
    if not r.rowcount:fail(404,"Dispositivo non trovato")
    c.execute("DELETE FROM mobile_sessions WHERE device_id=?",(device_id,))
+   c.execute("DELETE FROM mobile_trust WHERE device_id=?",(device_id,))
   return {"ok":True}
  @app.post("/api/mobile/v1/pair")
  def pair(b:dict):
@@ -72,7 +75,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
  def unlock(req:Request,b:dict):
   device=auth(req,False);owner=device["owner"];pin=b.get("pin")
   if not isinstance(pin,str) or not re.fullmatch(r"[0-9]{6}",pin):fail(400,"PIN di 6 cifre richiesto")
-  error=None;raw=token()
+  error=None;raw=token();remember=token() if b.get("remember") is True else None
   with db() as c:
    r=c.execute("SELECT * FROM pins WHERE owner=?",(owner,)).fetchone()
    if not r:fail(403,"Impostare il PIN dall'area personale web")
@@ -87,9 +90,25 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive):
     else:
      c.execute("UPDATE pins SET attempts=0,blocked_until=0 WHERE owner=?",(owner,))
      clean(c)
+     if not c.execute("SELECT 1 FROM mobile_devices WHERE id=? AND revoked=0 AND expires>?",(device["id"],time.time())).fetchone():fail(401,"Dispositivo non autorizzato")
+     if remember:
+      c.execute("INSERT OR REPLACE INTO mobile_trust VALUES(?,?,?)",(device["id"],digest(remember),min(device["expires"],time.time()+30*86400)))
+     else:c.execute("DELETE FROM mobile_trust WHERE device_id=?",(device["id"],))
      c.execute("DELETE FROM mobile_sessions WHERE device_id=?",(device["id"],))
      c.execute("INSERT INTO mobile_sessions VALUES(?,?,?)",(digest(raw),device["id"],time.time()+300))
   if error:fail(*error)
+  result={"session_token":raw,"expires_in":300}
+  if remember:result["remember_token"]=remember
+  return result
+ @app.post("/api/mobile/v1/resume")
+ def resume(req:Request,b:dict):
+  device=auth(req,False);hashed=raw_token(b.get("remember_token"));raw=token()
+  with db() as c:
+   clean(c)
+   row=c.execute("SELECT t.token_hash FROM mobile_trust t JOIN mobile_devices d ON d.id=t.device_id WHERE t.device_id=? AND t.expires>? AND d.expires>? AND d.revoked=0",(device["id"],time.time(),time.time())).fetchone()
+   if not row or not secrets.compare_digest(row["token_hash"],hashed):fail(401,"Verifica PIN NextDo necessaria")
+   c.execute("DELETE FROM mobile_sessions WHERE device_id=?",(device["id"],))
+   c.execute("INSERT INTO mobile_sessions VALUES(?,?,?)",(digest(raw),device["id"],time.time()+300))
   return {"session_token":raw,"expires_in":300}
  @app.post("/api/mobile/v1/lock")
  def lock(req:Request):
