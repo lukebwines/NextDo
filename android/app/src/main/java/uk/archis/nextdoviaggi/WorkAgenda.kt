@@ -1,6 +1,7 @@
 package uk.archis.nextdoviaggi
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -56,11 +57,23 @@ private val SandWork=Color(0xFFFFD49A)
 private val MutedWork=Color(0xFFADC1D2)
 private val PanelWork=Color(0xFF172B3D)
 private val RedWork=Color(0xFFFF9595)
-private fun statusName(value:String)=when(value){"review"->"Da verificare";"todo"->"Da fare";"doing"->"In corso";"waiting"->"In attesa";"done"->"Completata";else->value}
+internal fun workMatches(t:WorkItem,filter:String):Boolean=when(filter){
+    "tasks"->t.kind=="task"
+    "appointments"->t.kind=="appointment"
+    "todo"->t.status=="todo"
+    "urgent"->t.urgent
+    "review"->t.status=="review"
+    "late"->t.overdue&&t.kind=="task"
+    "past"->t.overdue&&t.kind=="appointment"
+    "undated"->t.day.isBlank()
+    else->true
+}
+internal fun orderedWork(items:List<WorkItem>)=items.sortedWith(compareBy<WorkItem>{if(it.overdue)0 else if(it.urgent)1 else if(it.status=="review")2 else 3}.thenBy{it.day.ifBlank{"9999"}}.thenBy{it.instant}.thenBy{it.id})
+internal fun statusName(value:String)=when(value){"review"->"Da verificare";"todo"->"Da fare";"doing"->"In corso";"waiting"->"In attesa";"done"->"Completata";else->value}
 private fun priorityName(value:String)=when(value){"critical"->"Critica";"high"->"Alta";"low"->"Bassa";else->"Normale"}
 @Composable
-private fun WorkCard(title:String,body:@Composable ColumnScope.()->Unit){
-    Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(20.dp),colors=CardDefaults.cardColors(containerColor=PanelWork)){
+private fun WorkCard(title:String,action:(()->Unit)?=null,body:@Composable ColumnScope.()->Unit){
+    Card(Modifier.fillMaxWidth().then(if(action!=null)Modifier.clickable(onClick=action) else Modifier),shape=RoundedCornerShape(20.dp),colors=CardDefaults.cardColors(containerColor=PanelWork)){
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text(title,color=Blue,fontWeight=FontWeight.Bold,fontSize=18.sp)
             body()
@@ -68,11 +81,11 @@ private fun WorkCard(title:String,body:@Composable ColumnScope.()->Unit){
     }
 }
 @Composable
-internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:String,defaultUrl:String,onPair:(String,String)->Unit,onRefresh:()->Unit,onDetail:(Long)->Unit,onDisconnect:()->Unit,onAck:(Long,String)->Unit){
+internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:String,defaultUrl:String,onPair:(String,String)->Unit,onRefresh:()->Unit,onDetail:(Long)->Unit,onDisconnect:()->Unit,onAck:(Long,String)->Unit,initialFilter:String="all"){
     var url by remember(defaultUrl){mutableStateOf(defaultUrl)}
     var code by remember{mutableStateOf("")}
     var confirm by remember{mutableStateOf(false)}
-    var filter by remember{mutableStateOf("week")}
+    var filter by remember(initialFilter){mutableStateOf(initialFilter)}
     var chosen by remember{mutableStateOf("")}
     var offset by remember{mutableIntStateOf(0)}
     var visible by remember(filter,chosen,offset){mutableIntStateOf(50)}
@@ -100,6 +113,16 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
     val sunday=monday.plusDays(6)
     val items=agenda.items
     fun inWeek(t:WorkItem)=t.day.isNotBlank()&&t.day>=monday.toString()&&t.day<=sunday.toString()
+    WorkCard("Attività aperte"){ 
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+            OutlinedButton(onClick={filter="todo";chosen=""},modifier=Modifier.weight(1f)){Text("Da fare "+items.count{it.status=="todo"},fontSize=12.sp)}
+            OutlinedButton(onClick={filter="tasks";chosen=""},modifier=Modifier.weight(1f)){Text("Scadenze "+items.count{it.kind=="task"},fontSize=12.sp)}
+        }
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+            OutlinedButton(onClick={filter="appointments";chosen=""},modifier=Modifier.weight(1f)){Text("Appuntamenti "+items.count{it.kind=="appointment"},fontSize=12.sp)}
+            OutlinedButton(onClick={filter="all";chosen=""},modifier=Modifier.weight(1f)){Text("Tutte "+items.size,fontSize=12.sp)}
+        }
+    }
     WorkCard("Settimana"){
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){
             TextButton(onClick={offset--;chosen="";filter="week"}){Text("‹")}
@@ -138,12 +161,12 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
             OutlinedButton(onClick={filter="undated";chosen=""},modifier=Modifier.weight(1f)){Text("Senza data "+items.count{it.day.isBlank()},fontSize=12.sp)}
         }
     }
-    val label=when(filter){"urgent"->"Urgenti";"review"->"Da verificare";"late"->"Scadute";"past"->"Appuntamenti trascorsi";"all"->"Tutte le voci aperte";"undated"->"Senza data";else->chosen.ifBlank{"Scadenze e appuntamenti della settimana"}}
-    val shown=items.filter{t->when(filter){"urgent"->t.urgent;"review"->t.status=="review";"late"->t.overdue&&t.kind=="task";"past"->t.overdue&&t.kind=="appointment";"all"->true;"undated"->t.day.isBlank();else->inWeek(t)&&(chosen.isBlank()||t.day==chosen)}}.sortedWith(compareBy<WorkItem>{it.day.ifBlank{"9999"}}.thenBy{it.instant}.thenBy{it.id})
+    val label=when(filter){"tasks"->"Scadenze e attività";"appointments"->"Appuntamenti";"todo"->"Da fare";"urgent"->"Urgenti";"review"->"Da verificare";"late"->"Scadute";"past"->"Appuntamenti trascorsi";"all"->"Tutte le voci aperte";"undated"->"Senza data";else->chosen.ifBlank{"Scadenze e appuntamenti della settimana"}}
+    val shown=orderedWork(items.filter{t->if(filter=="week")inWeek(t)&&(chosen.isBlank()||t.day==chosen) else workMatches(t,filter)})
     Text(label+" · "+shown.size,fontSize=18.sp,fontWeight=FontWeight.Bold)
     if(shown.isEmpty())Text("Nessuna voce in questo filtro.",color=MutedWork)
     for(t in shown.take(visible)){
-        WorkCard(t.title){
+        WorkCard(t.title,if(!busy){{onDetail(t.id)}} else null){
             Text((if(t.kind=="appointment")"Appuntamento" else "Scadenza")+" · "+t.timeLabel,color=MutedWork,fontSize=13.sp)
             Text(statusName(t.status)+" · Priorità "+priorityName(t.priority)+(if(t.overdue)if(t.kind=="task")" · Scaduta" else " · Trascorso" else ""),color=if(t.overdue)RedWork else if(t.urgent||t.status=="review")SandWork else Blue,fontSize=12.sp)
             if(t.acknowledged)Text("Presa visione sincronizzata",color=Blue,fontSize=12.sp)
