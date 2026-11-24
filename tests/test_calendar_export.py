@@ -77,7 +77,7 @@ def test_ics_escaping_folding_timezone_and_uid():
  assert r"LOCATION:Sala A\, B" in body
  uid=next(x for x in body.split("\r\n") if x.startswith("UID:"))
  task["title"]="Modificato";task["due_at"]="2026-07-02T09:30:00"
- assert uid in calendar_export.calendar([task],tz,False,now)
+ assert uid in unfold(calendar_export.calendar([task],tz,False,now))
  task["due_at"]="2026-10-25T02:30:00"
  assert not calendar_export.eligible(task,tz)
  task["due_at"]="2026-03-29T02:30:00"
