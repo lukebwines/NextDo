@@ -1,5 +1,5 @@
 'use strict';
-const S={me:null,csrf:'',tasks:[],courses:[],groups:[],users:[],view:'dashboard',editing:null,month:new Date(),light:localStorage.getItem('nextdo-light')==='1',listPreset:'all',labelFilter:'',searchTerm:'',projects:[],courseAssignees:[],collaborators:[],courseCollaborators:[],myCourseIds:[],selectedProject:null,projectMode:localStorage.getItem('nextdo-project-view')==='gantt'?'gantt':'kanban',ganttZoom:localStorage.getItem('nextdo-gantt-zoom')||'normal'};
+const S={me:null,csrf:'',tasks:[],courses:[],groups:[],users:[],view:'dashboard',settingsTab:'general',dayFilter:'',editing:null,month:new Date(),light:localStorage.getItem('nextdo-light')==='1',listPreset:'all',labelFilter:'',searchTerm:'',projects:[],courseAssignees:[],collaborators:[],courseCollaborators:[],myCourseIds:[],selectedProject:null,projectMode:localStorage.getItem('nextdo-project-view')==='gantt'?'gantt':'kanban',ganttZoom:localStorage.getItem('nextdo-gantt-zoom')||'normal'};
 const $=id=>document.getElementById(id), priority={low:'Bassa',normal:'Normale',high:'Alta',critical:'Critica'}, statuses={review:'Da verificare',todo:'Da fare',doing:'In corso',waiting:'In attesa',done:'Completata'};
 function el(tag,attrs={},children=[]){const n=document.createElement(tag);for(const [k,v] of Object.entries(attrs)){if(k==='class')n.className=v;else if(k==='text')n.textContent=v;else if(k==='html')throw Error('Unsafe HTML');else if(k.startsWith('on'))n.addEventListener(k.slice(2),v);else if(k==='value')n.value=v;else if(k==='checked')n.checked=!!v;else if(k==='style')n.setAttribute('style',v);else n.setAttribute(k,v)}for(const c of (Array.isArray(children)?children:[children]))if(c!=null)n.append(typeof c==='string'?document.createTextNode(c):c);return n}
 function node(tag,cls,txt){return el(tag,{class:cls,text:txt})}
@@ -11,10 +11,26 @@ const select=(name,options,value='')=>{const s=el('select',{class:'field',name})
 const wrap=(...x)=>el('div',{},x);const btn=(text,fn,cls='')=>el('button',{type:'button',class:'btn '+cls,onclick:fn,text});
 function fmt(d){if(!d)return 'Senza data';if(/^\d{4}-\d{2}-\d{2}$/.test(d)){const [y,m,day]=d.split('-').map(Number);return new Date(y,m-1,day).toLocaleDateString('it-IT',{dateStyle:'medium'})}const dt=new Date(d);return isNaN(dt)?d:dt.toLocaleString('it-IT',{dateStyle:'medium',timeStyle:'short'})}
 function tag(text,cls=''){return node('span','pill '+cls,text)}
-function today(){return new Date().toISOString().slice(0,10)}
+function localDay(d=new Date()){return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')}
+function today(){return localDay()}
+function dueDay(t){if(!t.due_at)return '';const d=t.due_at;if(/^\d{4}-\d{2}-\d{2}$/.test(d))return d;const dt=new Date(d);return isNaN(dt)?'':localDay(dt)}
+function dayOffset(n){const d=new Date();d.setDate(d.getDate()+n);return localDay(d)}
+function agendaMatch(t,preset){
+ const d=dueDay(t),open=t.status!=='done';
+ return preset==='all'||(preset==='done'&&!open)||(open&&(
+ (preset==='review'&&t.status==='review')||(preset==='urgent'&&['high','critical'].includes(t.priority))||
+ (preset==='overdue'&&!!d&&d<today())||(preset==='today'&&d===today())||
+ (preset==='tomorrow'&&d===dayOffset(1))||(preset==='week'&&d>=today()&&d<=dayOffset(6))||
+ (preset==='future'&&d>dayOffset(6))||(preset==='undated'&&!d)));
+}
+function agendaOrder(a,b){return (dueDay(a)||'9999').localeCompare(dueDay(b)||'9999')||(a.due_at||'').localeCompare(b.due_at||'')||a.id-b.id}
+function agendaOpen(preset='all',day=''){S.searchTerm='';changeView('agenda',preset,'',null,day)}
+function settingsOpen(tab='general'){S.settingsTab=tab;changeView('settings')}
+function brand(){return el('img',{class:'nextdo-brand',src:'assets/nextdo.svg',alt:'',width:'44',height:'44'})}
+function themeButton(){const b=btn(S.light?'Tema scuro':'Tema chiaro',()=>{S.light=!S.light;localStorage.setItem('nextdo-light',S.light?'1':'0');document.body.classList.toggle('light',S.light);b.textContent=S.light?'Tema scuro':'Tema chiaro'},'small');return b}
 function dtLocal(raw){if(!raw)return '';if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return raw+'T12:00';const d=new Date(raw);if(isNaN(d))return raw.slice(0,16);const z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,16)}
 async function init(){document.body.classList.toggle('light',S.light);const csrf=await api('/csrf');S.csrf=csrf.csrf;const setup=await api('/setup');if(setup.needs_setup)return loginView(true);try{S.me=await api('/me');if(new URLSearchParams(location.search).get('gmail')==='connected')S.view='settings';await refresh();render()}catch{loginView(false)}}
-function loginView(setup){const box=el('form',{class:'authbox'});box.append(node('div','logo','✓ NextDo'),node('h1','',setup?'Prima configurazione':'Accedi'),node('p','sub',setup?'Crea il primo account amministratore. La password deve avere almeno 12 caratteri.':'Usa le credenziali personali NextDo.'));const u=input('username','Nome utente');const p=input('password','Password','','password');box.append(field('Nome utente',u));if(setup)box.append(field('Nome visualizzato',input('display_name','Nome visualizzato')));box.append(field('Password',p));if(setup)box.append(field('Codice installazione (visibile nei log NextDo)',input('setup_token','Codice locale di prima attivazione')));const submit=el('button',{class:'btn primary',type:'submit',style:'width:100%;margin-top:20px',text:setup?'Crea amministratore':'Accedi'});box.append(submit);box.addEventListener('submit',async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(box));if(setup){await api('/setup',{method:'POST',body:JSON.stringify(data)});msg('Amministratore creato: effettua l’accesso');loginView(false)}else{await api('/login',{method:'POST',body:JSON.stringify({...data,display_name:''})});S.me=await api('/me');await refresh();render()}}catch(e){msg(e.message,true)}});$('app').replaceChildren(box)}
+function loginView(setup){const box=el('form',{class:'authbox'});box.append(el('div',{class:'logo'},[brand(),node('span','name','NextDo')]),node('h1','',setup?'Prima configurazione':'Accedi'),node('p','sub',setup?'Crea il primo account amministratore. La password deve avere almeno 12 caratteri.':'Usa le credenziali personali NextDo.'));const u=input('username','Nome utente');const p=input('password','Password','','password');box.append(field('Nome utente',u));if(setup)box.append(field('Nome visualizzato',input('display_name','Nome visualizzato')));box.append(field('Password',p));if(setup)box.append(field('Codice installazione (visibile nei log NextDo)',input('setup_token','Codice locale di prima attivazione')));const submit=el('button',{class:'btn primary',type:'submit',style:'width:100%;margin-top:20px',text:setup?'Crea amministratore':'Accedi'});box.append(submit);box.addEventListener('submit',async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(box));if(setup){await api('/setup',{method:'POST',body:JSON.stringify(data)});msg('Amministratore creato: effettua l’accesso');loginView(false)}else{await api('/login',{method:'POST',body:JSON.stringify({...data,display_name:''})});S.me=await api('/me');await refresh();render()}}catch(e){msg(e.message,true)}});$('app').replaceChildren(box)}
 async function refresh(){
  const out=await Promise.all([api('/tasks'),api('/courses'),api('/groups'),api('/users'),api('/projects'),api('/my-courses')]);
  [S.tasks,S.courses,S.groups,S.users,S.projects,S.myCourseIds]=out;
@@ -23,54 +39,104 @@ async function refresh(){
 }
 const iconDefs={paperclip:['M21.44 11.05l-8.49 8.49a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.4a2 2 0 0 1-2.83-2.83l8.49-8.49'],check:['M9 11l3 3L22 4','M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'],home:['M3 10l9-7 9 7','M5 9v12h14V9','M9 21v-8h6v8'],list:['M8 6h13','M8 12h13','M8 18h13','M3 6h.01','M3 12h.01','M3 18h.01'],calendar:['M8 2v4','M16 2v4','M3 10h18','M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2z'],note:['M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-5-5H8z','M16 3v5h5','M8 13h8','M8 17h5'],archive:['M3 4h18v5H3z','M5 9v12h14V9','M10 13h4'],settings:['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8','M4 12a8 8 0 0 1 16 0 8 8 0 0 1-16 0'],bell:['M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9','M10 21h4'],search:['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16','M21 21l-4.35-4.35'],user:['M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2','M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8'],clock:['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20','M12 6v6l4 2'],alert:['M12 3L2 21h20L12 3z','M12 9v4','M12 17h.01'],tag:['M3 3h8l10 10-8 8L3 11V3z','M7 7h.01'],plus:['M12 5v14','M5 12h14'],chevron:['M9 18l6-6-6-6']};
 function ico(name,cls=''){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','2');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');svg.setAttribute('class','ico '+cls);svg.setAttribute('aria-hidden','true');for(const d of iconDefs[name]||iconDefs.check){const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',d);svg.append(p)}return svg}
-function changeView(view,preset='all',label='',projectId=null){if(S.view==='personal'&&view!=='personal')NextDoPersonal.lock();if(view==='projects')S.selectedProject=projectId;S.view=view;S.listPreset=preset;S.labelFilter=label;render()}
+function changeView(view,preset='all',label='',projectId=null,day=''){S.dayFilter=day;if(S.view==='personal'&&view!=='personal')NextDoPersonal.lock();if(view==='projects')S.selectedProject=projectId;S.view=view;S.listPreset=preset;S.labelFilter=label;render()}
 function render(){
  const app=$('app');app.replaceChildren();
  const layout=el('div',{class:'app'}),sidebar=el('aside',{class:'sidebar'}),main=el('main',{class:'main'});
- const logo=el('div',{class:'logo'},[el('span',{class:'brandmark'},[ico('check')]),el('span',{},[node('span','name','NextDo'),node('small','brand-sub','Tasks, Notes & Deadlines')])]);
+ const logo=el('div',{class:'logo'},[brand(),el('span',{},[node('span','name','NextDo'),node('small','brand-sub','Tasks · Note · Agenda')])]);
  sidebar.append(logo);
- const navs=[['dashboard','home','Dashboard'],['mine','note','Il mio spazio'],['tasks','list','Scadenze'],['appointments','calendar','Appuntamenti'],['projects','archive','Progetti'],['calendar','calendar','Calendario'],['notes','note','Note'],['courses','calendar','Corsi di Studio'],['archive','archive','Archivio'],['personal','user','Area personale'],['settings','settings','Impostazioni']];
- for(const [id,icon,title] of navs)sidebar.append(el('button',{class:'nav '+(S.view===id?'active':''),onclick:()=>changeView(id)},[ico(icon),node('span','navtext',title)]));
+ const menu=el('button',{type:'button',class:'mobile-nav-toggle','aria-expanded':'false','aria-label':'Apri menu'},[ico('list'),node('span','','Menu')]);
+ const navContainer=el('nav',{class:'nav-sections','aria-label':'Navigazione principale'});
+ menu.addEventListener('click',()=>{const open=sidebar.classList.toggle('menu-open');menu.setAttribute('aria-expanded',String(open))});sidebar.append(menu,navContainer);
+ const reviewCount=S.tasks.filter(t=>['task','appointment'].includes(t.kind)&&t.status==='review').length;
+ const groups=[
+ ['OPERATIVITÀ',[['dashboard','home','Dashboard'],['calendar','calendar','Calendario'],['agenda','clock','Agenda'],['tasks','list','Attività e scadenze'],['appointments','calendar','Appuntamenti'],['review','alert','Da verificare'],['notes','note','Note']]],
+ ['ORGANIZZAZIONE',[['projects','archive','Progetti'],['courses','calendar','Corsi di Studio'],['archive','archive','Archivio']]],
+ ['SPAZIO PERSONALE',[['mine','note','Il mio spazio'],['personal','user','Area personale']]],
+ ['STRUMENTI',[['settings','settings','Impostazioni']]]];
+ for(const [group,navs] of groups){const section=el('div',{class:'nav-group'},[node('div','nav-heading',group)]);
+ for(const [id,icon,title] of navs){const active=id==='review'?S.view==='agenda'&&S.listPreset==='review':id==='agenda'?S.view==='agenda'&&S.listPreset!=='review':id==='projects'?['projects','project-progress'].includes(S.view):S.view===id;
+ const b=el('button',{type:'button',class:'nav '+(active?'active':''),title,'aria-current':active?'page':'false',onclick:()=>{S.searchTerm='';if(id==='review')agendaOpen('review');else changeView(id)}},[ico(icon),node('span','navtext',title),...(id==='review'&&reviewCount?[node('span','nav-count',String(reviewCount))]:[])]);section.append(b)}navContainer.append(section)}
  const labels=[...new Set(S.tasks.flatMap(t=>t.labels||[]))].sort((a,b)=>a.localeCompare(b,'it')).slice(0,12);
  const labelBox=el('div',{class:'sidebar-labels'},[node('div','sidebar-labels-heading','Etichette')]);
  if(!labels.length)labelBox.append(node('p','sidebar-empty','Nessuna etichetta'));
  labels.forEach((label,i)=>labelBox.append(el('button',{class:'label-link',onclick:()=>changeView('tasks','all',label)},[el('span',{class:'label-dot',style:'--dot-color:'+['#8c83ff','#f87283','#58cdbb','#ffad55','#48c4ff'][i%5]}),node('span','',label)])));
- sidebar.append(labelBox);
- sidebar.append(el('div',{class:'bottom'},[node('div','muted labeltext',S.me.display_name),btn('Esci',async()=>{if(S.view==='personal')await NextDoPersonal.lock();await api('/logout',{method:'POST'});S.me=null;loginView(false)},'small')]));
+ const labelDetails=el('details',{class:'nav-label-details'},[node('summary','','Etichette'),labelBox]);navContainer.append(labelDetails);
+ navContainer.append(el('div',{class:'bottom'},[node('div','muted labeltext',S.me.display_name),btn('Esci',async()=>{if(S.view==='personal')await NextDoPersonal.lock();await api('/logout',{method:'POST'});S.me=null;loginView(false)},'small')]));
  layout.append(sidebar,main);app.append(layout);
  const toolbar=el('div',{class:'appbar'});
  const search=el('form',{class:'global-search'},[ico('search'),input('global-search','Cerca attività e note...',S.searchTerm)]);
  search.addEventListener('submit',e=>{e.preventDefault();S.searchTerm=search.querySelector('input').value;changeView('tasks')});
- toolbar.append(search,el('button',{type:'button',class:'iconbutton',title:'Notifiche',onclick:()=>changeView('settings')},[ico('bell')]),el('button',{type:'button',class:'iconbutton',title:'Profilo e impostazioni',onclick:()=>changeView('settings')},[ico('user')]));
+ toolbar.append(search,el('button',{type:'button',class:'iconbutton',title:'Notifiche',onclick:()=>settingsOpen('notifications')},[ico('bell')]),el('button',{type:'button',class:'iconbutton',title:'Profilo e impostazioni',onclick:()=>settingsOpen('general')},[ico('user')]));
  main.append(toolbar);
- const titles={dashboard:'Dashboard',agenda:'Scadenze e appuntamenti',mine:'Il mio spazio',tasks:'Scadenze',appointments:'Appuntamenti',projects:'Progetti',notes:'Note',calendar:'Calendario',courses:'Corsi di Studio',groups:'Gruppi',archive:'Archivio',personal:'Area personale',settings:'Impostazioni'};
- const header=el('div',{class:'top'},[el('div',{},[node('h1','',titles[S.view]),node('div','sub',S.view==='dashboard'?'Panoramica delle tue attività':'Organizza le attività, rispetta le scadenze.')]),el('div',{class:'top-actions'},[btn(S.light?'☀ Tema':'☾ Tema',()=>{S.light=!S.light;localStorage.setItem('nextdo-light',S.light?'1':'0');document.body.classList.toggle('light',S.light)},'small'),...(S.view==='personal'?[]:[btn('+ Nuova',()=>taskForm(null,S.view==='appointments'?'appointment':'task'),'primary')])])]);
+ const titles={dashboard:'Centro operativo',agenda:'Agenda', 'project-progress':'Avanzamenti e cronoprogrammi',mine:'Il mio spazio',tasks:'Attività e scadenze',appointments:'Appuntamenti',projects:'Progetti',notes:'Note',calendar:'Calendario',courses:'Corsi di Studio',groups:'Gruppi',archive:'Archivio',personal:'Area personale',settings:'Impostazioni'};
+ const header=el('div',{class:'top'},[el('div',{},[node('h1','',titles[S.view]),node('div','sub',S.view==='dashboard'?new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long',year:'numeric'}):S.view==='agenda'&&S.dayFilter?'Impegni del '+fmt(S.dayFilter):'Organizza le attività, rispetta le scadenze.')]),el('div',{class:'top-actions'},[themeButton(),...(['personal','settings','dashboard','project-progress'].includes(S.view)?[]:[btn('+ Nuova',()=>taskForm(null,S.view==='appointments'?'appointment':S.view==='notes'?'note':'task'),'primary')])])]);
  main.append(header);
- if(S.view==='dashboard')dashboard(main);else if(['tasks','appointments','notes','archive','mine','agenda'].includes(S.view))taskList(main,S.view);else if(S.view==='projects')NextDoWorkspace.projectView(main);else if(S.view==='calendar')calendar(main);else if(S.view==='courses')coursesView(main);else if(S.view==='groups')groupsView(main);else if(S.view==='personal')NextDoPersonal.render(main);else settings(main);
+ if(S.view==='dashboard')dashboard(main);else if(['tasks','appointments','notes','archive','mine','agenda'].includes(S.view))taskList(main,S.view);else if(S.view==='projects')NextDoWorkspace.projectView(main);else if(S.view==='project-progress'){main.append(btn('← Torna ai progetti',()=>changeView('projects'),'small'));const progress=el('div',{class:'project-progress-page'});NextDoProgress.dashboard(progress);if(!progress.children.length)progress.append(node('div','empty','Nessun progetto in evidenza o attività assegnata'));main.append(progress)}else if(S.view==='calendar')calendar(main);else if(S.view==='courses')coursesView(main);else if(S.view==='groups')groupsView(main);else if(S.view==='personal')NextDoPersonal.render(main);else settings(main);
 }
-function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:t.status==='review'?'Verificare la scadenza prima di completarla':'Completa attività'});if(t.can_complete===false||t.status==='review')cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[node('div','tasktitle',t.title),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),...(t.kind==='appointment'?[tag('Appuntamento')]:t.kind==='task'?[tag('Scadenza')]:[]),...(t.status==='review'?[tag('Da verificare','high')]:[]),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit,...(['task','appointment'].includes(t.kind)?[workAckButton(t)]:[]));return row}
+function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:t.status==='review'?'Verificare la scadenza prima di completarla':'Completa attività'});if(t.can_complete===false||t.status==='review')cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[el('button',{type:'button',class:'tasktitle task-open',onclick:()=>taskForm(t)},[t.title]),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),...(t.kind==='appointment'?[tag('Appuntamento')]:t.kind==='task'?[tag('Scadenza')]:[]),...(t.status==='review'?[tag('Da verificare','high')]:[]),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit,...(['task','appointment'].includes(t.kind)?[workAckButton(t)]:[]));return row}
+function dashboardRow(t){
+ const d=dueDay(t),past=!!d&&d<today(),appointment=t.kind==='appointment';
+ const cls=past?'overdue':t.status==='review'?'review':appointment?'appointment':'deadline';
+ const row=el('div',{class:'dash-task-row '+cls+(t.priority==='critical'?' critical':'')});
+ const cb=el('input',{type:'checkbox','aria-label':'Completa '+t.title,title:t.status==='review'?'Verificare prima di completare':'Completa attività'});
+ cb.disabled=t.status==='review'||t.can_complete===false;
+ cb.addEventListener('change',async()=>{if(t.completion_mode==='per_course'&&t.courses?.length){taskForm(t);cb.checked=false;return}cb.disabled=true;try{await api('/tasks/'+t.id+'/toggle',{method:'POST'});await refresh();render()}catch(e){cb.checked=false;cb.disabled=false;msg(e.message,true)}});
+ const date=d?new Date(d+'T12:00:00'):null;
+ const tile=el('span',{class:'date-tile'},date?[node('span','tile-weekday',date.toLocaleDateString('it-IT',{weekday:'short'})),node('strong','tile-day',String(date.getDate())),node('span','tile-month',date.toLocaleDateString('it-IT',{month:'short'}))]:[ico('calendar'),node('span','tile-month','Senza data')]);
+ const when=!d?'Senza data':past?'Trascorsa · '+fmt(t.due_at):d===today()?'Oggi · '+fmt(t.due_at):d===dayOffset(1)?'Domani · '+fmt(t.due_at):fmt(t.due_at);
+ const info=el('button',{type:'button',class:'dash-task-title',onclick:()=>taskForm(t),'aria-label':'Apri '+t.title},[tile,el('span',{class:'dash-task-copy'},[
+ node('span','dash-due',when),node('strong','dash-task-name',t.title),
+ el('span',{class:'dash-task-meta'},[tag(appointment?'Appuntamento':'Attività / scadenza',appointment?'normal':''),...(t.status==='review'?[tag('Da verificare','high')]:[]),...(past?[tag('Trascorsa','critical')]:[]),...(['high','critical'].includes(t.priority)?[tag(priority[t.priority],t.priority)]:[]),...(t.labels||[]).slice(0,1).map(v=>tag(v,'label-tag'))])
+ ]),ico('chevron')]);
+ row.append(cb,info,workAckButton(t));return row
+}
+function dashboardPanel(title,icon,items,action,empty,cls=''){
+ const panel=el('section',{class:'card bento-panel '+cls});
+ panel.append(el('div',{class:'card-head'},[ico(icon),node('h2','',title),node('span','panel-count',String(items.length)),btn('Vedi tutte',action,'textlink')]));
+ const list=el('div',{class:'bento-list'});
+ for(const t of items.sort(agendaOrder))list.append(dashboardRow(t));
+ if(!items.length)list.append(el('div',{class:'bento-empty'},[ico('check'),node('span','',empty)]));
+ panel.append(list);return panel
+}
+function monthShift(delta){S.month=new Date(S.month.getFullYear(),S.month.getMonth()+delta,1)}
+function monthDays(month){const y=month.getFullYear(),m=month.getMonth(),start=(new Date(y,m,1).getDay()+6)%7;return Array.from({length:42},(_,i)=>new Date(y,m,1-start+i))}
+function miniCalendar(pending){
+ const card=el('section',{class:'card bento-panel bento-calendar'});
+ const title=node('h2','',S.month.toLocaleDateString('it-IT',{month:'long',year:'numeric'}));
+ card.append(el('div',{class:'card-head'},[ico('calendar'),title,el('div',{class:'calendar-nav'},[
+ el('button',{type:'button',class:'btn small','aria-label':'Mese precedente',onclick:()=>{monthShift(-1);render()}},['‹']),
+ el('button',{type:'button',class:'btn small','aria-label':'Mese successivo',onclick:()=>{monthShift(1);render()}},['›'])
+ ])]));
+ const grid=el('div',{class:'mini-month'});
+ for(const w of ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'])grid.append(node('span','mini-weekday',w));
+ for(const d of monthDays(S.month)){
+  const key=localDay(d),events=pending.filter(t=>dueDay(t)===key);
+  const types=[...new Set(events.map(t=>t.status==='review'?'review':t.kind==='appointment'?'appointment':'deadline'))];
+  const cell=el('button',{type:'button',class:'mini-day '+(d.getMonth()!==S.month.getMonth()?'outside ':'')+(key===today()?'today ':'')+(events.length?'has-events':''),'aria-label':d.toLocaleDateString('it-IT',{dateStyle:'long'})+': '+events.length+' impegni',onclick:()=>agendaOpen('all',key)},[node('span','',String(d.getDate())),el('span',{class:'mini-dots'},types.map(x=>el('span',{class:'mini-dot '+x})))]);
+  grid.append(cell)
+ }
+ card.append(grid,el('div',{class:'calendar-legend'},[['appointment','Appuntamento'],['deadline','Scadenza'],['review','Da verificare']].map(([cls,name])=>el('span',{},[el('i',{class:'mini-dot '+cls}),name]))),
+ el('div',{class:'calendar-footer'},[btn('Oggi',()=>{S.month=new Date();render()},'small'),btn('Apri calendario →',()=>changeView('calendar'),'textlink')]));
+ return card
+}
 function dashboard(main){
  main.classList.add('dashboard-page');
- main.append(el('div',{class:'toolbar'},[btn('NextDo Android · Professionale',workMobileEditor,'small')]));
- const agendaItems=S.tasks.filter(t=>['task','appointment'].includes(t.kind));
- const pending=agendaItems.filter(t=>t.status!=='done');
- const urgent=pending.filter(t=>['high','critical'].includes(t.priority));
- const late=pending.filter(t=>t.kind==='task'&&t.due_at&&new Date(t.due_at)<new Date());
- const done=agendaItems.filter(t=>t.status==='done');
- const metrics=[['Da gestire',pending.length,'calendar','all'],['Da verificare',pending.filter(t=>t.status==='review').length,'alert','review'],['Scadute',late.length,'clock','overdue'],['Completate',done.length,'check','done']];
- const summary=el('div',{class:'dash-metrics'});
- metrics.forEach(([name,n,icon,preset],index)=>summary.append(el('button',{type:'button',class:'metric metric-'+index,onclick:()=>changeView(preset==='overdue'?'tasks':'agenda',preset),'aria-label':name+': '+n+' attività, apri elenco filtrato'},[el('span',{class:'metric-icon'},[ico(icon)]),node('span','metric-label',name),node('strong','metric-value',String(n))])));
+ const all=S.tasks.filter(t=>['task','appointment'].includes(t.kind));
+ const pending=all.filter(t=>t.status!=='done');
+ const metrics=[['Scadute / trascorse','overdue','clock'],['Oggi','today','calendar'],['Domani','tomorrow','calendar'],['Prossimi 7 giorni','week','calendar'],['Da verificare','review','alert'],['Completate','done','check']];
+ const summary=el('div',{class:'dash-metrics bento-metrics'});
+ for(const [name,preset,icon] of metrics){const n=all.filter(t=>agendaMatch(t,preset)).length;summary.append(el('button',{type:'button',class:'metric metric-'+preset,onclick:()=>agendaOpen(preset),'aria-label':name+': '+n+' attività, apri elenco filtrato'},[el('span',{class:'metric-icon'},[ico(icon)]),node('span','metric-label',name),node('strong','metric-value',String(n))]))}
  main.append(summary);
- const board=el('div',{class:'dash-layout'});const left=el('section',{class:'card dash-upcoming'});
- left.append(el('div',{class:'card-head'},[node('h2','','Scadenze e appuntamenti'),btn('Vedi tutti ›',()=>changeView('agenda'),'textlink')]));
- for(const t of [...pending].sort((a,b)=>(a.due_at||'9999').localeCompare(b.due_at||'9999'))){
-  const row=el('div',{class:'dash-task-row '+(t.priority||'normal')});
-  const checkbox=el('input',{type:'checkbox',title:t.status==='review'?'Verificare prima di completare':'Completa attività'});if(t.status==='review'||t.can_complete===false)checkbox.disabled=true;
-  checkbox.addEventListener('change',async()=>{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);checkbox.checked=false;return}try{await api('/tasks/'+t.id+'/toggle',{method:'POST'});await refresh();render()}catch(e){checkbox.checked=false;msg(e.message,true)}});
-  const details=el('button',{type:'button',class:'dash-task-title',onclick:()=>taskForm(t)},[node('span','dash-task-name',t.title),el('span',{class:'dash-task-meta'},[tag(t.kind==='appointment'?'Appuntamento':'Scadenza'),...(t.status==='review'?[tag('Da verificare','high')]:[]),...(late.includes(t)?[tag('Scaduta','critical')]:[]),...(t.labels||[]).slice(0,1).map(v=>tag(v,'label-tag')),tag(priority[t.priority]||'Normale',t.priority),node('span','dash-due',fmt(t.due_at))])]);
-  row.append(checkbox,details,workAckButton(t));left.append(row);
- }
- if(!pending.length)left.append(node('div','empty','Nessuna attività in sospeso'));
+ const near=pending.filter(t=>dueDay(t)&&dueDay(t)<=dayOffset(6));
+ const rest=pending.filter(t=>!near.includes(t));
+ const reviews=rest.filter(t=>t.status==='review');
+ const later=rest.filter(t=>t.status!=='review'&&dueDay(t));
+ const undated=rest.filter(t=>t.status!=='review'&&!dueDay(t));
+ const left=el('div',{class:'bento-stack bento-main'},[
+ dashboardPanel('Prossimi impegni','clock',near,()=>agendaOpen('week'),'Nessun impegno imminente','bento-upcoming'),
+ dashboardPanel('Altre attività da verificare','alert',reviews,()=>agendaOpen('review'),'Nessun’altra proposta da verificare','bento-review')
+ ]);
  const quick=el('section',{class:'card dash-quick'});quick.append(el('div',{class:'card-head'},[ico('plus'),node('h2','','Aggiunta rapida')]));
  const compose=el('textarea',{class:'field dash-compose',rows:'3',placeholder:'Incolla una nota, un’email o scrivi un’attività...','aria-label':'Testo per aggiunta rapida'});
  const pr=select('quick-priority',Object.entries(priority),'normal');pr.setAttribute('aria-label','Priorità');
@@ -102,16 +168,20 @@ function dashboard(main){
  quick.append(compose,actions,quickFileInput);
  NextDoFileUI.quickDrop(quick,files=>taskForm(null,'task',makeQuick(),{files,focus:'attachments'}),message=>msg(message,true));
  const extract=el('button',{type:'button',class:'extract-action',onclick:pasteForm},[ico('note'),el('span',{},[node('strong','','Incolla e crea scadenze'),node('small','','NextDo riconosce date e priorità; conferma prima di salvare')]),ico('chevron')]);
- const right=el('div',{class:'dash-right'},[quick,extract]);board.append(left,right);main.append(board);
- const lower=el('div',{class:'dash-bottom'});const week=el('section',{class:'card dash-week'});week.append(node('h2','','In arrivo questa settimana'));
- const weekRow=el('div',{class:'week-row'});const base=new Date();base.setHours(0,0,0,0);
- for(let i=0;i<7;i++){const date=new Date(base);date.setDate(base.getDate()+i);const dayString=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');const daily=pending.filter(t=>t.due_at&&dtLocal(t.due_at).slice(0,10)===dayString);const tile=el('button',{type:'button',class:'week-day '+(i===0?'today':''),onclick:()=>changeView('agenda')},[node('span','',date.toLocaleDateString('it-IT',{weekday:'short'})),node('strong','',String(date.getDate())),node('span','week-dots',daily.length?'● '.repeat(Math.min(daily.length,3)):'·')]);weekRow.append(tile)}week.append(weekRow);
+ const actionsCard=el('section',{class:'card bento-panel bento-actions'},[el('div',{class:'card-head'},[ico('plus'),node('h2','','Azioni rapide')])]);
+ for(const [kind,label,icon] of [['task','Nuova attività','list'],['appointment','Nuovo appuntamento','calendar'],['note','Nuova nota','note']])actionsCard.append(el('button',{type:'button',class:'quick-link',onclick:()=>taskForm(null,kind)},[ico(icon),node('span','',label),ico('chevron')]));
+ actionsCard.append(extract);
+ const board=el('div',{class:'bento-grid'},[left,miniCalendar(pending),el('div',{class:'bento-stack bento-side'},[actionsCard,quick,dashboardPanel('Senza data','list',undated,()=>agendaOpen('undated'),'Nessuna attività senza data','bento-undated')])]);
+ main.append(board,dashboardPanel('Prossime scadenze e impegni','calendar',later,()=>agendaOpen('future'),'Nessun altro impegno programmato','bento-later'));
+ const footer=el('div',{class:'dashboard-footer'},[btn('Tutte le attività · '+pending.length,()=>agendaOpen(),'small'),btn('Urgenti · '+pending.filter(t=>agendaMatch(t,'urgent')).length,()=>agendaOpen('urgent'),'small')]);main.append(footer)
+}
+function labelDistribution(pending){
  const groups=new Map();for(const t of pending)for(const label of t.labels||[])groups.set(label,(groups.get(label)||0)+1);
  const count=[...groups.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5);const breakdown=el('section',{class:'card dash-breakdown'});breakdown.append(node('h2','','Distribuzione per etichetta'));
  const chart=el('div',{class:'breakdown-inner'});const colors=['#8e80ff','#409bff','#51d8a2','#ffad43','#5dc6ea'];const all=count.reduce((n,v)=>n+v[1],0);let pct=0;const segments=count.map(([name,n],i)=>{const first=pct;pct+=n/all*100;return colors[i]+' '+first+'% '+pct+'%'});
  const ring=el('div',{class:'donut',style:'background:'+(all?'conic-gradient('+segments.join(',')+')':'conic-gradient(#31465e 0 100%)')},[node('span','donut-count',String(pending.length)),node('span','donut-label','attività')]);
- const legend=el('div',{class:'chart-legend'});count.forEach(([name,num],i)=>legend.append(el('div',{class:'legend-row'},[el('span',{class:'legend-dot',style:'background:'+colors[i]}),node('span','',name),node('strong','',String(num))])));if(!count.length)legend.append(node('span','muted','Nessuna etichetta assegnata'));chart.append(ring,legend);breakdown.append(chart);lower.append(week,breakdown);main.append(lower);
- NextDoProgress.dashboard(main);
+ const legend=el('div',{class:'chart-legend'});count.forEach(([name,num],i)=>legend.append(el('div',{class:'legend-row'},[el('span',{class:'legend-dot',style:'background:'+colors[i]}),node('span','',name),node('strong','',String(num))])));if(!count.length)legend.append(node('span','muted','Nessuna etichetta assegnata'));chart.append(ring,legend);breakdown.append(chart);return breakdown;
+
 }
 function canExportICS(t){return ['task','appointment'].includes(t.kind)&&t.status!=='review'&&!!t.due_at}
 async function downloadICS(ids,includeDetails){
@@ -168,7 +238,7 @@ function calendarExportForm(tasks){
   el('div',{class:'actions'},[btn('Annulla',()=>back.remove()),run,...(S.me.role==='admin'?[btn('Invia ICS via email',async()=>{if(!selected.size)return msg('Seleziona almeno una voce',true);try{await sendCalendarMail([...selected],details.checked)}catch(e){msg(e.message,true)}},'small')]:[])]));
  update();
 }
-function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['review','Da verificare'],['urgent','Urgenti'],['overdue','Scadute'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';tools.append(search,csel,gsel,status,preset);if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Email → Scadenze AI',emailIntakeForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':(view==='agenda'?['task','appointment'].includes(t.kind):t.kind===(view==='appointments'?'appointment':'task'))&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&(preset.value==='all'||(preset.value==='review'&&t.status==='review')||(preset.value==='urgent'&&['high','critical'].includes(t.priority)&&t.status!=='done')||(preset.value==='overdue'&&t.due_at&&new Date(t.due_at)<new Date()&&t.status!=='done')||(preset.value==='done'&&t.status==='done')));panel.append(node('h2','',`${tasks.length} elementi`));if(tasks.some(canExportICS))panel.append(btn('Esporta ICS',()=>calendarExportForm(tasks),'small'));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.forEach(t=>panel.append(taskrow(t)))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
+function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['review','Da verificare'],['urgent','Urgenti'],['overdue','Scadute / trascorse'],['today','Oggi'],['tomorrow','Domani'],['week','Prossimi 7 giorni'],['future','Oltre 7 giorni'],['undated','Senza data'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';for(const [control,label] of [[search,'Cerca attività'],[csel,'Filtra per CdS'],[gsel,'Filtra per gruppo'],[status,'Filtra per stato'],[preset,'Filtra per periodo o priorità']])control.setAttribute('aria-label',label);tools.append(search,csel,gsel,status,preset);if(S.dayFilter)tools.append(btn('Data: '+fmt(S.dayFilter)+' ×',()=>agendaOpen(),'small'));if(S.labelFilter)tools.append(btn('Etichetta: '+S.labelFilter+' ×',()=>changeView(view),'small'));if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Email → Scadenze AI',emailIntakeForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':(view==='agenda'?['task','appointment'].includes(t.kind):t.kind===(view==='appointments'?'appointment':'task'))&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&agendaMatch(t,preset.value)&&(!S.dayFilter||dueDay(t)===S.dayFilter));panel.append(node('h2','',`${tasks.length} elementi`));if(tasks.some(canExportICS))panel.append(btn('Esporta ICS',()=>calendarExportForm(tasks),'small'));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.sort(agendaOrder).forEach(t=>panel.append(taskrow(t)));if(['tasks','agenda'].includes(view)&&tasks.length)panel.append(el('details',{class:'list-analytics'},[node('summary','','Distribuzione per etichetta'),labelDistribution(tasks.filter(t=>t.status!=='done'))]))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
 function modal(title){const back=el('div',{class:'modalback'}),box=el('div',{class:'modal'});box.append(node('h2','',title));back.append(box);back.addEventListener('click',e=>{if(e.target===back)back.remove()});document.body.append(back);return {back,box}}
 function checkboxes(title,values,selected=[]){const outer=el('div',{class:'full'}),region=el('div',{class:'checkboxes'});outer.append(node('label','label',title),region);for(const [v,l] of values){const cb=el('input',{type:'checkbox',value:String(v),checked:selected.includes(Number(v))});region.append(el('label',{},[cb,' '+l]))}return {outer,selected:()=>[...region.querySelectorAll('input:checked')].map(e=>Number(e.value))}}
 function taskForm(t=null,kind='task',suggestion=null,preferences={}){
@@ -459,7 +529,21 @@ async function emailIntakeForm(){
 }
 
 function pasteForm(){const {box,back}=modal('Incolla nota e rileva scadenze');const txt=el('textarea',{class:'field',rows:'10',placeholder:'Incolla una comunicazione o una nota…'});box.append(field('Testo originale',txt));box.append(el('p',{class:'sub',text:'Il rilevamento è locale e non utilizza servizi di AI esterni. Le date e le priorità devono sempre essere confermate.'}),el('div',{class:'actions'},[btn('Annulla',()=>back.remove()),btn('Analizza testo',async()=>{try{const suggestion=await api('/extract',{method:'POST',body:JSON.stringify({text:txt.value})});if(suggestion.detected_dates.length>1)msg('Rilevate più date: verificare quelle aggiuntive nella descrizione.');suggestion.due_at=suggestion.detected_dates[0]?suggestion.detected_dates[0]+'T12:00:00':'';back.remove();taskForm(null,'task',suggestion)}catch(e){msg(e.message,true)}},'primary')]))}
-function calendar(main){const bar=el('div',{class:'toolbar'});bar.append(btn('←',()=>{S.month.setMonth(S.month.getMonth()-1);render()}),node('h2','',S.month.toLocaleDateString('it-IT',{month:'long',year:'numeric'})),btn('→',()=>{S.month.setMonth(S.month.getMonth()+1);render()}));bar.append(btn('Esporta ICS',()=>calendarExportForm(S.tasks.filter(t=>t.due_at&&new Date(t.due_at).getMonth()===S.month.getMonth()&&new Date(t.due_at).getFullYear()===S.month.getFullYear())),'small'));main.append(bar);const grid=el('div',{class:'monthgrid'});for(const name of ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'])grid.append(node('div','day head',name));const y=S.month.getFullYear(),m=S.month.getMonth(),start=(new Date(y,m,1).getDay()+6)%7,num=new Date(y,m+1,0).getDate();for(let i=0;i<start;i++)grid.append(node('div','day',''));for(let d=1;d<=num;d++){const cell=el('div',{class:'day'},[node('strong','',String(d))]);for(const t of S.tasks.filter(t=>t.due_at&&new Date(t.due_at).getDate()===d&&new Date(t.due_at).getMonth()===m&&new Date(t.due_at).getFullYear()===y))cell.append(el('button',{class:'item',onclick:()=>taskForm(t),text:(t.kind==='appointment'?'◷ ':'')+t.title}));grid.append(cell)}main.append(grid)}
+function calendar(main){
+ const bar=el('div',{class:'toolbar calendar-toolbar'});
+ const title=node('h2','',S.month.toLocaleDateString('it-IT',{month:'long',year:'numeric'}));
+ bar.append(el('button',{type:'button',class:'btn','aria-label':'Mese precedente',onclick:()=>{monthShift(-1);render()}},['‹']),title,el('button',{type:'button',class:'btn','aria-label':'Mese successivo',onclick:()=>{monthShift(1);render()}},['›']),btn('Oggi',()=>{S.month=new Date();render()}),btn('Esporta ICS',()=>calendarExportForm(S.tasks.filter(t=>dueDay(t).startsWith(localDay(S.month).slice(0,7)))),'small'));
+ main.append(bar);
+ const grid=el('div',{class:'monthgrid full-calendar'});
+ for(const name of ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'])grid.append(node('div','day head',name));
+ for(const d of monthDays(S.month)){
+  const key=localDay(d),events=S.tasks.filter(t=>dueDay(t)===key).sort(agendaOrder);
+  const cell=el('div',{class:'day '+(d.getMonth()!==S.month.getMonth()?'outside ':'')+(key===today()?'today':'')},[el('button',{type:'button',class:'calendar-day-number','aria-label':'Apri agenda del '+fmt(key),onclick:()=>agendaOpen('all',key)},[String(d.getDate())])]);
+  for(const t of events)cell.append(el('button',{type:'button',class:'item '+(t.status==='review'?'review':t.kind==='appointment'?'appointment':'deadline')+(t.status==='done'?' done':''),onclick:()=>taskForm(t),title:t.title},[(t.kind==='appointment'?'◷ ':'')+(t.status==='review'?'[Da verificare] ':'')+t.title]));
+  grid.append(cell)
+ }
+ main.append(grid)
+}
 function coursesView(main){const card=el('section',{class:'card'});card.append(node('h2','','Anagrafica CdS'));if(S.me.role==='admin'){card.append(btn('+ Aggiungi CdS',()=>courseForm(),'primary'),node('p','muted','Import CSV UTF-8 con intestazioni code,name. I codici devono rispettare il formato M seguito da 2–3 caratteri alfanumerici.'));const upload=el('input',{type:'file',accept:'.csv',class:'field'});card.append(upload,btn('Importa CSV',async()=>{if(!upload.files[0])return;const form=new FormData();form.append('file',upload.files[0]);try{const r=await api('/courses/import',{method:'POST',body:form});msg(`Importate ${r.imported} righe; righe scartate: ${r.rejected_lines.join(', ')||'nessuna'}`);await refresh();render()}catch(e){msg(e.message,true)}},'small'))}card.append(node('p','sub','L’elenco ufficiale non è precaricato: inserire o importare solo codici e denominazioni verificati.'));for(const c of S.courses){card.append(el('div',{class:'rowtask'},[node('div','taskmain',c.code+' — '+c.name+(c.active?'':' (non attivo)')),tag(S.tasks.filter(t=>t.courses.some(x=>x.id===c.id)&&t.status!=='done').length+' attività'),...(S.me.role==='admin'?[btn('Modifica',()=>courseForm(c),'small'),NextDoWorkspace.courseAdminButton(c)]:[])]))}main.append(card)}
 function courseForm(c){const {box,back}=modal(c?'Modifica CdS':'Nuovo CdS');const form=el('form',{class:'formgrid'}),code=input('code','Es. M...',c?.code||''),name=input('name','Denominazione ufficiale',c?.name||''),active=el('input',{type:'checkbox',checked:c?.active??true});form.append(field('Codice CdS',code),field('Denominazione',name),el('label',{class:'full'},[active,' Attivo']));form.append(el('div',{class:'actions full'},[btn('Annulla',()=>back.remove()),el('button',{type:'submit',class:'btn primary',text:'Salva'})]));form.addEventListener('submit',async e=>{e.preventDefault();try{await api('/courses'+(c?'/'+c.id:''),{method:c?'PUT':'POST',body:JSON.stringify({code:code.value,name:name.value,active:active.checked})});back.remove();await refresh();render()}catch(e){msg(e.message,true)}});box.append(form)}
 function groupsView(main){
@@ -480,10 +564,10 @@ function groupsView(main){
 }
 
 function membersForm(g){const {box}=modal('Membri — '+g.name);const list=el('div');box.append(list);async function show(){const members=await api(`/groups/${g.id}/members`);list.replaceChildren(...members.map(m=>el('div',{class:'rowtask'},[node('span','taskmain',m.display_name),tag(m.role)])))}show().catch(e=>msg(e.message,true));const memberSelect=select('user_id',S.users.map(u=>[String(u.id),u.display_name])),role=select('role',[['member','Membro'],['manager','Responsabile']]);box.append(field('Aggiungi utente',memberSelect),field('Ruolo',role),btn('Aggiungi / aggiorna',async()=>{try{await api(`/groups/${g.id}/members`,{method:'POST',body:JSON.stringify({user_id:Number(memberSelect.value),role:role.value})});await show()}catch(e){msg(e.message,true)}},'primary'))}
-function emailIntakeSettings(main){
+function emailIntakeSettings(main,mode='all'){
  if(S.me.role!=='admin')return;
  const card=el('section',{class:'card',style:'margin-top:15px'});
- card.append(node('h2','','Email e intelligenza artificiale'),
+ card.append(node('h2','',mode==='imap'?'Casella IMAP facoltativa':'Configurazione GroqCloud'),
   node('p','sub','GroqCloud elabora il testo su server esterni. Non inviare comunicazioni istituzionali senza autorizzazione. Nessuna integrazione Microsoft 365.'));
  const grid=el('div',{class:'formgrid'});card.append(grid);main.append(card);
  api('/email-intake/config').then(cfg=>{
@@ -494,16 +578,14 @@ function emailIntakeSettings(main){
   const model=input('groq_model','Modello GroqCloud',cfg.groq_model||'openai/gpt-oss-120b');
   const key=input('groq_api_key','Lascia vuoto per mantenere la chiave salvata','','password');
   key.setAttribute('autocomplete','new-password');password.setAttribute('autocomplete','new-password');
-  grid.append(node('p','sub','Chiave GroqCloud: '+(cfg.groq_key_configured?'già configurata':'non configurata')+'. Per il test con testo incollato non occorre configurare IMAP.'),
-   field('Modello GroqCloud',model),field('API key GroqCloud',key),
-   node('h3','full','Casella IMAP facoltativa'),
-   field('Server IMAP',host),field('Porta SSL/TLS',port),
-   field('Utente casella',user),field('Password casella dedicata',password));
+  if(mode!=='imap')grid.append(node('p','sub','Chiave GroqCloud: '+(cfg.groq_key_configured?'già configurata':'non configurata')+'. Per il test con testo incollato non occorre configurare IMAP.'),field('Modello GroqCloud',model),field('API key GroqCloud',key));
+  if(mode!=='ai')grid.append(field('Server IMAP',host),field('Porta SSL/TLS',port),field('Utente casella',user),field('Password casella dedicata',password));
   grid.append(btn('Salva impostazioni email e AI',async()=>{
    try{
+    const current=await api('/email-intake/config');
     const result=await api('/email-intake/config',{method:'POST',body:JSON.stringify({
-     imap_host:host.value,imap_port:Number(port.value),imap_user:user.value,
-     imap_password:password.value,groq_model:model.value,groq_api_key:key.value})});
+     imap_host:mode==='ai'?current.imap_host:host.value,imap_port:mode==='ai'?current.imap_port:Number(port.value),imap_user:mode==='ai'?current.imap_user:user.value,
+     imap_password:mode==='ai'?'':password.value,groq_model:mode==='imap'?current.groq_model:model.value,groq_api_key:mode==='imap'?'':key.value})});
     key.value='';password.value='';
     msg('Configurazione salvata. Chiave GroqCloud: '+(result.groq_key_configured?'configurata':'non configurata'));
    }catch(e){msg(e.message,true)}
@@ -837,7 +919,48 @@ function cloudflareMailSettings(main){
  load();
 }
 
-function settings(main){const card=el('section',{class:'card'});card.append(node('h2','','Utenti e sistema'),node('p','sub','Account indipendenti da Home Assistant; accesso remoto da proteggere tramite HTTPS e Cloudflare Access.'));if(S.me.role==='admin'){card.append(btn('+ Utente',userForm,'primary'),btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();URL.revokeObjectURL(url)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'),btn('Genera monitor',displayForm),btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed)}catch(e){msg(e.message,true)}}),btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh()}catch(e){msg(e.message,true)}}));}for(const u of S.users)card.append(el('div',{class:'rowtask'},[node('span','taskmain',u.display_name+' ('+u.username+')'),tag(u.role)]));main.append(card);const card2=el('section',{class:'card',style:'margin-top:15px'},[node('h2','','Notifiche')]);api('/notifications').then(n=>{if(!n.length)card2.append(node('p','muted','Nessun promemoria'));for(const item of n)card2.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api(`/notifications/${item.id}/read`,{method:'POST'});render()},'small')]))}).catch(()=>{});main.append(card2);emailIntakeSettings(main);emailPromptSettings(main);cloudflareMailSettings(main);outboundMailSettings(main);automaticICSSettings(main);NextDoWorkspace.settings(main);NextDoMicrosoft.settings(main)}
+function settings(main){
+ main.classList.add('settings-page');
+ const admin=S.me.role==='admin';
+ const categories=[['general','user','Profilo e preferenze','Account, password, tema'],['notifications','bell','Notifiche','Promemoria e avvisi'],['android','calendar','App Android','Dispositivi e notifiche push'],...(admin?[
+ ['users','user','Utenti e organizzazione','Account, gruppi, collaboratori'],
+ ['incoming','note','Posta in entrata','Cloudflare e IMAP'],
+ ['outgoing','paperclip','Posta in uscita','Cloudflare e registro'],
+ ['ai','alert','Intelligenza artificiale','GroqCloud e prompt'],
+ ['automation','clock','Automazioni','Regola email → ICS e ricorrenze'],
+ ['integrations','list','Integrazioni','Microsoft Lists e monitor'],
+ ['backup','archive','Sicurezza e backup','Esportazione e ripristino']
+ ]:[])];
+ if(!categories.some(c=>c[0]===S.settingsTab))S.settingsTab='general';
+ const shell=el('div',{class:'settings-shell'}),nav=el('nav',{class:'settings-nav','aria-label':'Categorie impostazioni'}),content=el('div',{class:'settings-content'});
+ const search=input('settings-search','Cerca una categoria…');search.setAttribute('aria-label','Cerca impostazioni');
+ nav.append(search);
+ const items=el('div',{class:'settings-nav-list'});nav.append(items);
+ for(const [id,icon,title,desc] of categories){const b=el('button',{type:'button',class:'settings-link '+(S.settingsTab===id?'active':''),'aria-current':S.settingsTab===id?'page':'false',onclick:()=>{S.settingsTab=id;render()}},[ico(icon),el('span',{},[node('strong','',title),node('small','',desc)]),ico('chevron')]);items.append(b)}
+ search.addEventListener('input',()=>{const q=search.value.toLocaleLowerCase('it').trim();for(const item of items.children)item.hidden=!item.textContent.toLocaleLowerCase('it').includes(q)});
+ const chosen=categories.find(c=>c[0]===S.settingsTab);
+ content.append(el('div',{class:'settings-heading'},[ico(chosen[1]),el('div',{},[node('h2','',chosen[2]),node('p','sub',chosen[3])])]));
+ function section(title,desc=''){const card=el('section',{class:'card settings-card'},[node('h2','',title),...(desc?[node('p','sub',desc)]:[])]);content.append(card);return card}
+ if(S.settingsTab==='general'){
+  const card=section('Preferenze','Account indipendente da Home Assistant. Proteggere l’accesso remoto tramite HTTPS e Cloudflare Access.');
+  card.append(themeButton(),node('p','sub','Versione NextDo 0.2.0-test'));
+  NextDoWorkspace.settings(content,'profile')
+ }else if(S.settingsTab==='notifications'){
+  const card=section('Notifiche');if(admin)card.append(btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed);render()}catch(e){msg(e.message,true)}},'small'));
+  api('/notifications').then(n=>{if(!n.length)card.append(node('p','muted','Nessun promemoria'));for(const item of n)card.append(el('div',{class:'rowtask'},[node('span','taskmain',item.message),tag(item.seen?'Letta':'Nuova'),btn('Segna letta',async()=>{await api('/notifications/'+item.id+'/read',{method:'POST'});render()},'small')]))}).catch(e=>card.append(node('p','sub',e.message)))
+ }else if(S.settingsTab==='android'){
+  const card=section('NextDo Android · Professionale','Associa e gestisci i dispositivi; l’area Viaggi rimane invariata.');card.append(btn('Dispositivi e associazione',workMobileEditor,'primary'));if(admin)card.append(btn('Configura push Firebase',workPushEditor,'small'))
+ }else if(admin){
+  if(S.settingsTab==='users'){const card=section('Gestione organizzazione');card.append(btn('+ Utente',userForm,'primary'),btn('Gruppi',()=>changeView('groups'),'small'));NextDoWorkspace.settings(content,'organization')}
+  if(S.settingsTab==='incoming'){cloudflareMailSettings(content);emailIntakeSettings(content,'imap');const legacy=el('details',{class:'card settings-details'},[node('summary','','Gmail OAuth · configurazione facoltativa')]);content.append(legacy);legacy.addEventListener('toggle',()=>{if(legacy.open&&!legacy.dataset.loaded){legacy.dataset.loaded='1';gmailAutoSettings(legacy)}})}
+  if(S.settingsTab==='outgoing')outboundMailSettings(content);
+  if(S.settingsTab==='ai'){emailIntakeSettings(content,'ai');emailPromptSettings(content)}
+  if(S.settingsTab==='automation'){automaticICSSettings(content);const card=section('Ricorrenze');card.append(btn('Avanza ricorrenze completate',async()=>{try{const r=await api('/recurrences/process',{method:'POST'});msg('Attività avanzate: '+r.advanced);await refresh();render()}catch(e){msg(e.message,true)}}))}
+  if(S.settingsTab==='integrations'){NextDoMicrosoft.settings(content);section('Monitor NextDo').append(btn('Genera monitor',displayForm))}
+  if(S.settingsTab==='backup'){const card=section('Backup e ripristino','Scaricare una copia prima di importare un archivio.');card.append(btn('Scarica backup',async()=>{try{const r=await api('/backup');const blob=await r.blob(),url=URL.createObjectURL(blob),a=el('a',{href:url,download:'nextdo-backup.zip'});a.click();setTimeout(()=>URL.revokeObjectURL(url),60000)}catch(e){msg(e.message,true)}}),btn('Importa backup NextDo',restoreForm,'primary'))}
+ }
+ shell.append(nav,content);main.append(shell)
+}
 
 function restoreForm(){
  const {box,back}=modal('Ripristina un backup NextDo');
