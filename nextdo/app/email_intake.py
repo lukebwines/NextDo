@@ -298,6 +298,10 @@ def appointment_date(source,evidence,proposed):
     if not match[3] and anchor and abs((result-anchor).days)>180:return ""
     return result.isoformat()
    except ValueError:return ""
+ numeric=re.search(r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b",evidence)
+ if numeric:
+  try:return date(int(numeric[3]),int(numeric[2]),int(numeric[1])).isoformat()
+  except ValueError:return ""
  if anchor:
   relative=re.search(r"\b(oggi|domani|dopodomani)\b",evidence,re.I)
   if relative:return (anchor+timedelta(days={"oggi":0,"domani":1,"dopodomani":2}[relative[1].lower()])).isoformat()
@@ -319,7 +323,10 @@ def deadline_evidenced(due,evidence):
  # Date must match day/month/year and be attached to a deadline expression.
  expression=r"(?:\bentro\b|\bscadenz\w*\b|\btermine\b|\bnon oltre\b|\bal pi[uù] tardi\b|\bda (?:inviare|consegnare|trasmettere|completare|presentare)\b)"
  for part in re.split(r"[;\n!?]|\.(?=\s+[A-ZÀ-Ù])",evidence):
-  if not re.search(expression,part,re.I):continue
+  # Explicitly scheduled actions also qualify; historical/hypothetical wording does not.
+  scheduled_action=r"\b(?:occorre|bisogna|dovr[aà](?:nno)?|dovremo|si dovr[aà]|effettuare|eseguire|verificare|predisporre|completare|compilare|caricare|pubblicare|consegnare|trasmettere|inviare|presentare|ritirare)\b"
+  if re.search(r"\b(?:era|erano|avrebbe|avrebbero|gi[aà]|annullat[ao]|rinviat[ao]|potremmo|potrebbe|da concordare)\b",part,re.I):continue
+  if not re.search(expression,part,re.I) and not re.search(scheduled_action,part,re.I):continue
   date_patterns=(rf"\b0?{d.day}\s+{MONTHS[d.month-1]}\s+{d.year}\b",
     rf"\b0?{d.day}[./-]0?{d.month}[./-]{d.year}\b",re.escape(due))
   if any(re.search(p,part,re.I) for p in date_patterns):return True

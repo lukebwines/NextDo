@@ -54,10 +54,10 @@ def enqueue(c,data,row,source,owner,created):
  cfg=mail.load(data);a=rule(cfg)
  if not valid_rule(cfg) or owner!=a["owner_id"]:return
  if row["sender"].casefold()==cfg["sender"].casefold() or MARKER.casefold() in source["subject"].casefold():return
- received=c.execute("SELECT received_at FROM cloudflare_mail_inbox WHERE message_hash=?",(row["message_hash"],)).fetchone()
+ received=c.execute("SELECT received_at,rowid FROM cloudflare_mail_inbox WHERE message_hash=?",(row["message_hash"],)).fetchone()
  if not received:return
  # SQLite arrival time is recorded to the second. Never scan already processed messages.
- if received[0]<a["activated_at"]:return
+ if received[0]<a["activated_at"] or received[1]<=a.get("arrival_cutoff",0):return
  items=[]
  for tid,item in created:
   if not eligible(item,source,TZ):continue
@@ -154,8 +154,9 @@ def register(app,*,conn,user,csrf,data_path):
    if not b.enabled:
     cfg.pop("automatic_ics",None)
    else:
+    with conn() as c:cutoff=c.execute("SELECT COALESCE(MAX(rowid),0) FROM cloudflare_mail_inbox").fetchone()[0]
     cfg["automatic_ics"]={"enabled":True,"recipient":recipient,"id":secrets.token_hex(16),"owner_id":u["id"],
-      "activated_at":datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")}
+      "activated_at":datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),"arrival_cutoff":cutoff}
    mail.save(data_path,cfg)
    with conn() as c:
     table(c)
