@@ -8,6 +8,7 @@ from fastapi import HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 from argon2.exceptions import VerificationError
 from . import personal_travel_tools as tools
+from . import travel_mobile
 
 LIMIT=32*1024*1024
 MAX_EXPANDED=120*1024*1024
@@ -216,10 +217,11 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   cur=c.execute("UPDATE trips SET archive=?,title=?,start=?,end=?,revision=revision+1 WHERE owner=? AND id=? AND revision=?",(archive,t["title"],t["start"],t["end"],owner,t["id"],revision))
   if not cur.rowcount:fail("Il viaggio è stato modificato: ricaricare",409)
   return revision+1
+ travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive)
  @app.middleware("http")
  async def private_cache(req:Request,call_next):
   res=await call_next(req)
-  if req.url.path.startswith("/api/personal/"):
+  if req.url.path.startswith(("/api/personal/","/api/mobile/v1/")):
    res.headers["Cache-Control"]="no-store, private"
    res.headers["Referrer-Policy"]="no-referrer"
    res.headers["X-Content-Type-Options"]="nosniff"
