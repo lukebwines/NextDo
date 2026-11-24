@@ -19,6 +19,8 @@ android {
 }
 dependencies {
     implementation("com.google.firebase:firebase-messaging:24.1.2")
+    // Firebase transitively introduces an older Fragment; Activity Result requires >= 1.3.
+    implementation("androidx.fragment:fragment:1.8.5")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.activity:activity-compose:1.9.3")
