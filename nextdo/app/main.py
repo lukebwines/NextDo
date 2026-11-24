@@ -341,7 +341,7 @@ class TaskIn(BaseModel):
  scope:str='personal';project_id:Optional[int]=None
  labels:list[str]=Field(default_factory=list);course_ids:list[int]=Field(default_factory=list);reminders:list[int]=Field(default_factory=list)
 def validate_task(c,u,b):
- if b.priority not in ('low','normal','high','critical') or b.status not in ('review','todo','doing','waiting','done') or b.kind not in ('task','note') or b.completion_mode not in ('global','per_course'):err(400,'Valore non valido')
+ if b.priority not in ('low','normal','high','critical') or b.status not in ('review','todo','doing','waiting','done') or b.kind not in ('task','note','appointment') or b.completion_mode not in ('global','per_course'):err(400,'Valore non valido')
  if b.recurrence not in ('none','daily','weekly','monthly','yearly'):err(400,'Ricorrenza non valida')
  workspace.validate_scope(c,u,b)
  parsed={}

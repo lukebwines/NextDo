@@ -183,3 +183,15 @@ def test_ui_has_explicit_selected_email_review_and_confirmation(tmp_path):
   "Prepara scadenza","Nessuna scadenza viene salvata automaticamente"):
   assert expected in text
  c.close()
+
+
+def test_appointment_uses_original_thread_date_and_time(monkeypatch):
+ from app import email_intake as intake
+ body="Riunione di domani.\nhttps://example.org/meeting\nInviato: martedì 17 novembre 2026 09:09\nLa riunione si terrà mercoledì 25 novembre alle ore 9.00."
+ source={"subject":"Incontro","sender":"","date":"Tue, 24 Nov 2026 09:23:00 +0100","text":body,"source_hash":"test"}
+ monkeypatch.setattr(intake,"_call_groq",lambda cfg,source:{"proposals":[{"title":"Riunione","kind":"appointment","date":"2026-11-25","evidence":"La riunione si terrà mercoledì 25 novembre alle ore 9.00.","time_evidence":"alle ore 9.00","meeting_url":"https://example.org/meeting"}]})
+ item=intake.analyze({},source)["proposals"][0]
+ assert item["kind"]=="appointment"
+ assert item["due_date"]=="2026-11-25"
+ assert item["appointment_time"]=="09:00"
+ assert intake.appointment_date(source,"Riunione di domani.","")=="2026-11-25"
