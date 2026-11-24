@@ -40,3 +40,6 @@ Visualizzazione e filtro giorno, confronto tappe geolocalizzate e tracce effetti
 
 ## App modulare (Android 0.1.7-test)
 Nome pubblico NextDo, icona e dashboard generale, aree Professionale e Personale separate, Impostazioni e Viaggi come modulo. Il blocco biometrico e l'identificativo pacchetto, firma, credenziali Viaggi e archivi cifrati restano invariati. L'area professionale è per ora una struttura non collegata, senza dati simulati né accesso ai dati professionali. Notifiche e moduli personali non Viaggi non sono ancora attivi. Non richiede migrazioni o aggiornamento server aggiuntivo. Vedi [roadmap Android](../docs/android-roadmap.md).
+
+## Agenda professionale (0.1.8-test / server 0.1.39-test)
+Dalla Dashboard web: NextDo Android · Professionale → Genera codice; Android → Lavoro → URL HTTPS e codice. Associazione distinta da Viaggi, revocabile, sola lettura. Nessuna password in app. Agenda con tutte le voci aperte accessibili, incluse Da verificare e senza data. Aggiornamento quando si apre Home/Lavoro e manuale; niente notifiche o background in questa versione. Se si cambia password o scade l'associazione, revocare e associare nuovamente. Il gateway deve consentire solo le API mobile dedicate.

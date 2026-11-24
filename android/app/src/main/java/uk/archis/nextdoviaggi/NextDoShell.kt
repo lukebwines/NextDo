@@ -68,27 +68,27 @@ private fun ShellCard(title:String,subtitle:String,icon:ImageVector,accent:Color
     }
 }
 @Composable
-private fun StatusTile(label:String,icon:ImageVector,accent:Color,modifier:Modifier=Modifier) {
+private fun StatusTile(label:String,icon:ImageVector,accent:Color,modifier:Modifier=Modifier,value:String="—") {
     Column(modifier.clip(RoundedCornerShape(15.dp)).background(accent.copy(alpha=.08f)).padding(12.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
         Icon(icon,null,tint=accent)
         Text(label,color=ShellWhite,fontWeight=FontWeight.SemiBold,fontSize=13.sp)
-        Text("—",color=ShellMuted,fontSize=23.sp)
+        Text(value,color=ShellMuted,fontSize=23.sp)
     }
 }
 @Composable
-internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolean,open:(NextDoArea)->Unit) {
+internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolean,agenda:WorkAgenda?,workConnected:Boolean,workBusy:Boolean,open:(NextDoArea)->Unit) {
     Text("La tua dashboard",fontSize=29.sp,fontWeight=FontWeight.ExtraBold,color=ShellWhite)
     Text(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy",Locale.ITALIAN)),color=ShellMuted,fontSize=14.sp)
     ShellCard("Professionale","Agenda, scadenze e appuntamenti",Icons.Default.Work,WorkBlue,enabled,{open(NextDoArea.WORK)}) {
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
-            StatusTile("Scadenze",Icons.Default.Event,WorkBlue,Modifier.weight(1f))
-            StatusTile("Appuntamenti",Icons.Default.CalendarToday,WorkBlue,Modifier.weight(1f))
+            StatusTile("Scadenze",Icons.Default.Event,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.kind=="task"}?.toString()?:"—")
+            StatusTile("Appuntamenti",Icons.Default.CalendarToday,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.kind=="appointment"}?.toString()?:"—")
         }
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
-            StatusTile("Urgenti",Icons.Default.Warning,ShellSand,Modifier.weight(1f))
-            StatusTile("Da verificare",Icons.Default.FactCheck,WorkBlue,Modifier.weight(1f))
+            StatusTile("Urgenti",Icons.Default.Warning,ShellSand,Modifier.weight(1f),agenda?.items?.count{it.urgent}?.toString()?:"—")
+            StatusTile("Da verificare",Icons.Default.FactCheck,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.status=="review"}?.toString()?:"—")
         }
-        Text("Collegamento professionale non ancora attivo. I trattini non indicano assenza di impegni.",color=ShellMuted,fontSize=12.sp)
+        Text(when{workBusy->"Aggiornamento agenda…";agenda!=null->"Ultima sincronizzazione: "+agenda.updated.take(16).replace('T',' ');workConnected->"Agenda non disponibile. Apri Lavoro per riprovare.";else->"Associa l’area professionale. I trattini non indicano assenza di impegni."},color=ShellMuted,fontSize=12.sp)
         OutlinedButton(onClick={open(NextDoArea.WORK)},enabled=enabled,modifier=Modifier.fillMaxWidth()){Text("Agenda della settimana",color=WorkBlue)}
     }
     ShellCard("Personale","Il tuo spazio riservato",Icons.Default.Person,PrivateTeal,enabled,{open(NextDoArea.PERSONAL)}) {
@@ -100,29 +100,6 @@ internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolea
             }
             TextButton(onClick={open(NextDoArea.TRIPS)},enabled=enabled){Text("Apri")}
         }
-    }
-}
-@Composable
-internal fun ProfessionalLanding() {
-    Text("Agenda professionale",fontSize=27.sp,fontWeight=FontWeight.ExtraBold,color=ShellWhite)
-    val today=LocalDate.now()
-    val monday=today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-    ShellCard("Questa settimana",monday.format(DateTimeFormatter.ofPattern("dd/MM"))+" – "+monday.plusDays(6).format(DateTimeFormatter.ofPattern("dd/MM")),Icons.Default.CalendarToday,WorkBlue){
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)){
-            for(i in 0L..6L){
-                val date=monday.plusDays(i);val selected=date==today
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(9.dp)).background(if(selected)WorkBlue.copy(alpha=.23f) else Color(0xFF203449)).padding(vertical=9.dp),horizontalAlignment=Alignment.CenterHorizontally){
-                    Text(date.format(DateTimeFormatter.ofPattern("EEE",Locale.ITALIAN)).take(3),fontSize=10.sp,color=ShellMuted)
-                    Text(date.dayOfMonth.toString(),fontWeight=FontWeight.Bold,color=if(selected)WorkBlue else ShellWhite,fontSize=15.sp)
-                }
-            }
-        }
-    }
-    ShellCard("Da collegare","I dati professionali non sono ancora sincronizzati.",Icons.Default.Lock,WorkBlue){
-        Text("La prossima versione mostrerà scadenze, appuntamenti, urgenze e voci da verificare della stessa agenda web. È prevista un’autorizzazione dedicata; l’associazione Viaggi non abilita l’accesso professionale.",color=ShellMuted,fontSize=13.sp)
-    }
-    ShellCard("Notifiche","Funzione non ancora attiva",Icons.Default.Notifications,ShellSand){
-        Text("Suoni, vibrazioni e avvisi ripetuti saranno configurabili dopo il collegamento al server.",color=ShellMuted,fontSize=12.sp)
     }
 }
 @Composable

@@ -66,6 +66,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var vault: Vault
     private var locked by mutableStateOf(true)
     private var area by mutableStateOf(NextDoArea.HOME)
+    private var workConnection by mutableStateOf<JSONObject?>(null)
+    private var workAgenda by mutableStateOf<WorkAgenda?>(null)
+    private var workDetail by mutableStateOf<JSONObject?>(null)
+    private var workError by mutableStateOf("")
+    private var workBusy by mutableStateOf(false)
     private var availableUpdate by mutableStateOf<TravelUpdate?>(null)
     private var updateBusy by mutableStateOf(false)
     private var updateMessage by mutableStateOf("")
@@ -161,12 +166,15 @@ class MainActivity : ComponentActivity() {
         val cfg=connection ?: return
         task({resumeServer(cfg)}) { r -> session=r.token;trips=r.trips;error=r.error }
     }
+    private data class DeviceUnlockData(val cfg:JSONObject?,val meta:JSONObject?,val resumed:ResumeResult,val work:JSONObject?)
     private fun finishDeviceUnlock() {
         task({
             val cfg = if (vault.exists("connection")) JSONObject(String(vault.read("connection"), Charsets.UTF_8)) else null
             val meta = if (vault.exists("offline_meta")) JSONObject(String(vault.read("offline_meta"), Charsets.UTF_8)) else null
-            Triple(cfg, meta, if(cfg!=null)resumeServer(cfg) else ResumeResult())
-        }) { (cfg, meta, resumed) ->
+            val work=if(vault.exists("work_connection")) JSONObject(String(vault.read("work_connection"),Charsets.UTF_8)) else null
+            DeviceUnlockData(cfg,meta,if(cfg!=null)resumeServer(cfg) else ResumeResult(),work)
+        }) { (cfg, meta, resumed, work) ->
+            workConnection=work
             connection = cfg; offlineMeta = meta; locked = false; session=resumed.token; trips=resumed.trips; error=resumed.error
             authHandler.removeCallbacks(autoLock)
             authHandler.postDelayed(autoLock, 300_000L)
@@ -198,6 +206,7 @@ class MainActivity : ComponentActivity() {
         authenticating = false
         pending?.cancel()
         locked = true; busy = false; connection = null; session = ""; trips = emptyList()
+        workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false
         editor = null; current = null; offlineMeta = null; offline = false; pdf = null; pageBitmap = null; pdfName = ""; error = ""
         section = "Home"; area=NextDoArea.HOME
     }
@@ -421,10 +430,47 @@ class MainActivity : ComponentActivity() {
     }
     private fun closePdf() { pdf = null; pdfName = ""; pageBitmap = null; page = 0; pageCount = 0 }
 
+    private fun <T> workTask(run:()->T,done:(T)->Unit){
+        if(locked||workBusy)return
+        val started=epoch
+        workBusy=true;workError=""
+        lifecycleScope.launch {
+            try {
+                val value=withContext(Dispatchers.IO){run()}
+                if(started==epoch&&!locked)done(value)
+            } catch(e:CancellationException){throw e}
+            catch(e:Exception){if(started==epoch&&!locked){workAgenda=null;workDetail=null;workError=e.message?.take(200)?:"Connessione professionale non riuscita"}}
+            finally{if(started==epoch)workBusy=false}
+        }
+    }
+    private fun pairWork(url:String,code:String){
+        workTask({
+            val cfg=WorkApi(url).pair(code)
+            vault.write("work_connection",cfg.toString().toByteArray())
+            cfg
+        }){workConnection=it;workAgenda=null}
+    }
+    private fun refreshWork(){
+        val cfg=workConnection?:return
+        workTask({WorkApi(cfg.getString("url")).agenda(cfg.getString("token"))}){workAgenda=it}
+    }
+    private fun loadWorkDetail(id:Long){
+        val cfg=workConnection?:return
+        workTask({WorkApi(cfg.getString("url")).detail(cfg.getString("token"),id)}){if(area==NextDoArea.WORK)workDetail=it}
+    }
+    private fun disconnectWork(){
+        val cfg=workConnection?:return
+        workTask({
+            val revoked=try{WorkApi(cfg.getString("url")).revoke(cfg.getString("token"));true}catch(_:Exception){false}
+            vault.remove("work_connection")
+            revoked
+        }){revoked->workConnection=null;workAgenda=null;workDetail=null;workError=if(revoked)"" else "Dati locali rimossi. Revoca il dispositivo anche dal web."}
+    }
     private fun openArea(next:NextDoArea) {
         if(locked || busy) return
         closePdf(); current=null; editor=null; offline=false; section="Home"; error=""
         area=next
+        workDetail=null
     }
     private fun backArea() {
         if(busy)return
@@ -436,8 +482,10 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable private fun App() {
+        LaunchedEffect(locked,area,workConnection){if(!locked&&(area==NextDoArea.HOME||area==NextDoArea.WORK)&&workConnection!=null) refreshWork()}
         val t = current
         BackHandler(enabled=!locked&&(t!=null||area!=NextDoArea.HOME||pdf!=null)){backArea()}
+        if(!locked && area==NextDoArea.WORK) workDetail?.let { detail -> WorkDetailDialog(detail){workDetail=null} }
         if(!locked) editor?.let { e -> TravelEditDialog(e,busy,error,{editor=null;error=""},{submitEditor(e,it)}) }
         Scaffold(containerColor = Navy,
             topBar = {
@@ -500,10 +548,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     area==NextDoArea.TRIPS -> ConnectionScreen()
-                    area==NextDoArea.WORK -> ProfessionalLanding()
+                    area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()})
                     area==NextDoArea.PERSONAL -> PersonalLanding(!busy){openArea(NextDoArea.TRIPS)}
                     area==NextDoArea.SETTINGS -> SettingsLanding()
-                    else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null){openArea(it)}
+                    else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy){openArea(it)}
                 }
                 Spacer(Modifier.height(12.dp))
             }
@@ -521,7 +569,8 @@ class MainActivity : ComponentActivity() {
         TravelCard("Associazioni","Il collegamento Viaggi rimane distinto dall’autorizzazione professionale.") {
             Text(if(connection!=null)"Viaggi: dispositivo associato" else "Viaggi: non associato",color=Muted)
             Action("Gestisci connessione e archivio Viaggi",!busy){openArea(NextDoArea.TRIPS)}
-            Text("Professionale: associazione dedicata da implementare. Nessun accesso ai dati di lavoro con le credenziali Viaggi.",color=Muted,fontSize=12.sp)
+            Text(if(workConnection!=null)"Professionale: associato" else "Professionale: non associato",color=Muted,fontSize=12.sp)
+            Action("Gestisci agenda professionale",!busy){openArea(NextDoArea.WORK)}
         }
         TravelCard("Notifiche","Le notifiche professionali saranno configurabili nel prossimo sviluppo.") {
             Text("Non ancora attive.",color=Muted,fontSize=12.sp)
