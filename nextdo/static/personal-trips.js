@@ -45,9 +45,32 @@ const NextDoPersonal=(()=>{
  const fieldlist=(obj,spec)=>spec.map(([k,l,t])=>[k,l,obj[k]||'',t]);
  const pairsText=a=>(a||[]).map(x=>x.join(' | ')).join('\n');
  const readPairs=s=>s.split('\n').filter(x=>x.trim()).map(x=>{const n=x.indexOf('|');return n<0?[x.trim(),'']:[x.slice(0,n).trim(),x.slice(n+1).trim()]});
+ const bookingTypes=[['flight','Volo'],['hotel','Hotel'],['car','Auto a noleggio'],['train','Treno'],['attraction','Attrazione'],['restaurant','Ristorante'],['other','Altro']];
+ const fieldTemplates={flight:['Compagnia','Numero volo','Terminal','Check-in'],hotel:['Check-in','Check-out','Camera'],car:['Società','Ritiro','Riconsegna','Categoria'],train:['Numero treno','Carrozza','Posto'],attraction:['Orario','Biglietto'],restaurant:['Orario','Persone'],other:[]};
+ const roleTemplates={flight:['Partenza','Scalo','Arrivo'],hotel:['Alloggio'],car:['Ritiro','Riconsegna'],train:['Partenza','Fermata','Arrivo'],attraction:['Attrazione'],restaurant:['Ristorante'],other:['Tappa']};
+ function bookingKind(b){
+  if(bookingTypes.some(([k])=>k===b.kind))return b.kind;
+  const v=String(b.type||'').toLowerCase();
+  if(/vol[io]|flight|aere/.test(v))return 'flight';
+  if(/hotel|alloggio|accommodation|albergo/.test(v))return 'hotel';
+  if(/auto|car rental|noleggio/.test(v))return 'car';
+  if(/tren[oi]|train/.test(v))return 'train';
+  if(/attrazion|bigliett|attraction/.test(v))return 'attraction';
+  if(/ristorant|restaurant/.test(v))return 'restaurant';
+  return 'other';
+ }
  function bookingEdit(b,index){
-  const spec=[['type','Tipo'],['title','Titolo'],['ref','Riferimento'],['date','Data / periodo'],['status','Stato'],['place','Indirizzo / luogo'],['price','Prezzo'],['map','Link mappa HTTPS'],['source','Link fonte HTTPS'],['extraLink','Link aggiuntivo HTTPS'],['extraLabel','Etichetta link'],['doc','Nome PDF già caricato']];
-  editor('Prenotazione',[...fieldlist(b,spec),['lines','Dettagli (etichetta | valore per riga)',pairsText(b.lines),'textarea']],v=>save(t=>{const n={...b,...v,id:b.id||'booking-'+uid(),lines:readPairs(v.lines)};if(index<0)t.manifest.bookings.push(n);else t.manifest.bookings[index]=n}))
+  const {box,back}=modal('Prenotazione');back.setAttribute('data-personal-modal','');
+  const kind=select('kind',bookingTypes,bookingKind(b));
+  const spec=[['type','Categoria originale / personalizzata'],['title','Titolo'],['ref','Riferimento'],['date','Data / periodo'],['status','Stato'],['place','Luogo originale (testo)'],['price','Prezzo'],['map','Link mappa originale HTTPS'],['source','Link fonte HTTPS'],['extraLink','Link aggiuntivo HTTPS'],['extraLabel','Etichetta link'],['doc','Nome PDF già caricato']];
+  const form=el('form',{class:'formgrid'},[field('Tipologia',kind)]),controls={};
+  for(const [k,label] of spec){const c=input(k,'',b[k]||'');controls[k]=c;form.append(field(label,c))}
+  const details=el('textarea',{class:'field',rows:'4',value:pairsText(b.lines)});
+  const extra=el('textarea',{class:'field',rows:'5',value:pairsText(b.fields)});
+  const insert=btn('Inserisci campi del modello',()=>{const pairs=readPairs(extra.value),known=new Set(pairs.map(x=>x[0]));for(const k of fieldTemplates[kind.value])if(!known.has(k))pairs.push([k,'']);extra.value=pairsText(pairs)},'small');
+  form.append(field('Dettagli originali (etichetta | valore)',details),field('Campi specifici e personalizzati',extra),insert,el('div',{class:'actions full'},[btn('Annulla',()=>back.remove()),el('button',{type:'submit',class:'btn primary',text:'Salva'})]));
+  form.addEventListener('submit',async e=>{e.preventDefault();if(busy)return;busy=true;try{const v=Object.fromEntries(Object.entries(controls).map(([k,c])=>[k,c.value]));if(!v.title.trim())throw Error('Inserire un titolo');const n={...b,...v,kind:kind.value,type:v.type||bookingTypes.find(x=>x[0]===kind.value)[1],id:b.id||'booking-'+uid(),lines:readPairs(details.value),fields:readPairs(extra.value)};await save(t=>{if(index<0)t.manifest.bookings.push(n);else t.manifest.bookings[index]=n});back.remove()}catch(e){report(e)}finally{busy=false}});
+  box.append(form);
  }
  function guideEdit(g,index){
   editor('Guida pratica',[...fieldlist(g,[['category','Categoria'],['title','Titolo'],['summary','Sintesi','textarea'],['doc','Nome PDF già caricato']]),['items','Indicazioni (etichetta | valore per riga)',pairsText(g.items),'textarea'],['links','Link (etichetta | URL HTTPS)',pairsText((g.links||[]).map(x=>[x.label,x.url])),'textarea']],v=>save(t=>{const n={...g,...v,id:g.id||'guide-'+uid(),severity:g.severity||'info',items:readPairs(v.items),links:readPairs(v.links).map(([label,url])=>({label,url}))};if(index<0)t.manifest.guides.push(n);else t.manifest.guides[index]=n}))
@@ -98,10 +121,44 @@ const NextDoPersonal=(()=>{
   return img?el('div',{class:'travel-spot-photo'},[el('img',{src:'data:image/jpeg;base64,'+img.jpeg,alt:'Foto della tappa',loading:'lazy'}),el('div',{class:'travel-spot-credit'},[img.credit||'',img.license?' · '+img.license:'',safeLink(img.source,'Fonte')])]):null;
  }
  let geoKey='';
+ const located=p=>typeof p?.lat==='number'&&typeof p?.lon==='number';
+ const locationNav=p=>located(p)?safeLink('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(p.lat+','+p.lon),'Naviga'):p?.address?safeLink('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(p.address),'Cerca su Maps'):null;
+ const locationLine=p=>el('div',{class:'travel-mini'},[el('div',{},[node('strong','',p.role?p.role+' · '+p.label:p.label),paragraph([p.code,p.address,p.time,located(p)?p.lat+', '+p.lon:'Coordinate da verificare'].filter(Boolean).join(' · '))]),locationNav(p)]);
+ function placeEditor(initial,roles,onSave){
+  const {box,back}=modal('Luogo e coordinate');back.setAttribute('data-personal-modal','');
+  const loc={...initial,id:initial.id||'loc-'+uid()};
+  const role=input('role','Es. Partenza, Scalo, Arrivo',loc.role||''),label=input('label','Nome della tappa',loc.label||''),code=input('code','Codice aeroporto/stazione (facoltativo)',loc.code||''),when=input('time','Data / ora (facoltativa)',loc.time||''),query=input('query','Nome, indirizzo, città e paese',loc.address||loc.label||''),notes=el('textarea',{class:'field',rows:'3',value:loc.notes||''});
+  const results=el('div'),chosen=el('div');let candidate=located(loc)?{address:loc.address,lat:loc.lat,lon:loc.lon,map:loc.map,source:loc.source}:null;
+  const draw=()=>chosen.replaceChildren(paragraph(candidate?'Coordinate selezionate: '+candidate.lat+', '+candidate.lon:'Coordinate non ancora confermate'));
+  draw();
+  query.addEventListener('input',()=>{candidate=null;draw()});
+  const find=btn('Cerca con Geoapify',async()=>{if(find.disabled)return;find.disabled=true;results.replaceChildren(paragraph('Ricerca…'));try{const list=await api(path+'/geocode',{method:'POST',body:JSON.stringify({query:query.value,key:geoKey})});if(!back.isConnected)return;results.replaceChildren();for(const r of list)results.append(card(r.address,paragraph(r.lat+', '+r.lon+' · '+r.source),safeLink(r.map,'Verifica'),btn('Seleziona',()=>{candidate=r;query.value=r.address;if(!label.value.trim())label.value=r.address;draw();results.replaceChildren()},'primary')));if(!list.length)results.append(paragraph('Nessun risultato. Specifica il nome completo, città e paese.'))}catch(e){results.replaceChildren(paragraph(e.message))}finally{find.disabled=false}},'primary');
+  const commit=btn('Salva luogo',async()=>{if(commit.disabled)return;if(!label.value.trim())return msg('Inserire il nome del luogo',true);commit.disabled=true;try{const next={id:loc.id,role:role.value,label:label.value.trim(),code:code.value,time:when.value,address:query.value.trim(),notes:notes.value};if(candidate)Object.assign(next,{lat:candidate.lat,lon:candidate.lon,map:candidate.map,source:candidate.source});await onSave(next);back.remove()}catch(e){report(e);commit.disabled=false}},'primary');
+  box.append(paragraph('Ruoli suggeriti: '+roles.join(' · ')+'. Ogni luogo ha coordinate indipendenti. Il testo originale della prenotazione non viene modificato.'),field('Ruolo',role),field('Nome',label),field('Codice',code),field('Data / ora',when),field('Indirizzo da cercare',query),toolbar(find,btn('Servizi Viaggi',servicesEditor,'small')),results,chosen,field('Note',notes),toolbar(commit,btn('Annulla',()=>back.remove(),'small')));
+ }
  function geoEditor(b,index){
-  const {box,back}=modal('Trova indirizzo e coordinate');back.setAttribute('data-personal-modal','');
-  const query=input('query','Nome e città',b.place||b.title||'');const key=input('key','API key Geoapify',geoKey,'password');const results=el('div');
-  box.append(paragraph('Ricerca Geoapify: viene inviato solo il luogo che confermi. Usa la chiave salvata in Servizi Viaggi oppure inseriscine una temporanea.'),field('Luogo da cercare',query),field('Chiave temporanea (facoltativa)',key),btn('Cerca luogo',async()=>{results.replaceChildren(paragraph('Ricerca…'));try{const list=await api(path+'/geocode',{method:'POST',body:JSON.stringify({query:query.value,key:key.value})});geoKey=key.value;results.replaceChildren();for(const r of list)results.append(card(r.address,paragraph(r.lat+', '+r.lon+' · '+r.source),safeLink(r.map,'Verifica sulla mappa'),btn('Conferma questo luogo',async()=>{try{await save(t=>Object.assign(t.manifest.bookings[index],{place:r.address,map:r.map,latitude:r.lat,longitude:r.lon,geo_source:r.source}));back.remove()}catch(e){report(e)}},'primary')));if(!list.length)results.append(paragraph('Nessun risultato. Specifica città e paese.'))}catch(e){results.replaceChildren(paragraph(e.message))}},'primary'),results);
+  const {box,back}=modal('Luoghi della prenotazione');back.setAttribute('data-personal-modal','');
+  const roles=roleTemplates[bookingKind(b)],draft=clone(b.locations||[]);
+  const list=el('div');const repaint=()=>{list.replaceChildren();for(const [i,p] of draft.entries())list.append(card(p.role+' · '+p.label,locationLine(p),toolbar(btn('Modifica',()=>placeEditor(p,roles,async v=>{draft[i]=v;repaint()}),'small'),btn('↑',()=>{if(i>0){[draft[i-1],draft[i]]=[draft[i],draft[i-1]];repaint()}},'small'),btn('↓',()=>{if(i<draft.length-1){[draft[i+1],draft[i]]=[draft[i],draft[i+1]];repaint()}},'small'),btn('Rimuovi',()=>{draft.splice(i,1);repaint()},'small'))));};
+  box.append(paragraph('Dati precedenti conservati: '+(b.place||'nessun luogo originale')),paragraph('Aggiungi partenza, scali, arrivo, ritiro e riconsegna o qualsiasi altro luogo. Salva l’elenco solo dopo averlo controllato.'),list,toolbar(...roles.map(r=>btn('+ '+r,()=>placeEditor({role:r},roles,async v=>{draft.push(v);repaint()}),'small')),btn('+ Luogo libero',()=>placeEditor({},roles,async v=>{draft.push(v);repaint()}),'small')));
+  if(b.place&&(!draft.length))box.append(btn('Riprendi luogo originale',()=>placeEditor({role:roles[0],label:b.place,address:b.place,...(typeof b.latitude==='number'&&typeof b.longitude==='number'?{lat:b.latitude,lon:b.longitude,map:b.map,source:b.geo_source}:{})},roles,async v=>{draft.push(v);repaint()}),'small'));
+  const commit=btn('Salva tutti i luoghi',async()=>{if(commit.disabled)return;commit.disabled=true;try{await save(t=>{t.manifest.bookings[index].locations=draft});back.remove()}catch(e){report(e);commit.disabled=false}},'primary');box.append(commit);repaint();
+ }
+ function routeEditor(d){
+  const {box,back}=modal('Percorso · '+dayFmt(d.date));back.setAttribute('data-personal-modal','');
+  const points=clone(d.route_points||[]),mode=select('mode',[['drive','Auto'],['walk','A piedi'],['bicycle','Bicicletta']],d.route_mode||'drive');
+  const results=el('div'),list=el('div');
+  const candidates=trip.manifest.bookings.flatMap(b=>(b.locations||[]).map(l=>({b,l})));
+  const pick=select('location',[['','Seleziona un luogo già salvato'],...candidates.map(({b,l},i)=>[String(i),b.title+' · '+l.label])],'');
+  const refresh=()=>{list.replaceChildren();for(const [i,p] of points.entries())list.append(card((i+1)+'. '+p.label,locationLine(p),toolbar(btn('Modifica',()=>placeEditor(p,['Tappa'],async v=>{points[i]=v;refresh()}),'small'),btn('↑',()=>{if(i>0){[points[i-1],points[i]]=[points[i],points[i-1]];refresh()}},'small'),btn('↓',()=>{if(i<points.length-1){[points[i+1],points[i]]=[points[i],points[i+1]];refresh()}},'small'),btn('Rimuovi',()=>{points.splice(i,1);refresh()},'small'))));};
+  box.append(paragraph('Costruisci un percorso terrestre nell’ordine che preferisci. Le tappe sono copie indipendenti: nessuna modifica alle prenotazioni.'),field('Modalità',mode),list,toolbar(pick,btn('Aggiungi luogo',()=>{if(pick.value==='')return;points.push({...clone(candidates[Number(pick.value)].l),id:'loc-'+uid()});refresh()},'small')),btn('+ Nuova tappa',()=>placeEditor({role:'Tappa'},['Tappa'],async v=>{points.push(v);refresh()}),'small'),btn('Salva percorso',async()=>{try{await save(t=>{const day=t.manifest.days.find(x=>x.date===d.date);day.route_points=points;day.route_mode=mode.value});back.remove()}catch(e){report(e)}},'primary'));refresh();
+ }
+ function routeCard(d){
+  const points=d.route_points||[],out=el('div'),mode=d.route_mode||'drive',names={drive:'Auto',walk:'A piedi',bicycle:'Bicicletta'};
+  const labelTime=s=>Math.round(s/60)+' min',labelDist=m=>(m/1000).toLocaleString('it-IT',{maximumFractionDigits:1})+' km';
+  const calculate=btn('Calcola distanza e tempi',async()=>{if(calculate.disabled)return;calculate.disabled=true;out.replaceChildren(paragraph('Calcolo percorso…'));try{const r=await api(tripURL()+'/route',{method:'POST',body:JSON.stringify({date:d.date})});if(!out.isConnected)return;out.replaceChildren(node('h2','',labelDist(r.distance_m)+' · '+labelTime(r.duration_s)),paragraph('Stima '+names[mode]+' · '+r.source+' · non comprende soste o traffico in tempo reale.'),...r.legs.map((l,i)=>paragraph(points[i].label+' → '+points[i+1].label+': '+labelDist(l.distance_m)+' · '+labelTime(l.duration_s))))}catch(e){out.replaceChildren(paragraph(e.message))}finally{calculate.disabled=false}},'primary');
+  calculate.disabled=points.length<2||points.length>15||points.some(p=>!located(p));
+  return card('Percorso della giornata',paragraph(names[mode]+' · '+points.length+' tappe'),...points.map(locationLine),toolbar(btn('Organizza percorso',()=>routeEditor(d),'small'),calculate),paragraph(calculate.disabled?'Per il calcolo occorrono da 2 a 15 tappe con coordinate confermate.':''),out);
  }
  function aiEditor(){
   const {box,back}=modal('Acquisisci prenotazione con AI');back.setAttribute('data-personal-modal','');
@@ -125,14 +182,15 @@ const NextDoPersonal=(()=>{
    root.append(el('div',{class:'travel-grid'},[card('Prossima tappa',paragraph(next?dayFmt(next.date)+' · '+[next.place,next.headline].filter(Boolean).join(' — '):'Da pianificare'),paragraph(next?.description),btn('Apri programma',()=>{selected=next?.date;switchTab('giornata')},'primary')),card('Organizza in pochi passaggi',paragraph('Parti da una conferma di prenotazione, da un PDF o da un testo.'),toolbar(btn('Acquisisci con AI',aiEditor,'primary'),btn('+ Prenotazione',()=>bookingEdit({},-1),'small')),btn('Aggiungi spesa',()=>expenseEditor(),'small')),card('Guide per il viaggio',...m.guides.slice(0,4).map(g=>el('div',{class:'travel-mini'},[node('strong','',g.title),doc(g.doc,'PDF')])),btn('Tutte le guide',()=>switchTab('guide'),'small')),card('Prenotazioni',...m.bookings.slice(0,4).map(b=>el('div',{class:'travel-mini'},[node('strong','',b.title),navLink(b)])),btn('Tutte le prenotazioni',()=>switchTab('prenotazioni'),'small'))]));
   }else if(tab==='mappa'){
    root.append(card('Mappa e navigazione',paragraph('Apri le destinazioni sul navigatore. Le coordinate sono disponibili dopo la ricerca e la conferma di un luogo.')));
-   for(const [i,b] of m.bookings.entries())root.append(card(b.title,paragraph(b.place||'Luogo non definito'),paragraph(b.latitude!=null&&b.longitude!=null?b.latitude+', '+b.longitude+' · '+b.geo_source:''),toolbar(navLink(b),btn('Trova coordinate',()=>geoEditor(b,i),'small'))));
+   for(const [i,b] of m.bookings.entries())root.append(card(b.title,paragraph(b.place||'Luogo originale non definito'),...(b.locations||[]).map(locationLine),toolbar(navLink(b),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'))));
+   for(const d of m.days)if((d.route_points||[]).length)root.append(card(dayFmt(d.date),routeCard(d)));
   }else if(tab==='spese'){
    const expenses=m.expenses||[],totals={};for(const e of expenses){const cents=Math.round(Number(e.amount)*100);totals[e.currency]=(totals[e.currency]||0)+cents}
    root.append(card('Spese registrate',paragraph(Object.entries(totals).map(([k,v])=>k+' '+(v/100).toFixed(2)).join(' · ')||'Nessuna spesa registrata'),btn('+ Ricevuta / spesa',()=>expenseEditor(),'primary')));
    for(const [i,e] of expenses.entries())root.append(card(e.title,paragraph([e.date,e.category,e.currency+' '+e.amount,e.notes].filter(Boolean).join(' · ')),toolbar(doc(e.doc),btn('Modifica',()=>expenseEditor(e,i),'small'))));
   }else if(tab==='prenotazioni'){
    root.append(toolbar(btn('+ Prenotazione',()=>bookingEdit({},-1),'primary'),btn('Acquisisci con AI',aiEditor,'primary')));
-   for(const [i,b] of m.bookings.entries())root.append(card(b.title,spotPhoto(m.travel_photos?.['booking:'+b.id]),paragraph([b.type,b.date,b.status,b.ref,b.place,b.price].filter(Boolean).join(' · ')),lines(b.lines),toolbar(doc(b.doc,b.original?'Documento originale':'Apri PDF'),navLink(b),safeLink(b.source,'Fonte'),safeLink(b.extraLink,b.extraLabel||'Link'),btn('Trova coordinate',()=>geoEditor(b,i),'small'),btn('Foto della tappa',()=>coverEditor('booking:'+b.id,b.place||b.title),'small'),btn('Modifica',()=>bookingEdit(b,i),'small'))));
+   for(const [i,b] of m.bookings.entries())root.append(card(b.title,spotPhoto(m.travel_photos?.['booking:'+b.id]),paragraph([b.type,b.date,b.status,b.ref,b.place,b.price].filter(Boolean).join(' · ')),lines(b.lines),lines(b.fields),...(b.locations||[]).map(locationLine),toolbar(doc(b.doc,b.original?'Documento originale':'Apri PDF'),navLink(b),safeLink(b.source,'Fonte'),safeLink(b.extraLink,b.extraLabel||'Link'),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'),btn('Foto della tappa',()=>coverEditor('booking:'+b.id,b.place||b.title),'small'),btn('Modifica',()=>bookingEdit(b,i),'small'))));
   }else if(tab==='guide'){
    root.append(toolbar(btn('+ Guida',()=>guideEdit({},-1),'primary')));
    for(const [i,g] of m.guides.entries())root.append(card(g.title,paragraph([g.category,g.severity,g.summary].filter(Boolean).join(' · ')),lines(g.items),toolbar(doc(g.doc),...(g.links||[]).map(l=>safeLink(l.url,l.label)),btn('Modifica',()=>guideEdit(g,i),'small'))));
@@ -145,10 +203,11 @@ const NextDoPersonal=(()=>{
    const d=m.days.find(x=>x.date===selected)||m.days[0];if(!d)return;
    root.append(el('div',{class:'travel-days'},m.days.map(day=>btn(dayFmt(day.date),()=>{selected=day.date;render(main)},day.date===d.date?'primary':'small'))));
    root.append(card([d.date,d.place,d.headline].filter(Boolean).join(' · '),spotPhoto(m.travel_photos?.['day:'+d.date]),paragraph(d.description),toolbar(btn('Foto della giornata',()=>coverEditor('day:'+d.date,d.place||d.headline),'small'),btn('Modifica giornata',()=>dayEdit(d),'small'),btn('+ Evento',()=>eventEdit(d,{},-1),'primary'))));
+   root.append(routeCard(d));
    const timeline=el('div',{class:'travel-timeline'});root.append(timeline);
    for(const [i,e] of d.events.entries()){
     const b=m.bookings.find(x=>x.id===e.bid),g=m.guides.find(x=>x.id===e.gid);
-    timeline.append(card([e.time,e.title].filter(Boolean).join(' · '),paragraph([e.type,e.warning?'ATTENZIONE':'',e.details].filter(Boolean).join(' · ')),toolbar(b&&doc(b.doc),b&&navLink(b),b&&safeLink(b.source,'Fonte'),b&&safeLink(b.extraLink,b.extraLabel||'Link'),g&&doc(g.doc,'PDF guida'),g&&btn('Guide',()=>{tab='guide';render(main)},'small'),btn('Modifica',()=>eventEdit(d,e,i),'small'))))
+    timeline.append(card([e.time,e.title].filter(Boolean).join(' · '),paragraph([e.type,e.warning?'ATTENZIONE':'',e.details].filter(Boolean).join(' · ')),toolbar(b&&doc(b.doc),b&&navLink(b),...(b?.locations||[]).map(locationNav),b&&safeLink(b.source,'Fonte'),b&&safeLink(b.extraLink,b.extraLabel||'Link'),g&&doc(g.doc,'PDF guida'),g&&btn('Guide',()=>{tab='guide';render(main)},'small'),btn('Modifica',()=>eventEdit(d,e,i),'small'))))
    }
    const checks=card('Checklist');for(const [i,c] of d.checks.entries()){
     const cb=el('input',{type:'checkbox',checked:(st.checks[d.date]||[]).includes(i)});cb.addEventListener('change',()=>save(t=>{const a=new Set(t.state.checks[d.date]||[]);cb.checked?a.add(i):a.delete(i);t.state.checks[d.date]=[...a]}).catch(report));checks.append(el('label',{class:'rowtask'},[cb,c]))
