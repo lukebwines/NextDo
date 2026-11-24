@@ -10,6 +10,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.util.Base64
@@ -60,6 +62,47 @@ private val White = Color(0xFFF3F8FC)
 class MainActivity : ComponentActivity() {
     private lateinit var vault: Vault
     private var locked by mutableStateOf(true)
+    private var availableUpdate by mutableStateOf<TravelUpdate?>(null)
+    private var updateBusy by mutableStateOf(false)
+    private var updateMessage by mutableStateOf("")
+    private var showUpdateNotes by mutableStateOf(false)
+    private fun checkUpdates(manual: Boolean = false) {
+        if (updateBusy) return
+        updateBusy = true; updateMessage = ""
+        lifecycleScope.launch {
+            try {
+                availableUpdate = withContext(Dispatchers.IO) { AppUpdates.check(this@MainActivity) }
+                if (manual && availableUpdate == null) updateMessage = "Nessun aggiornamento disponibile"
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                if (manual) updateMessage = "Impossibile verificare gli aggiornamenti. Riprova con una connessione Internet."
+            } finally { updateBusy = false }
+        }
+    }
+    private fun installUpdate() {
+        val update = availableUpdate ?: return
+        if (updateBusy) return
+        if (!packageManager.canRequestPackageInstalls()) {
+            updateMessage = "Autorizza NextDo Viaggi a installare app da questa fonte, poi torna qui e riprova."
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + packageName)))
+            } catch (_: Exception) {
+                updateMessage = "Apri Impostazioni Android e autorizza l’installazione da NextDo Viaggi."
+            }
+            return
+        }
+        updateBusy = true; updateMessage = ""
+        lifecycleScope.launch {
+            try {
+                val apk = withContext(Dispatchers.IO) { AppUpdates.download(this@MainActivity, update) }
+                val uri = FileProvider.getUriForFile(this@MainActivity, packageName + ".updates", apk)
+                startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { updateMessage = e.message?.take(200) ?: "Aggiornamento non riuscito" }
+            finally { updateBusy = false }
+        }
+    }
     private var authenticating by mutableStateOf(false)
     private var busy by mutableStateOf(false)
     private var error by mutableStateOf("")
@@ -113,6 +156,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         vault = Vault(this)
+        checkUpdates()
         // Any leftovers from an interrupted PDF render are local and deleted on startup.
         cacheDir.listFiles()?.filter { it.name.startsWith("travel-pdf-") }?.forEach { it.delete() }
         setContent {
@@ -350,6 +394,7 @@ class MainActivity : ComponentActivity() {
                 }
             }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement=Arrangement.spacedBy(14.dp)) {
+                UpdatePanel()
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color=Teal)
                 if (error.isNotBlank()) Card(colors=CardDefaults.cardColors(containerColor=Color(0xFF432E37))) {
                     Row(Modifier.padding(14.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -375,6 +420,19 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(12.dp))
             }
         }
+    }
+    @Composable private fun UpdatePanel() {
+        val update = availableUpdate
+        if (update != null) {
+            TravelCard("Aggiornamento disponibile", "NextDo Viaggi " + update.version) {
+                if (showUpdateNotes && update.notes.isNotBlank()) Text(update.notes, color=Muted, fontSize=13.sp)
+                TextButton(onClick={showUpdateNotes=!showUpdateNotes}) { Text(if(showUpdateNotes) "Nascondi novità" else "Novità della versione") }
+                Action(if(updateBusy) "Attendi…" else "Scarica e installa", !updateBusy && !busy) { installUpdate() }
+            }
+        }
+        if (updateMessage.isNotBlank()) Text(updateMessage, color=Sand, fontSize=12.sp)
+        if (updateBusy) LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
+        if (locked || current == null) TextButton(onClick={checkUpdates(true)}, enabled=!updateBusy) { Text("Verifica aggiornamenti") }
     }
     @Composable private fun Pill(text: String, color: Color=Teal) {
         Text(text, Modifier.clip(RoundedCornerShape(50)).background(color.copy(alpha=.14f)).padding(horizontal=12.dp, vertical=6.dp),

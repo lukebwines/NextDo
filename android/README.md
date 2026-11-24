@@ -25,3 +25,6 @@ Prompt biometrico di sistema Android con biometria forte (impronta se disponibil
 
 ## Accesso ricordato (Android 0.1.3-test / server 0.1.35-test)
 Il primo PIN NextDo rilascia un segreto casuale dedicato al dispositivo, cifrato con il Keystore Android e conservato sul server solo come hash. Non viene conservato il PIN. Lo sblocco locale tenta automaticamente una nuova sessione di lettura di 5 minuti. Il segreto scade al massimo dopo 30 giorni e non oltre l'associazione; la revoca elimina le sessioni e il segreto. In caso di mancata connessione l'archivio offline resta disponibile. La riassociazione o un nuovo PIN possono essere necessari alla scadenza. Test fisico e HTTPS richiesti.
+
+## Distribuzione con firma stabile
+Vedi [Configurazione firma e release Android](SIGNING.md). L'app verifica le release Android pubbliche all'avvio o su richiesta; controlla SHA-256, nome pacchetto, versione e firma prima di passare al programma di installazione Android. Nessun token GitHub o dato dei viaggi viene inviato. Le build debug non sono aggiornabili con una firma di produzione differente; il primo passaggio alla firma stabile richiede una reinstallazione, con nuova associazione e download offline. I dati centrali restano sul Raspberry. Il codice server 0.1.35-test non cambia.
