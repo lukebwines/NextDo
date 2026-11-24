@@ -30,7 +30,7 @@ const NextDoPersonal=(()=>{
   const file=el('input',{type:'file',accept:'.zip',class:'field'});
   const importBtn=btn('Importa ZIP',async()=>{if(!file.files[0])return msg('Seleziona un archivio ZIP',true);const data=new FormData();data.append('file',file.files[0]);try{const r=await api(path+'/trips/import',{method:'POST',body:data});await load(r.id);msg('Importato: '+r.bookings+' prenotazioni, '+r.days+' giornate, '+r.pdfs+' PDF')}catch(e){report(e)}},'primary');
   pick.addEventListener('change',()=>pick.value?load(pick.value):(trip=null,render(main)));
-  root.classList.add('travel-shell');const imports=el('details',{class:'travel-import'},[node('summary','','Importa / trasferisci viaggio'),toolbar(file,importBtn)]);root.replaceChildren(el('div',{class:'travel-picker'},[el('div',{},[node('div','travel-kicker','AREA PERSONALE · VIAGGI'),pick]),toolbar(btn('+ Nuovo viaggio',newTrip,'primary'),btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',async()=>{await lock();render(main)})),imports]));
+  root.classList.add('travel-shell');const imports=el('details',{class:'travel-import'},[node('summary','','Importa / trasferisci viaggio'),paragraph('Gli ZIP con diario ripristinano anche la cronologia privata inclusa.'),toolbar(file,importBtn)]);root.replaceChildren(el('div',{class:'travel-picker'},[el('div',{},[node('div','travel-kicker','AREA PERSONALE · VIAGGI'),pick]),toolbar(btn('+ Nuovo viaggio',newTrip,'primary'),btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',async()=>{await lock();render(main)})),imports]));
   if(trip)show(root);else root.append(paragraph('Seleziona un viaggio oppure importane uno.'));
  }
  async function load(id){const token=generation;try{const result=await api(path+'/trips/'+encodeURIComponent(id));if(token!==generation||S.view!=='personal')return;trip=result;selected=trip.manifest.days[0]?.date||'';tab='panoramica';render(main)}catch(e){report(e)}}
@@ -181,28 +181,42 @@ const NextDoPersonal=(()=>{
   const active=()=>token===generation&&host.isConnected;
   const format=t=>t.slice(0,16).replace('T',' ');
   function draw(){
-   out.replaceChildren();if(!data){out.append(paragraph('Nessuna cronologia importata. Apri Diario nell’app Android e seleziona il file JSON esportato da Google.'));return}
+   out.replaceChildren();if(!data)out.append(paragraph('Nessuna cronologia importata. Sono visibili le tappe previste.'));
    const d=day.value,match=t=>!d||t.slice(0,10)===d;
-   const visits=data.visits.filter(v=>match(v.startTime)),acts=data.activities.filter(a=>match(a.startTime));
-   const paths=data.paths.flatMap(p=>{const groups=[];let g=[];for(const x of p){if(match(x.time))g.push(x);else if(g.length){groups.push(g);g=[]}}if(g.length)groups.push(g);return groups});
-   const pts=paths.flat().concat(visits.map(v=>v.location),acts.flatMap(a=>[a.first,a.last]));
-   out.append(card('Cronologia importata',paragraph(data.from+' — '+data.to+' · '+visits.length+' visite · '+acts.length+' spostamenti'),paragraph((acts.reduce((s,a)=>s+(a.distanceMeters||0),0)/1000).toLocaleString('it-IT',{maximumFractionDigits:1})+' km indicati da Google per gli spostamenti con distanza disponibile. Orari originali locali; gli eventi sono attribuiti alla data di inizio.')));
+   const visits=(data?.visits||[]).filter(v=>match(v.startTime)),acts=(data?.activities||[]).filter(a=>match(a.startTime));
+   const paths=(data?.paths||[]).flatMap(p=>{const groups=[];let g=[];for(const x of p){if(match(x.time))g.push(x);else if(g.length){groups.push(g);g=[]}}if(g.length)groups.push(g);return groups});
+   const plans=trip.manifest.days.filter(v=>!d||v.date===d).map(v=>(v.route_points||[]).filter(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lon))).filter(p=>p.length);
+   const pts=paths.flat().concat(visits.map(v=>v.location),acts.flatMap(a=>[a.first,a.last]),plans.flat());
+   const known=acts.filter(a=>a.distanceMeters!=null),minutes=Math.round(acts.reduce((s,a)=>s+Math.max(0,Date.parse(a.endTime)-Date.parse(a.startTime)),0)/60000);
+   out.append(card('Riepilogo',paragraph((data?data.from+' — '+data.to+' · ':'')+visits.length+' visite · '+acts.length+' spostamenti · '+plans.flat().length+' tappe geolocalizzate previste'),paragraph((known.length?(known.reduce((s,a)=>s+a.distanceMeters,0)/1000).toLocaleString('it-IT',{maximumFractionDigits:1})+' km registrati':'Distanza non disponibile')+' · '+minutes+' min negli spostamenti registrati. Orari originali locali; gli eventi sono attribuiti alla data di inizio.')));
    if(pts.length){
-    const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 800 520');svg.setAttribute('width','100%');svg.style.background='#162c3f';svg.style.touchAction='none';
-    const lon0=pts[0].lon,lat0=pts[0].lat,xy=p=>[(((p.lon-lon0+540)%360)-180)*Math.max(.01,Math.cos(lat0*Math.PI/180)),-p.lat];
+    const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 768 768');svg.setAttribute('width','100%');svg.style.background='#162c3f';svg.style.touchAction='none';
+    const merc=p=>{const lat=Math.max(-85.05112878,Math.min(85.05112878,p.lat))*Math.PI/180;return [(p.lon+180)/360,(1-Math.asinh(Math.tan(lat))/Math.PI)/2]};
+    const anchor=merc(pts[0])[0],xy=p=>{const [x,y]=merc(p);return [anchor+((x-anchor+1.5)%1)-.5,y]};
     let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
     for(const p of pts){const [x,y]=xy(p);minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y)}
-    const scale=Math.min(740/Math.max(.0001,maxX-minX),460/Math.max(.0001,maxY-minY)),project=p=>{const [x,y]=xy(p);return [400+(x-(minX+maxX)/2)*scale,260+(y-(minY+maxY)/2)*scale]};
+    const z=Math.max(0,Math.min(18,Math.floor(Math.log2(1/Math.max(1e-9,maxX-minX,maxY-minY))))),n=2**z,cx=Math.floor((minX+maxX)/2*n),cy=Math.max(0,Math.min(n-1,Math.floor((minY+maxY)/2*n)));
+    const project=p=>{const [x,y]=xy(p);return [(x*n-cx+1)*256,(y*n-cy+1)*256]};
     const make=(tag,attrs)=>{const n=document.createElementNS(ns,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));svg.append(n);return n};
-    for(const p of paths){const coords=p.map(project);if(coords.length>1)make('polyline',{points:coords.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#69e0d2','stroke-width':2,'vector-effect':'non-scaling-stroke'});else make('circle',{cx:coords[0][0],cy:coords[0][1],r:3,fill:'#69e0d2'})}
+    const bg=make('image',{x:0,y:0,width:768,height:768});
+    for(const p of plans){const coords=p.map(project);if(coords.length>1)make('polyline',{points:coords.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#008b88','stroke-width':3,'stroke-dasharray':'7 5','vector-effect':'non-scaling-stroke'});for(const [x,y] of coords)make('circle',{cx:x,cy:y,r:5,fill:'#008b88',stroke:'white'})}
+    for(const p of paths){const coords=p.map(project);if(coords.length>1)make('polyline',{points:coords.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#e58617','stroke-width':2,'vector-effect':'non-scaling-stroke'});else make('circle',{cx:coords[0][0],cy:coords[0][1],r:3,fill:'#e58617'})}
     for(const v of visits){const [x,y]=project(v.location);make('circle',{cx:x,cy:y,r:5,fill:'#ffd49a'})}
     for(const a of acts){for(const p of [a.first,a.last]){const [x,y]=project(p);make('circle',{cx:x,cy:y,r:3,fill:'#a5b4fc'})}}
-    let x=0,y=0,w=800,h=520,drag=null;const refresh=()=>svg.setAttribute('viewBox',[x,y,w,h].join(' '));
+    let x=0,y=0,w=768,h=768,drag=null;const refresh=()=>svg.setAttribute('viewBox',[x,y,w,h].join(' '));
     const zoom=f=>{if(w*f<30||w*f>3200)return;x+=w*(1-f)/2;y+=h*(1-f)/2;w*=f;h*=f;refresh()};
     svg.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY,x,y];svg.setPointerCapture(e.pointerId)});
     svg.addEventListener('pointermove',e=>{if(!drag)return;const r=svg.getBoundingClientRect();x=drag[2]-(e.clientX-drag[0])*w/r.width;y=drag[3]-(e.clientY-drag[1])*h/r.height;refresh()});
     for(const e of ['pointerup','pointercancel','lostpointercapture'])svg.addEventListener(e,()=>drag=null);
-    out.append(card('Tracciato geografico',toolbar(btn('+ Zoom',()=>zoom(.7),'small'),btn('− Zoom',()=>zoom(1/.7),'small'),btn('Centra',()=>{x=0;y=0;w=800;h=520;refresh()},'small')),svg,paragraph('Schema senza cartografia esterna: verde = percorso disponibile, giallo = visite, lilla = estremi degli spostamenti. Nessuna ricostruzione dei tratti mancanti.')));
+    const status=paragraph('Sfondo non caricato. Nessuna richiesta esterna.');
+    const mapBtn=btn('Carica cartografia Geoapify',()=>{
+     if(!confirm('Caricare la mappa dell’area? Geoapify riceverà gli indici delle tessere, non le visite o il tracciato.'))return;
+     mapBtn.disabled=true;status.textContent='Caricamento cartografia…';
+     bg.addEventListener('load',()=>{status.textContent='Geoapify · © OpenMapTiles · © OpenStreetMap contributors';mapBtn.disabled=false},{once:true});
+     bg.addEventListener('error',()=>{status.textContent='Cartografia non disponibile. Verifica la chiave Geoapify.';mapBtn.disabled=false},{once:true});
+     bg.setAttribute('href','api/personal/trips/'+encodeURIComponent(tr.id)+'/timeline/map/'+z+'/'+((cx%n+n)%n)+'/'+cy);
+    },'small');
+    out.append(card('Previsto / effettivo',toolbar(btn('+ Zoom',()=>zoom(.7),'small'),btn('− Zoom',()=>zoom(1/.7),'small'),btn('Centra',()=>{x=0;y=0;w=768;h=768;refresh()},'small'),mapBtn),svg,status,paragraph('Verde tratteggiato: collegamento schematico delle tappe previste, non percorso stradale. Arancione: percorso registrato; giallo: visite; lilla: estremi. Nessuna ricostruzione dei tratti mancanti.')));
    }
    const events=[...visits.map(v=>({v,kind:'Visita'})),...acts.map(v=>({v,kind:'Spostamento'}))].sort((a,b)=>Date.parse(a.v.startTime)-Date.parse(b.v.startTime));
    const labels={WALKING:'A piedi',IN_PASSENGER_VEHICLE:'In auto',IN_VEHICLE:'Veicolo',CYCLING:'Bicicletta',FLYING:'Volo',IN_BUS:'Autobus',IN_TRAIN:'Treno'};
@@ -212,7 +226,7 @@ const NextDoPersonal=(()=>{
    if(planned)out.append(card('Diario della giornata',spotPhoto(trip.manifest.travel_photos?.['day:'+d]),paragraph(trip.state.notes[d]||'Nessuna annotazione'),btn('Apri giornata e modifica note / foto',()=>{selected=d;switchTab('giornata')},'small')));
   }
   const loadDiary=async()=>{try{const r=await api(url);if(active()){data=r.data;draw()}}catch(e){if(active())report(e)}};
-  host.append(card('Diario di bordo',paragraph('Importazione da Android, solo per il periodo confermato. Nessun dato inviato a servizi cartografici esterni.'),field('Giornata (vuoto = tutte)',day),toolbar(btn('Aggiorna',loadDiary,'primary'),btn('Cancella cronologia',async()=>{if(!confirm('Eliminare la cronologia importata di questo viaggio?'))return;try{await api(url+'/clear',{method:'POST'});if(active())loadDiary()}catch(e){report(e)}},'small'))),out);
+  host.append(card('Diario di bordo',paragraph('Solo il periodo confermato. Cartografia esterna facoltativa. Il backup con diario contiene posizioni private.'),field('Giornata (vuoto = tutte)',day),toolbar(btn('Aggiorna',loadDiary,'primary'),btn('Esporta ZIP con diario',()=>{if(confirm('Il file conterrà la cronologia delle posizioni. Conservarlo in modo sicuro. Continuare?')){const a=el('a',{href:'api/personal/trips/'+encodeURIComponent(tr.id)+'/export?include_timeline=true',download:''});host.append(a);a.click();a.remove()}},'small'),btn('Cancella cronologia',async()=>{if(!confirm('Eliminare la cronologia importata di questo viaggio?'))return;try{await api(url+'/clear',{method:'POST'});if(active())loadDiary()}catch(e){report(e)}},'small'))),out);
   day.addEventListener('change',draw);root.append(host);loadDiary();
  }
  function show(root){

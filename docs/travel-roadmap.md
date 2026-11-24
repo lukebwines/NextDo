@@ -32,3 +32,6 @@ Ordine e numerazioni successive indicativi, non impegni di consegna. La priorit�
 - Pairing specifico Viaggi, PIN iniziale, biometria/credenziale Android, Keystore, token a scadenza e revocabili; revoca online non cancella copie offline esistenti.
 - Chiavi GroqCloud/Geoapify restano sul server. Cronologia: il JSON originale e i periodi esclusi non vengono trasmessi.
 - Cifre e firma APK conservate separatamente; nessuna reinstallazione necessaria se firma e identificativo restano uguali e versionCode aumenta.
+
+## Integrazione fase 2 — proposta 0.1.37-test / Android 0.1.6-test
+Consultazione diario web/Android, confronto visivo previsto/effettivo, mappa Geoapify su richiesta con overlay locale, export ZIP con diario e ripristino atomico, copia offline cifrata con storico. Test e collaudo reale ancora necessari. Non è calcolo automatico del percorso stradale né rilevazione automatica delle deviazioni. In seguito completare campi avanzati mobile e inbox.

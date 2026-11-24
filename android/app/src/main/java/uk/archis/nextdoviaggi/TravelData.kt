@@ -92,7 +92,7 @@ class TravelApi(base: String) {
         return (0 until a.length()).map { a.getJSONObject(it) }
     }
 }
-data class TripPackage(val manifest: JSONObject, val state: JSONObject, val docs: Map<String,ByteArray>, val revision: Int = -1) {
+data class TripPackage(val manifest: JSONObject, val state: JSONObject, val docs: Map<String,ByteArray>, val revision: Int = -1, val timeline: JSONObject? = null) {
     val info get() = manifest.getJSONObject("trip")
     val id get() = info.getString("id")
     val bookings get() = manifest.arr("bookings")
@@ -109,7 +109,7 @@ data class TripPackage(val manifest: JSONObject, val state: JSONObject, val docs
                     require(++entries <= 180) { "Archivio non valido" }
                     if (e.isDirectory) continue
                     val name = e.name
-                    require(name == "manifest.json" || name == "notes.json" ||
+                    require(name == "manifest.json" || name == "notes.json" || name == "timeline.json" ||
                         (name.startsWith("documenti/") && name.substring(10).matches(Regex("[^/\\\\]{1,128}\\.pdf", RegexOption.IGNORE_CASE)))) { "Percorso non valido" }
                     require(!files.containsKey(name)) { "File duplicato" }
                     val bytes = readLimited(zip, minOf(MAX, EXPANDED - total))
@@ -121,9 +121,10 @@ data class TripPackage(val manifest: JSONObject, val state: JSONObject, val docs
             val manifest = JSONObject(String(files.remove("manifest.json") ?: error("Manifest mancante"), Charsets.UTF_8))
             require(manifest.optInt("format_version") == 1)
             val state = JSONObject(String(files.remove("notes.json") ?: "{}".toByteArray(), Charsets.UTF_8))
+            val timeline=files.remove("timeline.json")?.let { JSONObject(String(it,Charsets.UTF_8)) }
             val docs = files.mapKeys { it.key.removePrefix("documenti/") }
             require(docs.values.all { it.size >= 5 && String(it,0,5,Charsets.US_ASCII) == "%PDF-" })
-            return TripPackage(manifest, state, docs)
+            return TripPackage(manifest, state, docs, timeline=timeline)
         }
     }
 }

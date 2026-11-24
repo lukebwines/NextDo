@@ -13,7 +13,7 @@ def raw_token(value):
  if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}",value):fail(401,"Credenziale non valida")
  return digest(value)
 
-def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit):
+def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit,import_bundle,export_bundle,map_tile):
  with db() as c:
   c.executescript("""CREATE TABLE IF NOT EXISTS mobile_pairings(code_hash TEXT PRIMARY KEY,owner TEXT NOT NULL,expires REAL NOT NULL);
   CREATE TABLE IF NOT EXISTS mobile_devices(id TEXT PRIMARY KEY,owner TEXT NOT NULL,label TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,expires REAL NOT NULL,created REAL NOT NULL,revoked INTEGER DEFAULT 0);
@@ -40,7 +40,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   if not row:fail(401,"Sessione scaduta o dispositivo revocato")
   active(row["owner"])
   return row
- travel_timeline.register(app,db=db,allowed=allowed,auth=auth,load=load)
+ travel_timeline.register(app,db=db,allowed=allowed,auth=auth,load=load,map_tile=map_tile)
  @app.get("/api/personal/mobile/devices")
  def devices(req:Request):
   owner=allowed(req)
@@ -133,10 +133,10 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   # Validate the same package format as the web import; keep blocking ZIP/SQLite off the event loop.
   from starlette.concurrency import run_in_threadpool
   def finish():
-   m,state,files=read_archive(bytes(raw))
+   m,state,files,timeline=read_archive(bytes(raw),with_timeline=True)
    with db() as c:
     owner=auth(req)["owner"]
-    rev=save(c,owner,m,state,files)
+    rev=import_bundle(c,owner,m,state,files,timeline)
    return {"id":m["trip"]["id"],"revision":rev}
   return await run_in_threadpool(finish)
  @app.post("/api/mobile/v1/trips")
@@ -187,9 +187,9 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
    r=load(c,owner,tid);m,state,_=read_archive(r["archive"])
    return {"manifest":m,"state":state,"revision":r["revision"]}
  @app.get("/api/mobile/v1/trips/{tid}/offline")
- def offline(tid:str,req:Request):
+ def offline(tid:str,req:Request,include_timeline:bool=False):
   owner=auth(req)["owner"]
-  with db() as c:r=load(c,owner,tid);return Response(r["archive"],media_type="application/zip",headers={"X-NextDo-Revision":str(r["revision"])})
+  with db() as c:r=load(c,owner,tid);return Response(export_bundle(c,owner,r,include_timeline),media_type="application/zip",headers={"X-NextDo-Revision":str(r["revision"])})
  @app.get("/api/mobile/v1/trips/{tid}/documents/{name}")
  def document(tid:str,name:str,req:Request):
   owner=auth(req)["owner"]
