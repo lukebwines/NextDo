@@ -1,0 +1,7 @@
+# NextDo 0.2 — restyling
+
+Dashboard operativa con contatori cliccabili per scadute/trascorse, oggi, domani, prossimi 7 giorni (oggi incluso), da verificare e completate. Ogni attività non completata è presente una sola volta nei riquadri; quelle da verificare con data imminente o trascorsa sono negli impegni principali, tutte sono raggiungibili dal filtro dedicato. Calendario mensile interattivo, data locale del browser, scelta del giorno → agenda filtrata. Il calendario completo mantiene anche voci concluse e note datate; esportazione ICS invariata. Azioni rapide e incolla/allega mantengono le funzioni precedenti.
+
+I cronoprogrammi e gli avanzamenti in evidenza sono in Progetti → Avanzamenti e Gantt in evidenza. Statistiche etichette: espandibili in Agenda/Attività e scadenze. Associazione Android: Impostazioni → App Android. I raggruppamenti impostazioni caricano solo la categoria aperta; IMAP e GroqCloud rimangono configurazioni separate a livello di interfaccia e conservano i valori già salvati. Gmail OAuth facoltativo, chiuso inizialmente. Menu mobile apribile con tutte le sezioni. Tema scuro/chiaro, titoli leggibili, focus tastiera, icone e favicon coordinate.
+
+Nessuna modifica al database, alle API operative, al motore GroqCloud o alle regole automatiche. Aggiornamento web/add-on; l'APK Android esistente resta compatibile. Icona Home Assistant e logo PNG; favicon SVG. Necessario collaudo finale sull'installazione reale, anche con il pannello Ingress.
