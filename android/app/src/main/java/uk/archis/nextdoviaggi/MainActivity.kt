@@ -394,7 +394,7 @@ class MainActivity : ComponentActivity() {
         }) { openTrip(it, false) }
     }
     private fun openTrip(t: TripPackage, cached: Boolean) {
-        area=NextDoArea.TRIPS; current = t; offline = cached; section = "Home"
+        area=NextDoArea.TRIPS; current = t; offline = cached; section = "Home"; updateCaptureProtection()
         selectedDay = t.days.firstOrNull { it.str("date") >= LocalDate.now().toString() }?.str("date")
             ?: t.days.firstOrNull()?.str("date").orEmpty()
     }
