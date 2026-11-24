@@ -66,6 +66,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var vault: Vault
     private var locked by mutableStateOf(true)
     private var area by mutableStateOf(NextDoArea.HOME)
+    private var workFilter by mutableStateOf("all")
+    private var allowWorkScreenshots by mutableStateOf(true)
+    private var foreground = false
+    private fun updateCaptureProtection(){
+        val allowed=foreground&&!locked&&allowWorkScreenshots&&android.os.Build.VERSION.SDK_INT>=33&&(area==NextDoArea.HOME||area==NextDoArea.WORK)
+        if(allowed)window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
     private var workConnection by mutableStateOf<JSONObject?>(null)
     private var workAgenda by mutableStateOf<WorkAgenda?>(null)
     private var workDetail by mutableStateOf<JSONObject?>(null)
@@ -189,6 +196,7 @@ class MainActivity : ComponentActivity() {
         }) { (cfg, meta, resumed, work) ->
             workConnection=work
             connection = cfg; offlineMeta = meta; locked = false; session=resumed.token; trips=resumed.trips; error=resumed.error
+            updateCaptureProtection()
             authHandler.removeCallbacks(autoLock)
             authHandler.postDelayed(autoLock, 300_000L)
         }
@@ -196,6 +204,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        if(android.os.Build.VERSION.SDK_INT>=33)setRecentsScreenshotEnabled(false)
+        allowWorkScreenshots=getPreferences(MODE_PRIVATE).getBoolean("allow_work_screenshots",true)
         vault = Vault(this)
         checkUpdates()
         WorkAlerts.channels(this)
@@ -211,6 +221,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume()
+        foreground=true;updateCaptureProtection()
         refreshAlertStatus()
         if(alertsEnabled)WorkAlerts.kick(this)
     }
@@ -223,6 +234,10 @@ class MainActivity : ComponentActivity() {
     }
     private fun saveAlarmOptions(o:AlarmOptions){CriticalAlarm.save(this,o);alarmOptions=o}
     private fun alarmSettings(action:String){try{startActivity(Intent(action,Uri.parse("package:"+packageName)))}catch(_:Exception){workError="Impostazione non disponibile su questo dispositivo."}}
+    override fun onPause(){
+        foreground=false;updateCaptureProtection()
+        super.onPause()
+    }
     override fun onStop() {
         super.onStop()
         if (!authenticating) lockLocal()
@@ -237,7 +252,7 @@ class MainActivity : ComponentActivity() {
         locked = true; busy = false; connection = null; session = ""; trips = emptyList()
         workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false
         editor = null; current = null; offlineMeta = null; offline = false; pdf = null; pageBitmap = null; pdfName = ""; error = ""
-        section = "Home"; area=NextDoArea.HOME
+        section = "Home"; area=NextDoArea.HOME;workFilter="all";updateCaptureProtection()
     }
     private fun deviceUnlock() {
         if (authenticating || busy) return
@@ -379,7 +394,7 @@ class MainActivity : ComponentActivity() {
         }) { openTrip(it, false) }
     }
     private fun openTrip(t: TripPackage, cached: Boolean) {
-        area=NextDoArea.TRIPS; current = t; offline = cached; section = "Home"
+        area=NextDoArea.TRIPS; current = t; offline = cached; section = "Home"; updateCaptureProtection()
         selectedDay = t.days.firstOrNull { it.str("date") >= LocalDate.now().toString() }?.str("date")
             ?: t.days.firstOrNull()?.str("date").orEmpty()
     }
@@ -494,7 +509,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun loadWorkDetail(id:Long){
         val cfg=workConnection?:return
-        workTask({WorkApi(cfg.getString("url")).detail(cfg.getString("token"),id)}){if(area==NextDoArea.WORK)workDetail=it}
+        workTask({WorkApi(cfg.getString("url")).detail(cfg.getString("token"),id)}){if(area==NextDoArea.WORK||area==NextDoArea.HOME)workDetail=it}
     }
     private fun disconnectWork(){
         val cfg=workConnection?:return
@@ -509,7 +524,8 @@ class MainActivity : ComponentActivity() {
         if(locked || busy) return
         closePdf(); current=null; editor=null; offline=false; section="Home"; error=""
         area=next
-        workDetail=null
+        if(next==NextDoArea.WORK)workFilter="all"
+        workDetail=null;updateCaptureProtection()
     }
     private fun backArea() {
         if(busy)return
@@ -521,10 +537,14 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable private fun App() {
-        LaunchedEffect(locked,area,workConnection){if(!locked&&(area==NextDoArea.HOME||area==NextDoArea.WORK)&&workConnection!=null) refreshWork()}
+        LaunchedEffect(locked,area,workConnection){
+            if(!locked&&(area==NextDoArea.HOME||area==NextDoArea.WORK)&&workConnection!=null){
+                while(true){refreshWork();kotlinx.coroutines.delay(30000)}
+            }
+        }
         val t = current
         BackHandler(enabled=!locked&&(t!=null||area!=NextDoArea.HOME||pdf!=null)){backArea()}
-        if(!locked && area==NextDoArea.WORK) workDetail?.let { detail -> WorkDetailDialog(detail){workDetail=null} }
+        if(!locked && (area==NextDoArea.WORK||area==NextDoArea.HOME)) workDetail?.let { detail -> WorkDetailDialog(detail){workDetail=null} }
         if(!locked) editor?.let { e -> TravelEditDialog(e,busy,error,{editor=null;error=""},{submitEditor(e,it)}) }
         Scaffold(containerColor = Navy,
             topBar = {
@@ -587,10 +607,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     area==NextDoArea.TRIPS -> ConnectionScreen()
-                    area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()},{id,rev->ackWork(id,rev)})
+                    area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()},{id,rev->ackWork(id,rev)},workFilter)
                     area==NextDoArea.PERSONAL -> PersonalLanding(!busy){openArea(NextDoArea.TRIPS)}
                     area==NextDoArea.SETTINGS -> SettingsLanding()
-                    else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy){openArea(it)}
+                    else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy,workError,{filter->openArea(NextDoArea.WORK);workFilter=filter},{id->loadWorkDetail(id)},{refreshWork()}){openArea(it)}
                 }
                 Spacer(Modifier.height(12.dp))
             }
@@ -619,6 +639,15 @@ class MainActivity : ComponentActivity() {
         }
         TravelCard("Sicurezza","Accesso protetto dal dispositivo; blocco in background e dopo cinque minuti.") {
             Action("Blocca applicazione",!busy){lockLocal()}
+            if(android.os.Build.VERSION.SDK_INT>=33){
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text("Consenti screenshot in Home e Lavoro")
+                        Text("Le catture possono contenere dati riservati. Viaggi, schermata bloccata e app recenti restano protetti.",color=Muted,fontSize=12.sp)
+                    }
+                    Switch(checked=allowWorkScreenshots,onCheckedChange={allowWorkScreenshots=it;getPreferences(MODE_PRIVATE).edit().putBoolean("allow_work_screenshots",it).apply();updateCaptureProtection()})
+                }
+            } else Text("Screenshot protetti su Android 12 e precedenti per tutelare le anteprime delle app recenti.",color=Muted,fontSize=12.sp)
         }
         TravelCard("Associazioni","Il collegamento Viaggi rimane distinto dall’autorizzazione professionale.") {
             Text(if(connection!=null)"Viaggi: dispositivo associato" else "Viaggi: non associato",color=Muted)

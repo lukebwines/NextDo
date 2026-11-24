@@ -8,6 +8,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,44 +70,52 @@ private fun ShellCard(title:String,subtitle:String,icon:ImageVector,accent:Color
     }
 }
 @Composable
-private fun StatusTile(label:String,icon:ImageVector,accent:Color,modifier:Modifier=Modifier,value:String="—") {
-    Column(modifier.clip(RoundedCornerShape(15.dp)).background(accent.copy(alpha=.08f)).padding(12.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
+private fun StatusTile(label:String,icon:ImageVector,accent:Color,modifier:Modifier=Modifier,value:String="—",enabled:Boolean=true,onClick:(()->Unit)?=null) {
+    Column(modifier.clip(RoundedCornerShape(15.dp)).background(accent.copy(alpha=.08f)).then(if(onClick!=null)Modifier.clickable(enabled=enabled,onClick=onClick) else Modifier).padding(12.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
         Icon(icon,null,tint=accent)
         Text(label,color=ShellWhite,fontWeight=FontWeight.SemiBold,fontSize=13.sp)
         Text(value,color=ShellMuted,fontSize=23.sp)
     }
 }
 @Composable
-internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolean,agenda:WorkAgenda?,workConnected:Boolean,workBusy:Boolean,open:(NextDoArea)->Unit) {
+internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolean,agenda:WorkAgenda?,workConnected:Boolean,workBusy:Boolean,workError:String,openWork:(String)->Unit,onDetail:(Long)->Unit,onRefresh:()->Unit,open:(NextDoArea)->Unit) {
     Text("La tua dashboard",fontSize=29.sp,fontWeight=FontWeight.ExtraBold,color=ShellWhite)
     Text(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy",Locale.ITALIAN)),color=ShellMuted,fontSize=14.sp)
     ShellCard("Professionale","Agenda, scadenze e appuntamenti",Icons.Default.Work,WorkBlue,enabled,{open(NextDoArea.WORK)}) {
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
-            StatusTile("Scadenze",Icons.Default.Event,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.kind=="task"}?.toString()?:"—")
-            StatusTile("Appuntamenti",Icons.Default.CalendarToday,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.kind=="appointment"}?.toString()?:"—")
+            StatusTile("Scadenze",Icons.Default.Event,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.kind=="task"}?.toString()?:"—",enabled){openWork("tasks")}
+            StatusTile("Appuntamenti",Icons.Default.CalendarToday,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.kind=="appointment"}?.toString()?:"—",enabled){openWork("appointments")}
         }
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
-            StatusTile("Urgenti",Icons.Default.Warning,ShellSand,Modifier.weight(1f),agenda?.items?.count{it.urgent}?.toString()?:"—")
-            StatusTile("Da verificare",Icons.Default.FactCheck,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.status=="review"}?.toString()?:"—")
+            StatusTile("Urgenti",Icons.Default.Warning,ShellSand,Modifier.weight(1f),agenda?.items?.count{it.urgent}?.toString()?:"—",enabled){openWork("urgent")}
+            StatusTile("Da verificare",Icons.Default.FactCheck,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.status=="review"}?.toString()?:"—",enabled){openWork("review")}
         }
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
+            StatusTile("Da fare",Icons.Default.Checklist,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.status=="todo"}?.toString()?:"—",enabled){openWork("todo")}
+            StatusTile("Senza data",Icons.Default.EventBusy,ShellSand,Modifier.weight(1f),agenda?.items?.count{it.day.isBlank()}?.toString()?:"—",enabled){openWork("undated")}
+        }
+        if(workError.isNotBlank())Text(workError,color=ShellSand,fontSize=12.sp)
+        if(workConnected)TextButton(onClick=onRefresh,enabled=!workBusy&&enabled){Text("Aggiorna agenda")}
         Text(when{workBusy->"Aggiornamento agenda…";agenda!=null->"Ultima sincronizzazione: "+agenda.updated.take(16).replace('T',' ');workConnected->"Agenda non disponibile. Apri Lavoro per riprovare.";else->"Associa l’area professionale. I trattini non indicano assenza di impegni."},color=ShellMuted,fontSize=12.sp)
         agenda?.let{data->
-            val end=LocalDate.parse(data.weekStart).plusDays(6).toString()
-            val alerts=data.items.filter{it.status=="review"||it.urgent||it.overdue||(it.day.isNotBlank()&&it.day>=data.today&&it.day<=end)}
-                .sortedWith(compareBy<WorkItem>{if(it.overdue)0 else if(it.urgent)1 else if(it.status=="review")2 else 3}.thenBy{it.day.ifBlank{"9999"}}.thenBy{it.id})
-            if(alerts.isNotEmpty()){
-                HorizontalDivider(color=ShellMuted.copy(alpha=.2f))
-                Text("In evidenza",color=WorkBlue,fontWeight=FontWeight.Bold)
-                for(t in alerts.take(6)){
-                    Column(Modifier.fillMaxWidth().clickable(enabled=enabled){open(NextDoArea.WORK)}.padding(vertical=4.dp)){
-                        Text(t.title,color=ShellWhite,fontWeight=FontWeight.SemiBold,fontSize=14.sp,maxLines=2)
-                        Text((if(t.kind=="appointment")"Appuntamento" else "Scadenza")+" · "+t.timeLabel+(if(t.status=="review")" · Da verificare" else "")+(if(t.overdue)if(t.kind=="appointment")" · Trascorso" else " · Scaduta" else ""),color=if(t.overdue||t.status=="review"||t.urgent)ShellSand else ShellMuted,fontSize=11.sp)
+            val entries=orderedWork(data.items)
+            HorizontalDivider(color=ShellMuted.copy(alpha=.2f))
+            Text("Attività aperte · "+entries.size,color=WorkBlue,fontWeight=FontWeight.Bold)
+            if(entries.isEmpty())Text("Nessuna attività aperta",color=ShellMuted,fontSize=13.sp)
+            var limit by androidx.compose.runtime.remember{androidx.compose.runtime.mutableIntStateOf(20)}
+            for(t in entries.take(limit)){
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(enabled=enabled&&!workBusy){onDetail(t.id)}.padding(vertical=8.dp,horizontal=4.dp),verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text(t.title,color=ShellWhite,fontWeight=FontWeight.SemiBold,fontSize=14.sp)
+                        Text((if(t.kind=="appointment")"Appuntamento" else "Attività")+" · "+t.timeLabel+" · "+statusName(t.status)+(if(t.overdue)if(t.kind=="appointment")" · Trascorso" else " · Scaduta" else ""),color=if(t.overdue||t.status=="review"||t.urgent)ShellSand else ShellMuted,fontSize=11.sp)
                     }
+                    Icon(Icons.Default.ChevronRight,"Apri dettaglio",tint=WorkBlue)
                 }
-                if(alerts.size>6)Text("Altre "+(alerts.size-6)+" voci in evidenza nell’agenda",color=ShellMuted,fontSize=12.sp)
             }
+            if(entries.size>limit)TextButton(onClick={limit+=20}){Text("Mostra altre "+minOf(20,entries.size-limit)+" voci")}
         }
-        OutlinedButton(onClick={open(NextDoArea.WORK)},enabled=enabled,modifier=Modifier.fillMaxWidth()){Text("Agenda della settimana",color=WorkBlue)}
+        OutlinedButton(onClick={openWork("all")},enabled=enabled,modifier=Modifier.fillMaxWidth()){Text("Tutte le attività",color=WorkBlue)}
+        TextButton(onClick={openWork("week")},enabled=enabled,modifier=Modifier.fillMaxWidth()){Text("Agenda della settimana",color=WorkBlue)}
     }
     ShellCard("Personale","Il tuo spazio riservato",Icons.Default.Person,PrivateTeal,enabled,{open(NextDoArea.PERSONAL)}) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){

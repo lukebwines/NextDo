@@ -55,3 +55,6 @@ Server 0.1.41-test invariato. Impostazioni → Allarmi critici: sveglia/sirena o
 
 ## 0.1.12-test — Ricerca aggiornamenti
 La ricerca scorre tutte le pagine delle release e sceglie il versionCode più alto tra i metadati validati, senza dipendere dall'ordine GitHub. Restano i controlli di firma, hash, package e versione. Test di regressione per ordine non cronologico, assenza aggiornamenti ed errori di lettura. Una sola installazione manuale della 0.1.12-test può essere necessaria per aggiornare il vecchio updater; non disinstallare. Server e Firebase invariati.
+
+## 0.1.13-test — Dashboard e agenda professionale
+La vista Lavoro parte da tutte le voci aperte, incluse quelle senza data, future e da verificare. Dashboard: contatori filtranti, dettaglio diretto e progressiva visualizzazione di tutte le attività. Aggiornamento automatico ogni 30 secondi mentre Home/Lavoro sono visibili e sbloccate. Screenshot abilitati in Home e Lavoro da Android 13, configurabili in Impostazioni → Sicurezza; Viaggi, blocco e anteprima delle app recenti protetti. Da Android 12 in giù rimane FLAG_SECURE. Il dettaglio professionale resta in sola lettura con presa visione separata. Server invariato; collaudo su dispositivo necessario.
