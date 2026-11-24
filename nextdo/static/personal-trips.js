@@ -66,29 +66,36 @@ const NextDoPersonal=(()=>{
  function servicesEditor(){
   const {box,back}=modal('Servizi Viaggi');back.setAttribute('data-personal-modal','');
   const token=generation;
-  box.append(paragraph('Le chiavi sono salvate cifrate sul Raspberry per il tuo account. Non vengono inserite nei file ZIP dei viaggi. GroqCloud continua a utilizzare la configurazione NextDo.'));
+  box.append(paragraph('GroqCloud rimane dedicato all’analisi delle prenotazioni. Geoapify serve per indirizzi e coordinate. Le immagini si caricano dal dispositivo, senza chiavi API fotografiche.'));
   (async()=>{try{
    const cfg=await api(path+'/services');if(token!==generation||!back.isConnected)return;
-   const pex=input('pexels','Incolla API key Pexels','','password'),geo=input('geoapify','Incolla API key Geoapify','','password');
-   const removeP=el('input',{type:'checkbox'}),removeG=el('input',{type:'checkbox'});
-   box.append(field('Pexels — '+(cfg.pexels_configured?'Configurata':'Da configurare'),pex),safeLink('https://www.pexels.com/api/','Richiedi chiave Pexels'),el('label',{},[removeP,' Rimuovi chiave Pexels']),field('Geoapify — '+(cfg.geoapify_configured?'Configurata':'Da configurare'),geo),safeLink('https://myprojects.geoapify.com/','Richiedi chiave Geoapify'),el('label',{},[removeG,' Rimuovi chiave Geoapify']),paragraph('Lascia vuoto per conservare una chiave esistente. Wikimedia è il servizio fotografico predefinito e non richiede configurazione. Pexels è facoltativo: le nuove chiavi potrebbero non essere disponibili.'),btn('Salva configurazione',async()=>{try{await api(path+'/services',{method:'POST',body:JSON.stringify({pexels:pex.value,geoapify:geo.value,remove:[...(removeP.checked?['pexels']:[]),...(removeG.checked?['geoapify']:[])]})});back.remove();msg('Servizi Viaggi aggiornati')}catch(e){report(e)}},'primary'))
+   const geo=input('geoapify','Incolla API key Geoapify','','password'),removeG=el('input',{type:'checkbox'});
+   box.append(field('Geoapify — '+(cfg.geoapify_configured?'Configurata':'Da configurare'),geo),safeLink('https://myprojects.geoapify.com/','Richiedi chiave Geoapify'),el('label',{},[removeG,' Rimuovi chiave Geoapify']),paragraph('Chiave cifrata sul Raspberry, esclusa dagli ZIP. Lascia vuoto per mantenere la chiave esistente.'),btn('Salva configurazione',async()=>{try{await api(path+'/services',{method:'POST',body:JSON.stringify({geoapify:geo.value,remove:removeG.checked?['geoapify']:[]})});back.remove();msg('Servizi Viaggi aggiornati')}catch(e){report(e)}},'primary'))
   }catch(e){report(e)}})();
  }
  function coverEditor(photoTarget='cover',initialQuery=''){
-  // Buttons call handlers with an event; treat that as the default cover.
   if(typeof photoTarget!=='string')photoTarget='cover';
-  const {box,back}=modal(photoTarget==='cover'?'Copertina del viaggio':'Foto della tappa');back.setAttribute('data-personal-modal','');
+  const {box,back}=modal(photoTarget==='cover'?'Copertina del viaggio':'Immagine della tappa');back.setAttribute('data-personal-modal','');
   const file=el('input',{type:'file',accept:'image/jpeg,image/png,image/webp',class:'field'});
-  const query=input('query','Es. città, paesaggio o monumento',initialQuery||trip.manifest.trip.subtitle?.split('·')[0]?.trim()||'');
-  const results=el('div',{class:'travel-photo-results'}),target=tripURL(),token=generation;
-  const provider=select('provider',[['commons','Wikimedia Commons · gratuito, senza chiave'],['pexels','Pexels · facoltativo (chiave API)']],'commons');
-  const upload=btn('Carica foto',async()=>{if(!file.files[0])return;const data=new FormData();data.append('file',file.files[0]);try{await api(target+'/photo/upload?target='+encodeURIComponent(photoTarget),{method:'POST',body:data});back.remove();if(token===generation)await reloadView()}catch(e){report(e)}},'primary');
-  box.append(paragraph('Cerca una foto della destinazione oppure carica una foto personale. Ai servizi esterni viene inviato solo il termine di ricerca.'),toolbar(file,upload),field('Servizio fotografico',provider),toolbar(safeLink('https://commons.wikimedia.org/','Wikimedia Commons'),btn('Servizi Viaggi',()=>{back.remove();servicesEditor()},'small')),field('Cerca una foto',query));
-  const search=btn('Cerca fotografie',async()=>{if(search.disabled)return;search.disabled=true;results.replaceChildren(paragraph('Ricerca…'));const chosen=provider.value;try{const list=await api(path+'/photos/search',{method:'POST',body:JSON.stringify({query:query.value,provider:chosen})});if(token!==generation||!back.isConnected)return;results.replaceChildren(...list.map(r=>el('div',{class:'travel-photo-option'},[el('img',{src:r.preview,alt:r.title,loading:'lazy',referrerpolicy:'no-referrer'}),paragraph(r.credit+' · '+r.license),safeLink(r.source,chosen==='pexels'?'Foto su Pexels':'Fonte Wikimedia'),btn('Usa questa foto',async()=>{try{await api(target+'/photo',{method:'POST',body:JSON.stringify({pageid:r.pageid,provider:chosen,target:photoTarget})});back.remove();if(token===generation)await reloadView()}catch(e){report(e)}},'primary')])));if(!list.length)results.append(paragraph('Nessun risultato. Prova una città o un luogo preciso, oppure cambia servizio.'))}catch(e){results.replaceChildren(paragraph(e.message))}finally{search.disabled=false}},'primary');
-  box.append(search,results);
+  const preview=el('div',{class:'travel-spot-photo'}),target=tripURL(),token=generation;
+  const upload=btn('Salva immagine',async()=>{
+   if(!file.files[0]||upload.disabled)return;
+   upload.disabled=true;const data=new FormData();data.append('file',file.files[0]);
+   try{await api(target+'/photo/upload?target='+encodeURIComponent(photoTarget),{method:'POST',body:data});back.remove();if(token===generation)await reloadView()}catch(e){report(e);upload.disabled=false}
+  },'primary');upload.disabled=true;
+  file.addEventListener('change',()=>{
+   preview.replaceChildren();upload.disabled=true;const selected=file.files[0];
+   if(!selected)return;
+   if(!['image/jpeg','image/png','image/webp'].includes(selected.type)||selected.size>5*1024*1024){preview.append(paragraph('Seleziona una foto JPEG, PNG o WebP fino a 5 MB.'));return}
+   const reader=new FileReader();
+   reader.onload=()=>{if(token!==generation||!back.isConnected||file.files[0]!==selected)return;preview.replaceChildren(el('img',{src:reader.result,alt:'Anteprima immagine'}));upload.disabled=false};
+   reader.onerror=()=>preview.replaceChildren(paragraph('Impossibile leggere il file.'));
+   reader.readAsDataURL(selected);
+  });
+  box.append(card('Carica dal dispositivo',paragraph('Fotografie personali o immagini create in ChatGPT. Formati JPEG, PNG e WebP, fino a 5 MB. Le immagini sono salvate localmente nel viaggio.'),file,preview,upload));
  }
  function spotPhoto(img){
-  return img?el('div',{class:'travel-spot-photo'},[el('img',{src:'data:image/jpeg;base64,'+img.jpeg,alt:'Foto della tappa',loading:'lazy'}),el('div',{class:'travel-spot-credit'},[img.credit||'',img.license?' · '+img.license:'',safeLink(img.source,img.license==='Pexels'?'Foto su Pexels':'Fonte')])]):null;
+  return img?el('div',{class:'travel-spot-photo'},[el('img',{src:'data:image/jpeg;base64,'+img.jpeg,alt:'Foto della tappa',loading:'lazy'}),el('div',{class:'travel-spot-credit'},[img.credit||'',img.license?' · '+img.license:'',safeLink(img.source,'Fonte')])]):null;
  }
  let geoKey='';
  function geoEditor(b,index){
@@ -108,7 +115,7 @@ const NextDoPersonal=(()=>{
   const m=trip.manifest,tr=m.trip,st=trip.state;
   const now=new Date(),today=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0'),delta=Math.round((new Date(tr.start+'T12:00:00')-new Date(today+'T12:00:00'))/86400000);
   const status=delta>0?delta+' giorni alla partenza':today<=tr.end?'In viaggio':'Viaggio concluso';
-  const hero=el('section',{class:'travel-hero'+(m.cover?' has-photo':'')},[...(m.cover?[el('img',{class:'travel-cover',src:'data:image/jpeg;base64,'+m.cover.jpeg,alt:'Copertina del viaggio'})]:[]),el('div',{class:'travel-hero-inner'},[node('div','travel-kicker','IL TUO VIAGGIO'),node('h2','',tr.title),node('p','',tr.subtitle||''),el('div',{class:'travel-hero-meta'},[node('span','travel-status',status),node('span','',dayFmt(tr.start)+' — '+dayFmt(tr.end))]),toolbar(btn('Oggi / prossima giornata',()=>{selected=m.days.find(d=>d.date>=today)?.date||m.days[0]?.date;switchTab('giornata')},'primary'),btn('Cambia copertina',coverEditor,'small'))]),...(m.cover?[el('div',{class:'travel-credit'},[m.cover.credit||'',m.cover.license?' · '+m.cover.license:'',safeLink(m.cover.source,m.cover.license==='Pexels'?'Foto su Pexels':'Fonte')])]:[])]);
+  const hero=el('section',{class:'travel-hero'+(m.cover?' has-photo':'')},[...(m.cover?[el('img',{class:'travel-cover',src:'data:image/jpeg;base64,'+m.cover.jpeg,alt:'Copertina del viaggio'})]:[]),el('div',{class:'travel-hero-inner'},[node('div','travel-kicker','IL TUO VIAGGIO'),node('h2','',tr.title),node('p','',tr.subtitle||''),el('div',{class:'travel-hero-meta'},[node('span','travel-status',status),node('span','',dayFmt(tr.start)+' — '+dayFmt(tr.end))]),toolbar(btn('Oggi / prossima giornata',()=>{selected=m.days.find(d=>d.date>=today)?.date||m.days[0]?.date;switchTab('giornata')},'primary'),btn('Cambia copertina',coverEditor,'small'))]),...(m.cover?[el('div',{class:'travel-credit'},[m.cover.credit||'',m.cover.license?' · '+m.cover.license:'',safeLink(m.cover.source,'Fonte')])]:[])]);
   root.append(hero);
   const header=el('nav',{class:'travel-tabs'},[...[['panoramica','Panoramica'],['giornata','Itinerario'],['prenotazioni','Prenotazioni'],['guide','Guide e GPS'],['mappa','Mappa'],['spese','Spese'],['documenti','Documenti']].map(([k,l])=>btn(l,()=>switchTab(k),tab===k?'primary':'small')),el('a',{class:'btn small',href:'api/personal/trips/'+encodeURIComponent(tr.id)+'/export',download:'',text:'Esporta ZIP'})]);
   root.append(header);

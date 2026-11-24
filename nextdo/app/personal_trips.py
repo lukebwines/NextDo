@@ -315,69 +315,31 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  def services(req:Request):
   owner=allowed(req)
   with db() as c:names={r[0] for r in c.execute("SELECT name FROM travel_services WHERE owner=?",(owner,))}
-  return {"pexels_configured":"pexels" in names,"geoapify_configured":"geoapify" in names}
+  return {"geoapify_configured":"geoapify" in names}
  @app.post("/api/personal/services")
  def save_services(req:Request,b:dict):
   owner=allowed(req,True)
   updates={}
-  for name in ("pexels","geoapify"):
+  for name in ("geoapify",):
    key=b.get(name)
    if key is None or key=="":continue
    updates[name]=tools.email_intake._cipher(data_path).encrypt(tools.service_key(key.strip() if isinstance(key,str) else key).encode()).decode()
   remove=b.get("remove",[])
-  if not isinstance(remove,list) or any(x not in ("pexels","geoapify") for x in remove):fail("Servizio non valido")
+  if not isinstance(remove,list) or any(x not in ("geoapify",) for x in remove):fail("Servizio non valido")
   with db() as c:
    for name,value in updates.items():c.execute("INSERT OR REPLACE INTO travel_services(owner,name,secret) VALUES(?,?,?)",(owner,name,value))
    for name in remove:c.execute("DELETE FROM travel_services WHERE owner=? AND name=?",(owner,name))
   return {"ok":True}
- @app.post("/api/personal/photos/search")
- def photos_search(req:Request,b:dict):
-  owner=allowed(req,True)
-  provider=b.get("provider","commons")
-  if provider=="pexels":
-   key=service(owner,"pexels")
-   if not key:fail("Configura la chiave Pexels in Servizi Viaggi")
-   return tools.pexels_search(b.get("query"),key)
-  if provider!="commons":fail("Servizio fotografico non valido")
-  return tools.photos_search(b.get("query"))
  def assign_photo(m,target,image):
   if target=="cover":m["cover"]=image;return
   if target not in {"day:"+d["date"] for d in m.get("days",[])}|{"booking:"+b["id"] for b in m.get("bookings",[])}:fail("Tappa non trovata")
   m.setdefault("travel_photos",{})[target]=image
- @app.post("/api/personal/trips/{tid}/photo")
- def choose_photo(tid:str,req:Request,b:dict):
-  owner=allowed(req,True)
-  target=b.get("target","cover")
-  if not isinstance(target,str):fail("Destinazione foto non valida")
-  with db() as c:load(c,owner,tid)
-  provider=b.get("provider","commons")
-  if provider=="pexels":
-   key=service(owner,"pexels")
-   if not key:fail("Configura la chiave Pexels in Servizi Viaggi")
-   image=tools.pexels_photo(b.get("pageid"),key)
-  elif provider=="commons":image=tools.commons_photo(b.get("pageid"))
-  else:fail("Servizio fotografico non valido")
-  if allowed(req,True)!=owner:fail("Sessione cambiata",403)
-  with db() as c:
-   r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
-   assign_photo(m,target,image)
-   return {"revision":save(c,owner,m,state,files,r["revision"])}
  @app.post("/api/personal/trips/{tid}/photo/upload")
  def upload_photo(tid:str,req:Request,target:str="cover",file:UploadFile=File(...)):
   owner=allowed(req,True);image=tools.photo(file.file.read(5*1024*1024+1))
   with db() as c:
    r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
    assign_photo(m,target,image)
-   return {"revision":save(c,owner,m,state,files,r["revision"])}
- @app.post("/api/personal/trips/{tid}/cover/commons")
- def cover_commons(tid:str,req:Request,b:dict):
-  owner=allowed(req,True)
-  with db() as c:load(c,owner,tid)
-  image=tools.commons_photo(b.get("pageid"))
-  if allowed(req,True)!=owner:fail("Sessione cambiata",403)
-  with db() as c:
-   r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
-   m["cover"]=image
    return {"revision":save(c,owner,m,state,files,r["revision"])}
  @app.post("/api/personal/geocode")
  def geocode(req:Request,b:dict):
