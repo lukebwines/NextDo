@@ -1,6 +1,8 @@
 package uk.archis.nextdoviaggi
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -152,7 +154,7 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
 @Composable
 internal fun WorkDetailDialog(detail:JSONObject,close:()->Unit){
     AlertDialog(onDismissRequest=close,title={Text(detail.str("title"))},text={
-        Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+        Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text(statusName(detail.str("status"))+" · "+priorityName(detail.str("priority")))
             Text(detail.str("due_at").ifBlank{"Data da definire"},color=MutedWork)
             Text(detail.str("description").take(12000).ifBlank{"Nessuna descrizione"})

@@ -89,6 +89,22 @@ internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolea
             StatusTile("Da verificare",Icons.Default.FactCheck,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.status=="review"}?.toString()?:"—")
         }
         Text(when{workBusy->"Aggiornamento agenda…";agenda!=null->"Ultima sincronizzazione: "+agenda.updated.take(16).replace('T',' ');workConnected->"Agenda non disponibile. Apri Lavoro per riprovare.";else->"Associa l’area professionale. I trattini non indicano assenza di impegni."},color=ShellMuted,fontSize=12.sp)
+        agenda?.let{data->
+            val end=LocalDate.parse(data.weekStart).plusDays(6).toString()
+            val alerts=data.items.filter{it.status=="review"||it.urgent||it.overdue||(it.day.isNotBlank()&&it.day>=data.today&&it.day<=end)}
+                .sortedWith(compareBy<WorkItem>{if(it.overdue)0 else if(it.urgent)1 else if(it.status=="review")2 else 3}.thenBy{it.day.ifBlank{"9999"}}.thenBy{it.id})
+            if(alerts.isNotEmpty()){
+                HorizontalDivider(color=ShellMuted.copy(alpha=.2f))
+                Text("In evidenza",color=WorkBlue,fontWeight=FontWeight.Bold)
+                for(t in alerts.take(6)){
+                    Column(Modifier.fillMaxWidth().clickable(enabled=enabled){open(NextDoArea.WORK)}.padding(vertical=4.dp)){
+                        Text(t.title,color=ShellWhite,fontWeight=FontWeight.SemiBold,fontSize=14.sp,maxLines=2)
+                        Text((if(t.kind=="appointment")"Appuntamento" else "Scadenza")+" · "+t.timeLabel+(if(t.status=="review")" · Da verificare" else "")+(if(t.overdue)if(t.kind=="appointment")" · Trascorso" else " · Scaduta" else ""),color=if(t.overdue||t.status=="review"||t.urgent)ShellSand else ShellMuted,fontSize=11.sp)
+                    }
+                }
+                if(alerts.size>6)Text("Altre "+(alerts.size-6)+" voci in evidenza nell’agenda",color=ShellMuted,fontSize=12.sp)
+            }
+        }
         OutlinedButton(onClick={open(NextDoArea.WORK)},enabled=enabled,modifier=Modifier.fillMaxWidth()){Text("Agenda della settimana",color=WorkBlue)}
     }
     ShellCard("Personale","Il tuo spazio riservato",Icons.Default.Person,PrivateTeal,enabled,{open(NextDoArea.PERSONAL)}) {
