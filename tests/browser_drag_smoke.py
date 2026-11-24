@@ -55,6 +55,16 @@ def main():
   assigned=check(client.post('/api/tasks',headers=headers,json={
    'title':'Bob private assignment','kind':'task','scope':'project','project_id':pid,
    'assigned_to':ids['bob']}))
+  for i in range(8):
+   check(client.post('/api/tasks',headers=headers,json={
+    'title':f'Dashboard appointment {i}', 'kind':'appointment',
+    'scope':'personal','status':'review','due_at':None if i==7 else '2099-11-25T09:00:00'}))
+  check(client.post('/api/tasks',headers=headers,json={
+   'title':'Dashboard deadline review','kind':'task','scope':'personal','status':'review'}))
+  check(client.post('/api/tasks',headers=headers,json={
+   'title':'Dashboard completed appointment','kind':'appointment','scope':'personal','status':'done'}))
+  check(client.post('/api/tasks',headers=headers,json={
+   'title':'Dashboard private note','kind':'note','scope':'personal'}))
   with socket.socket() as sock:
    sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
   base=f'http://127.0.0.1:{port}/'
@@ -74,6 +84,23 @@ def main():
    with sync_playwright() as play:
     browser=play.chromium.launch(headless=True)
     try:
+     dashboard_page=browser.new_page(viewport={'width':1365,'height':930})
+     dashboard_page.goto(base,wait_until='networkidle')
+     dashboard_page.locator('input[name="username"]').fill('admin')
+     dashboard_page.locator('input[name="password"]').fill('synthetic admin password 123')
+     dashboard_page.get_by_role('button',name='Accedi').click()
+     dashboard_page.locator('.dash-task-row',has_text='Dashboard appointment 7').wait_for()
+     assert dashboard_page.locator('.dash-task-row',has_text='Dashboard appointment').count()==8
+     assert dashboard_page.locator('.dash-task-row',has_text='Dashboard deadline review').count()==1
+     assert dashboard_page.locator('.dash-task-row',has_text='Dashboard completed appointment').count()==0
+     assert dashboard_page.locator('.dash-task-row',has_text='Dashboard private note').count()==0
+     pending=dashboard_page.locator('.dash-task-row',has_text='Dashboard appointment 7')
+     assert 'Da verificare' in pending.inner_text() and 'Senza data' in pending.inner_text()
+     assert not pending.locator('input[type="checkbox"]').is_enabled()
+     dashboard_page.get_by_role('button',name='Da verificare: 9 attività, apri elenco filtrato').click()
+     assert dashboard_page.locator('.rowtask',has_text='Dashboard appointment').count()==8
+     assert dashboard_page.locator('.rowtask',has_text='Dashboard deadline review').count()==1
+     dashboard_page.close()
      page=browser.new_page(viewport={'width':1365,'height':930})
      page.goto(base,wait_until='networkidle')
      page.locator('input[name="username"]').fill('alice')
