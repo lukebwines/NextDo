@@ -89,6 +89,8 @@ def register_restore_routes(app,*,user,csrf,db_path,attachments_path,data_path,d
      # Imported archives from older NextDo versions must be upgraded before use.
      from . import workspace
      workspace.upgrade(db_path,data_path)
+     from . import archive_storage
+     archive_storage.upgrade(db_path,data_path)
      from . import work_mobile
      with sqlite3.connect(db_path) as conn:
       work_mobile.ensure(conn)

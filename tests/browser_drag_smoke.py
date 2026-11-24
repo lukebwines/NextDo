@@ -106,6 +106,21 @@ def main():
      assert dashboard_page.locator('.rowtask',has_text='Dashboard appointment').count()==8
      assert dashboard_page.locator('.rowtask',has_text='Dashboard deadline review').count()==1
      dashboard_page.get_by_role('button',name='Dashboard',exact=True).click()
+     assert '30 giorni' in dashboard_page.locator('.metric-done').inner_text()
+     dashboard_page.locator('.metric-done').click()
+     dashboard_page.locator('.archive-results .rowtask',has_text='Dashboard completed appointment').wait_for()
+     assert dashboard_page.locator('.archive-results .rowtask').count()==1
+     dashboard_page.get_by_role('button',name='Impostazioni',exact=True).click()
+     dashboard_page.get_by_label('Periodo contatore completate').select_option('7')
+     dashboard_page.get_by_role('button',name='Salva periodo').click()
+     dashboard_page.get_by_text('Periodo salvato',exact=True).wait_for()
+     dashboard_page.locator('.settings-link',has_text='Archivio e spazio').click()
+     dashboard_page.locator('.storage-kpis').wait_for()
+     dashboard_page.get_by_role('button',name='Verifica selezione ed esporta').click()
+     dashboard_page.get_by_role('link',name='Scarica ZIP ordinato').wait_for()
+     dashboard_page.locator('.modalback').click(position={'x':4,'y':4})
+     dashboard_page.get_by_role('button',name='Dashboard',exact=True).click()
+     assert '7 giorni' in dashboard_page.locator('.metric-done').inner_text()
      assert dashboard_page.locator('.bento-overdue',has_text='Dashboard past synthetic').count()==1
      assert dashboard_page.locator('.bento-upcoming',has_text='Dashboard today synthetic').count()==1
      assert dashboard_page.locator('.bento-upcoming',has_text='Dashboard tomorrow synthetic').count()==1
@@ -120,6 +135,7 @@ def main():
      assert dashboard_page.locator('.rowtask',has_text='Dashboard today synthetic').count()==1
      assert dashboard_page.locator('.rowtask',has_text='Dashboard tomorrow synthetic').count()==0
      dashboard_page.get_by_role('button',name='Impostazioni',exact=True).click()
+     dashboard_page.locator('.settings-link',has_text='Profilo e preferenze').click()
      assert dashboard_page.locator('.settings-content',has_text='Il mio profilo').count()==1
      assert dashboard_page.locator('.settings-content',has_text='Regola automatica · Email → ICS').count()==0
      dashboard_page.locator('.settings-link',has_text='Automazioni').click()

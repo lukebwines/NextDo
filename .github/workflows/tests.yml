@@ -17,6 +17,7 @@ jobs:
         with:
           node-version: '22'
       - run: node --check nextdo/static/app.js
+      - run: node --check nextdo/static/archive-ui.js
       - run: node --check nextdo/static/personal-trips.js
       - run: node --check cloudflare/nextdo-email-worker.js
       - run: node tests/worker-email-smoke.mjs

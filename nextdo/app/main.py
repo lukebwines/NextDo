@@ -107,6 +107,8 @@ from . import workspace
 workspace.upgrade(DB,DATA)
 from . import collaborators
 collaborators.upgrade(DB,DATA)
+from . import archive_storage
+archive_storage.upgrade(DB,DATA)
 def ensure_setup_token():
  with conn() as c:
   initial=c.execute('SELECT 1 FROM users LIMIT 1').fetchone() is None
@@ -160,7 +162,7 @@ def check_course_code(code):
 
 def asset_versions():
  return {name:hashlib.sha256((ROOT/'static'/name).read_bytes()).hexdigest()[:12]
-         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','workspace-ui.css','workspace-ui.js','gantt.css','gantt.js','progress-ui.css','progress-ui.js','app.js','bento.css','nextdo.svg','microsoft-lists-ui.css','microsoft-lists-ui.js','personal-travel.css','personal-trips.js')}
+         for name in ('style.css','visual-v1.css','file-ui.css','file-tools.js','workspace-ui.css','workspace-ui.js','gantt.css','gantt.js','progress-ui.css','progress-ui.js','app.js','bento.css','nextdo.svg','microsoft-lists-ui.css','microsoft-lists-ui.js','personal-travel.css','personal-trips.js','archive-ui.js','archive-ui.css')}
 
 @app.get('/',response_class=HTMLResponse)
 def home():
@@ -172,7 +174,7 @@ def home():
 @app.get('/api/build')
 def build_details(req:Request):
  user(req)
- return {'version':'0.2.0-test','assets':asset_versions()}
+ return {'version':'0.2.1-test','assets':asset_versions()}
 @app.get('/api/setup')
 def setup():
  with conn() as c:count=c.execute('SELECT COUNT(*) FROM users').fetchone()[0]
@@ -747,3 +749,5 @@ outbound_mail.register(app,conn=conn,user=user,csrf=csrf,accessible=accessible,t
 
 from . import automatic_ics
 automatic_ics.register(app,conn=conn,user=user,csrf=csrf,data_path=DATA)
+
+archive_storage.register(app,conn=conn,user=user,csrf=csrf,accessible=accessible,can_edit=can_edit,taskdetail=taskdetail,record=record,data=DATA,db=DB,files=FILES,db_lock=DB_LOCK,tz=TZ)

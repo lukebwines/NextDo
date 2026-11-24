@@ -1,5 +1,5 @@
 name: NextDo
-version: "0.2.0-test"
+version: "0.2.1-test"
 slug: nextdo
 description: "Tasks, note, scadenze, CdS locali e monitor"
 arch:
