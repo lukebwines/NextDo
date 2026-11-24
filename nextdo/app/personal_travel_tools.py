@@ -60,22 +60,6 @@ def service_key(value):
  if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,250}",value):fail("Chiave API non valida")
  return value
 
-def generate_image(prompt,key):
- prompt=query_text(prompt,1500);key=service_key(key)
- payload={"model":"gpt-image-2.5-flare","prompt":prompt,"size":"1536x864","quality":"medium","n":1,"output_format":"jpeg","output_compression":80}
- opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
- try:
-  req=urllib.request.Request("https://api.openai.com/v1/images/generations",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"NextDo-Travel/0.1.32"},method="POST")
-  with opener.open(req,timeout=150) as response:raw=response.read(8*1024*1024+1)
-  if len(raw)>8*1024*1024:fail("Risposta immagine troppo grande",502)
-  result=json.loads(raw)
-  img=photo(base64.b64decode(result["data"][0]["b64_json"],validate=True))
-  return {**img,"credit":"Immagine illustrativa generata con AI OpenAI","license":"Generata con AI"}
- except HTTPException:raise
- except urllib.error.HTTPError as exc:
-  fail("OpenAI Images HTTP "+str(exc.code)+": verificare chiave, accesso al modello, limiti e fatturazione",502)
- except (OSError,ValueError,KeyError,IndexError,TypeError):fail("Generazione non riuscita o risposta non valida. Verificare il servizio OpenAI; non ripetere automaticamente.",502)
-
 def geocode(query,key):
  q=query_text(query);key=query_text(key,160)
  if not re.fullmatch(r"[A-Za-z0-9_-]+",key):fail("Chiave Geoapify non valida")

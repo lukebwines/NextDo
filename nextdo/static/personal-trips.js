@@ -66,34 +66,33 @@ const NextDoPersonal=(()=>{
  function servicesEditor(){
   const {box,back}=modal('Servizi Viaggi');back.setAttribute('data-personal-modal','');
   const token=generation;
-  box.append(paragraph('Chiavi cifrate sul Raspberry per il tuo account, escluse dagli ZIP. GroqCloud rimane dedicato alla lettura delle prenotazioni.'));
+  box.append(paragraph('GroqCloud rimane dedicato all’analisi delle prenotazioni. Geoapify serve per indirizzi e coordinate. Le immagini si caricano dal dispositivo, senza chiavi API fotografiche.'));
   (async()=>{try{
    const cfg=await api(path+'/services');if(token!==generation||!back.isConnected)return;
-   const imageAI=input('image_ai','Incolla API key OpenAI','','password'),geo=input('geoapify','Incolla API key Geoapify','','password');
-   const removeI=el('input',{type:'checkbox'}),removeG=el('input',{type:'checkbox'});
-   box.append(field('OpenAI Images — '+(cfg.image_ai_configured?'Configurata':'Da configurare'),imageAI),safeLink('https://platform.openai.com/api-keys','Crea chiave OpenAI API'),paragraph('La generazione è a consumo e distinta dall’abbonamento ChatGPT. Configurare la fatturazione API e verificare i limiti prima dell’uso.'),el('label',{},[removeI,' Rimuovi chiave OpenAI']),field('Geoapify — '+(cfg.geoapify_configured?'Configurata':'Da configurare'),geo),safeLink('https://myprojects.geoapify.com/','Richiedi chiave Geoapify'),el('label',{},[removeG,' Rimuovi chiave Geoapify']),paragraph('Lascia vuoto per conservare le chiavi esistenti.'),btn('Salva configurazione',async()=>{try{await api(path+'/services',{method:'POST',body:JSON.stringify({image_ai:imageAI.value,geoapify:geo.value,remove:[...(removeI.checked?['image_ai']:[]),...(removeG.checked?['geoapify']:[]),'pexels']})});back.remove();msg('Servizi Viaggi aggiornati')}catch(e){report(e)}},'primary'))
+   const geo=input('geoapify','Incolla API key Geoapify','','password'),removeG=el('input',{type:'checkbox'});
+   box.append(field('Geoapify — '+(cfg.geoapify_configured?'Configurata':'Da configurare'),geo),safeLink('https://myprojects.geoapify.com/','Richiedi chiave Geoapify'),el('label',{},[removeG,' Rimuovi chiave Geoapify']),paragraph('Chiave cifrata sul Raspberry, esclusa dagli ZIP. Lascia vuoto per mantenere la chiave esistente.'),btn('Salva configurazione',async()=>{try{await api(path+'/services',{method:'POST',body:JSON.stringify({geoapify:geo.value,remove:removeG.checked?['geoapify']:[]})});back.remove();msg('Servizi Viaggi aggiornati')}catch(e){report(e)}},'primary'))
   }catch(e){report(e)}})();
  }
  function coverEditor(photoTarget='cover',initialQuery=''){
   if(typeof photoTarget!=='string')photoTarget='cover';
   const {box,back}=modal(photoTarget==='cover'?'Copertina del viaggio':'Immagine della tappa');back.setAttribute('data-personal-modal','');
   const file=el('input',{type:'file',accept:'image/jpeg,image/png,image/webp',class:'field'});
-  const place=initialQuery||trip.manifest.trip.subtitle||trip.manifest.trip.title;
-  const prompt=el('textarea',{class:'field',rows:'5',value:'Panorama illustrativo di viaggio ispirato a '+String(place).slice(0,300)+'. Fotografia cinematografica, luce naturale, colori armoniosi, formato orizzontale 16:9, senza scritte né loghi. Rappresentazione evocativa, non documentale.'});
-  const results=el('div'),target=tripURL(),token=generation;
-  const upload=btn('Carica foto',async()=>{if(!file.files[0])return;const data=new FormData();data.append('file',file.files[0]);try{await api(target+'/photo/upload?target='+encodeURIComponent(photoTarget),{method:'POST',body:data});back.remove();if(token===generation)await reloadView()}catch(e){report(e)}},'primary');
-  const generate=btn('Genera con AI',async()=>{
-   if(generate.disabled||!prompt.value.trim())return;
-   if(!confirm('Inviare il prompt visibile a OpenAI Images? Ogni generazione può comportare un costo API, anche se non salvi la foto.'))return;
-   generate.disabled=true;results.replaceChildren(paragraph('Generazione in corso…'));
-   try{
-    const r=await api(target+'/photo/generate',{method:'POST',body:JSON.stringify({target:photoTarget,prompt:prompt.value,confirm_cost:true})});
-    if(token!==generation||!back.isConnected)return;
-    const use=btn('Usa questa immagine',async()=>{use.disabled=true;try{await api(target+'/photo/accept',{method:'POST',body:JSON.stringify({token:r.token})});back.remove();if(token===generation)await reloadView()}catch(e){report(e);use.disabled=false}},'primary');
-    results.replaceChildren(spotPhoto(r.image),paragraph('Anteprima AI: immagine illustrativa, non fotografia reale. Disponibile per 5 minuti.'),use);generate.textContent='Rigenera';
-   }catch(e){results.replaceChildren(paragraph(e.message))}finally{generate.disabled=false}
-  },'primary');
-  box.append(card('Carica dal dispositivo',paragraph('Puoi utilizzare anche immagini generate in ChatGPT, senza configurare l’API.'),toolbar(file,upload)),card('Genera con AI',paragraph('Modifica il prompt prima di inviarlo. Non includere dati di prenotazione, nomi, date private o documenti.'),field('Descrizione immagine',prompt),toolbar(generate,btn('Servizi Viaggi',()=>{back.remove();servicesEditor()},'small')),results));
+  const preview=el('div',{class:'travel-spot-photo'}),target=tripURL(),token=generation;
+  const upload=btn('Salva immagine',async()=>{
+   if(!file.files[0]||upload.disabled)return;
+   upload.disabled=true;const data=new FormData();data.append('file',file.files[0]);
+   try{await api(target+'/photo/upload?target='+encodeURIComponent(photoTarget),{method:'POST',body:data});back.remove();if(token===generation)await reloadView()}catch(e){report(e);upload.disabled=false}
+  },'primary');upload.disabled=true;
+  file.addEventListener('change',()=>{
+   preview.replaceChildren();upload.disabled=true;const selected=file.files[0];
+   if(!selected)return;
+   if(!['image/jpeg','image/png','image/webp'].includes(selected.type)||selected.size>5*1024*1024){preview.append(paragraph('Seleziona una foto JPEG, PNG o WebP fino a 5 MB.'));return}
+   const reader=new FileReader();
+   reader.onload=()=>{if(token!==generation||!back.isConnected||file.files[0]!==selected)return;preview.replaceChildren(el('img',{src:reader.result,alt:'Anteprima immagine'}));upload.disabled=false};
+   reader.onerror=()=>preview.replaceChildren(paragraph('Impossibile leggere il file.'));
+   reader.readAsDataURL(selected);
+  });
+  box.append(card('Carica dal dispositivo',paragraph('Fotografie personali o immagini create in ChatGPT. Formati JPEG, PNG e WebP, fino a 5 MB. Le immagini sono salvate localmente nel viaggio.'),file,preview,upload));
  }
  function spotPhoto(img){
   return img?el('div',{class:'travel-spot-photo'},[el('img',{src:'data:image/jpeg;base64,'+img.jpeg,alt:'Foto della tappa',loading:'lazy'}),el('div',{class:'travel-spot-credit'},[img.credit||'',img.license?' · '+img.license:'',safeLink(img.source,'Fonte')])]):null;

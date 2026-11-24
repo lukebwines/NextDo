@@ -152,8 +152,6 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  database=root/"trips.sqlite3"
  mutex=threading.RLock()
  grants={}
- previews={}
- generating=set()
  @contextmanager
  def db():
   with mutex:
@@ -246,8 +244,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  @app.post("/api/personal/lock")
  def lock(req:Request):
   owner,session=identity(req);csrf(req)
-  with mutex:
-   grants.pop((owner,session),None);previews.pop((owner,session),None)
+  with mutex:grants.pop((owner,session),None)
   return {"ok":True}
  @app.get("/api/personal/trips")
  def list_trips(req:Request):
@@ -318,17 +315,17 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  def services(req:Request):
   owner=allowed(req)
   with db() as c:names={r[0] for r in c.execute("SELECT name FROM travel_services WHERE owner=?",(owner,))}
-  return {"image_ai_configured":"image_ai" in names,"geoapify_configured":"geoapify" in names}
+  return {"geoapify_configured":"geoapify" in names}
  @app.post("/api/personal/services")
  def save_services(req:Request,b:dict):
   owner=allowed(req,True)
   updates={}
-  for name in ("image_ai","geoapify"):
+  for name in ("geoapify",):
    key=b.get(name)
    if key is None or key=="":continue
    updates[name]=tools.email_intake._cipher(data_path).encrypt(tools.service_key(key.strip() if isinstance(key,str) else key).encode()).decode()
   remove=b.get("remove",[])
-  if not isinstance(remove,list) or any(x not in ("image_ai","geoapify","pexels") for x in remove):fail("Servizio non valido")
+  if not isinstance(remove,list) or any(x not in ("geoapify",) for x in remove):fail("Servizio non valido")
   with db() as c:
    for name,value in updates.items():c.execute("INSERT OR REPLACE INTO travel_services(owner,name,secret) VALUES(?,?,?)",(owner,name,value))
    for name in remove:c.execute("DELETE FROM travel_services WHERE owner=? AND name=?",(owner,name))
@@ -337,45 +334,6 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   if target=="cover":m["cover"]=image;return
   if target not in {"day:"+d["date"] for d in m.get("days",[])}|{"booking:"+b["id"] for b in m.get("bookings",[])}:fail("Tappa non trovata")
   m.setdefault("travel_photos",{})[target]=image
- @app.post("/api/personal/trips/{tid}/photo/generate")
- def generate_photo(tid:str,req:Request,b:dict):
-  owner=allowed(req,True);_,session=identity(req)
-  target=b.get("target","cover")
-  if not isinstance(target,str):fail("Destinazione foto non valida")
-  if b.get("confirm_cost") is not True:fail("Confermare l'invio del prompt e il costo API")
-  prompt=tools.query_text(b.get("prompt"),1500)
-  key=service(owner,"image_ai")
-  if not key:fail("Configura OpenAI Images in Servizi Viaggi")
-  with db() as c:
-   r=load(c,owner,tid);m,_,_=read_archive(r["archive"])
-   if target!="cover" and target not in {"day:"+d["date"] for d in m.get("days",[])}|{"booking:"+x["id"] for x in m.get("bookings",[])}:fail("Tappa non trovata")
-  with mutex:
-   for k,v in list(previews.items()):
-    if v["expires"]<=time.monotonic():previews.pop(k,None)
-   if owner in generating:fail("Generazione già in corso",409)
-   if len(generating)>=3:fail("Servizio occupato, riprovare",429)
-   generating.add(owner);previews.pop((owner,session),None)
-  try:
-   image=tools.generate_image(prompt,key)
-   if allowed(req,True)!=owner:fail("Sessione cambiata",403)
-   token=secrets.token_urlsafe(32)
-   with mutex:
-    previews[(owner,session)]={"token":token,"tid":tid,"target":target,"image":image,"expires":time.monotonic()+300}
-   return {"token":token,"image":image}
-  finally:
-   with mutex:generating.discard(owner)
- @app.post("/api/personal/trips/{tid}/photo/accept")
- def accept_photo(tid:str,req:Request,b:dict):
-  owner=allowed(req,True);_,session=identity(req)
-  with mutex:
-   preview=previews.get((owner,session))
-   if not preview or preview["expires"]<=time.monotonic() or preview["tid"]!=tid or preview["token"]!=b.get("token"):fail("Anteprima scaduta o non valida",409)
-   with db() as c:
-    r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
-    assign_photo(m,preview["target"],preview["image"])
-    revision=save(c,owner,m,state,files,r["revision"])
-   previews.pop((owner,session),None)
-  return {"revision":revision}
  @app.post("/api/personal/trips/{tid}/photo/upload")
  def upload_photo(tid:str,req:Request,target:str="cover",file:UploadFile=File(...)):
   owner=allowed(req,True);image=tools.photo(file.file.read(5*1024*1024+1))
