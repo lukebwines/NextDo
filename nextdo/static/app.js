@@ -48,7 +48,7 @@ function render(){
  main.append(header);
  if(S.view==='dashboard')dashboard(main);else if(['tasks','appointments','notes','archive','mine','agenda'].includes(S.view))taskList(main,S.view);else if(S.view==='projects')NextDoWorkspace.projectView(main);else if(S.view==='calendar')calendar(main);else if(S.view==='courses')coursesView(main);else if(S.view==='groups')groupsView(main);else if(S.view==='personal')NextDoPersonal.render(main);else settings(main);
 }
-function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:t.status==='review'?'Verificare la scadenza prima di completarla':'Completa attività'});if(t.can_complete===false||t.status==='review')cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[node('div','tasktitle',t.title),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),...(t.kind==='appointment'?[tag('Appuntamento')]:t.kind==='task'?[tag('Scadenza')]:[]),...(t.status==='review'?[tag('Da verificare','high')]:[]),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit);return row}
+function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:t.status==='review'?'Verificare la scadenza prima di completarla':'Completa attività'});if(t.can_complete===false||t.status==='review')cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[node('div','tasktitle',t.title),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),...(t.kind==='appointment'?[tag('Appuntamento')]:t.kind==='task'?[tag('Scadenza')]:[]),...(t.status==='review'?[tag('Da verificare','high')]:[]),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit,...(['task','appointment'].includes(t.kind)?[workAckButton(t)]:[]));return row}
 function dashboard(main){
  main.classList.add('dashboard-page');
  main.append(el('div',{class:'toolbar'},[btn('NextDo Android · Professionale',workMobileEditor,'small')]));
@@ -68,7 +68,7 @@ function dashboard(main){
   const checkbox=el('input',{type:'checkbox',title:t.status==='review'?'Verificare prima di completare':'Completa attività'});if(t.status==='review'||t.can_complete===false)checkbox.disabled=true;
   checkbox.addEventListener('change',async()=>{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);checkbox.checked=false;return}try{await api('/tasks/'+t.id+'/toggle',{method:'POST'});await refresh();render()}catch(e){checkbox.checked=false;msg(e.message,true)}});
   const details=el('button',{type:'button',class:'dash-task-title',onclick:()=>taskForm(t)},[node('span','dash-task-name',t.title),el('span',{class:'dash-task-meta'},[tag(t.kind==='appointment'?'Appuntamento':'Scadenza'),...(t.status==='review'?[tag('Da verificare','high')]:[]),...(late.includes(t)?[tag('Scaduta','critical')]:[]),...(t.labels||[]).slice(0,1).map(v=>tag(v,'label-tag')),tag(priority[t.priority]||'Normale',t.priority),node('span','dash-due',fmt(t.due_at))])]);
-  row.append(checkbox,details);left.append(row);
+  row.append(checkbox,details,workAckButton(t));left.append(row);
  }
  if(!pending.length)left.append(node('div','empty','Nessuna attività in sospeso'));
  const quick=el('section',{class:'card dash-quick'});quick.append(el('div',{class:'card-head'},[ico('plus'),node('h2','','Aggiunta rapida')]));
@@ -670,5 +670,22 @@ async function workMobileEditor(){
  const code=node('p','sub','Genera un codice monouso valido 5 minuti. Il dispositivo avrà accesso in sola lettura alle scadenze e agli appuntamenti visibili nel tuo account, per 30 giorni. L’associazione Viaggi non cambia.');
  const list=el('div');
  const refresh=async()=>{try{const devices=await api('/work-mobile/devices');list.replaceChildren();for(const d of devices){list.append(el('div',{class:'rowtask'},[node('div','taskmain',d.label+' · '+(d.revoked?'Revocato':d.expires*1000<=Date.now()?'Scaduto':'Attivo fino al '+new Date(d.expires*1000).toLocaleString('it-IT'))),...(!d.revoked?[btn('Revoca',async()=>{if(!confirm('Revocare questo dispositivo professionale?'))return;try{await api('/work-mobile/devices/'+encodeURIComponent(d.id)+'/revoke',{method:'POST'});await refresh()}catch(e){msg(e.message,true)}},'small')]:[])]))}}catch(e){msg(e.message,true)}};
+ if(S.me.role==='admin')box.append(btn('Configura push Firebase',workPushEditor,'small'));
  box.append(code,btn('Genera codice',async()=>{try{const r=await api('/work-mobile/pair',{method:'POST'});const inputCode=el('input',{class:'field',value:r.code,readonly:'readonly'});code.replaceChildren(document.createTextNode('Codice monouso (5 minuti): '),inputCode);inputCode.select()}catch(e){msg(e.message,true)}},'primary'),list,btn('Chiudi',()=>back.remove(),'small'));await refresh();
+}
+
+function workAckButton(t){
+ if(t.work_acknowledged)return tag('Presa visione','normal');
+ return btn('Presa visione',async()=>{try{await api('/work-mobile/ack/'+t.id,{method:'POST',body:JSON.stringify({revision:t.work_revision})});await refresh();render()}catch(e){msg(e.message,true)}},'small');
+}
+async function workPushEditor(){
+ const {box,back}=modal('Push Firebase · NextDo');
+ const status=node('p','sub','Caricamento…');
+ const android=el('input',{type:'file',accept:'.json,application/json',class:'field'}),service=el('input',{type:'file',accept:'.json,application/json',class:'field'});
+ const refreshStatus=async()=>{try{const r=await api('/work-mobile/push/config');status.textContent=r.configured?'Configurato: '+r.project_id+' (consegna effettiva da verificare sul telefono)':'Firebase non configurato'}catch(e){status.textContent=e.message}};
+ box.append(status,node('p','sub','Registra in Firebase un’app Android con pacchetto uk.archis.nextdoviaggi. Carica google-services.json e la chiave JSON del service account autorizzato a Firebase Cloud Messaging. La chiave privata resta sul Raspberry, non viene inclusa nell’APK. Google riceve solo token e segnale generico di aggiornamento.'),
+ field('google-services.json',android),field('Service account JSON',service),
+ btn('Salva configurazione',async()=>{try{if(!android.files[0]||!service.files[0])throw Error('Seleziona entrambi i file');if(android.files[0].size>100000||service.files[0].size>100000)throw Error('File troppo grande');await api('/work-mobile/push/config',{method:'POST',body:JSON.stringify({android:JSON.parse(await android.files[0].text()),service:JSON.parse(await service.files[0].text())})});android.value='';service.value='';await refreshStatus();msg('Configurazione salvata. Sincronizza gli avvisi sul telefono.')}catch(e){msg(e.message,true)}},'primary'),
+ btn('Disabilita push',async()=>{if(!confirm('Rimuovere configurazione e registrazioni push? I promemoria locali rimangono attivi.'))return;try{await api('/work-mobile/push/disable',{method:'POST'});await refreshStatus()}catch(e){msg(e.message,true)}},'small'),btn('Chiudi',()=>back.remove(),'small'));
+ await refreshStatus();
 }

@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit
  */
 internal object WorkAlerts {
     private val lock=Any()
+    private val runLock=Any()
     private const val periodic="nextdo-work-alert-periodic"
     private const val immediate="nextdo-work-alert-now"
     private const val tag="nextdo-work-alert:"
@@ -41,6 +42,7 @@ internal object WorkAlerts {
         return if(v.exists(name))JSONObject(String(v.read(name),Charsets.UTF_8)) else null
     }
     private fun write(c:Context,name:String,data:JSONObject)=vault(c).write(name,data.toString().toByteArray(Charsets.UTF_8))
+    fun matches(c:Context,token:String)=synchronized(lock){try{read(c,"config")?.str("token")==token}catch(_:Exception){false}}
     fun enabled(c:Context)=synchronized(lock){vault(c).exists("config")}
     fun interval(c:Context)=synchronized(lock){try{read(c,"config")?.optInt("repeat",15)?:15}catch(_:Exception){15}}
     fun permission(c:Context)= (Build.VERSION.SDK_INT<33||ContextCompat.checkSelfPermission(c,Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED)&&NotificationManagerCompat.from(c).areNotificationsEnabled()
@@ -79,8 +81,11 @@ internal object WorkAlerts {
         synchronized(lock){clear(c)}
         WorkManager.getInstance(c).cancelUniqueWork(periodic)
         WorkManager.getInstance(c).cancelUniqueWork(immediate)
+        WorkManager.getInstance(c).cancelUniqueWork("nextdo-work-push-refresh")
+        WorkPush.clear(c)
     }
     fun enable(c:Context,url:String,token:String,expires:Long){
+        WorkPush.clear(c)
         synchronized(lock){
             clear(c)
             write(c,"config",JSONObject().put("url",url).put("token",token).put("expires",expires).put("repeat",15))
@@ -129,11 +134,12 @@ internal object WorkAlerts {
             val state=read(c,"state")?:return
             val marks=state.optJSONObject("marks")?:return
             val entry=marks.optJSONObject(key)?:JSONObject()
-            entry.put("ack",true);marks.put(key,entry)
+            entry.put("ack",true).put("pending",true);marks.put(key,entry)
             write(c,"state",state);manager(c).cancel(tag+key,id)
         }
         kick(c)
     }
+    fun pendingCount(c:Context):Int=synchronized(lock){try{val marks=read(c,"state")?.optJSONObject("marks")?:return@synchronized 0;marks.keys().asSequence().count{marks.optJSONObject(it)?.optBoolean("pending")==true}}catch(_:Exception){0}}
     private data class Remote(val items:JSONArray,val expires:Long)
     private fun fetch(cfg:JSONObject):Remote{
         val api=TravelApi(cfg.getString("url"));val token=cfg.getString("token")
@@ -164,17 +170,25 @@ internal object WorkAlerts {
         }
         return Plan(stage,next)
     }
-    fun run(c:Context):Boolean {
+    fun run(c:Context):Boolean=synchronized(runLock){runOnce(c)}
+    private fun runOnce(c:Context):Boolean {
         val cfg=synchronized(lock){read(c,"config")}?:return true
         if(cfg.getLong("expires")<=now()){synchronized(lock){if(read(c,"config")?.str("token")==cfg.str("token"))clear(c)};return true}
         var unauthorized=false
+        val pending=synchronized(lock){val marks=read(c,"state")?.optJSONObject("marks");marks?.keys()?.asSequence()?.filter{marks.optJSONObject(it)?.optBoolean("pending")==true}?.toList()?:emptyList()}
+        val delivered=mutableSetOf<String>()
+        for(key in pending.take(100)){
+            if(!matches(c,cfg.str("token")))return true
+            try{TravelApi(cfg.getString("url")).obj("/work/alerts/ack",cfg.getString("token"),JSONObject().put("key",key));delivered.add(key)}catch(e:Exception){if(e.message?.startsWith("HTTP 404")==true)delivered.add(key)}
+        }
         val remote=try{fetch(cfg)}catch(e:Exception){unauthorized=e.message?.startsWith("HTTP 401")==true||e.message?.startsWith("HTTP 403")==true;null}
         synchronized(lock){
             val current=read(c,"config")?:return true
             if(current.str("token")!=cfg.str("token"))return true
-            if(unauthorized){clear(c);return true}
+            if(unauthorized){clear(c);WorkPush.clear(c);return true}
             val t=now();val state=read(c,"state")?:JSONObject()
             val old=state.optJSONObject("marks")?:JSONObject()
+            for(key in delivered)old.optJSONObject(key)?.put("pending",false)
             val items=remote?.items?:state.optJSONArray("items")?:JSONArray()
             val last=if(remote!=null)t else state.optLong("synced",0)
             if(remote!=null){current.put("expires",remote.expires);write(c,"config",current)}
@@ -189,6 +203,7 @@ internal object WorkAlerts {
                 val key=item.str("key");if(!keyPattern.matches(key))continue
                 keys.add(key)
                 val mark=old.optJSONObject(key)?:JSONObject();marks.put(key,mark)
+                if(item.optBoolean("acknowledged")){mark.put("ack",true).put("pending",false);manager(c).cancel(tag+key,id);continue}
                 if(mark.optBoolean("ack"))continue
                 val p=plan(item,t);upcoming(p.next)
                 val critical=item.str("priority")=="critical"
@@ -201,11 +216,20 @@ internal object WorkAlerts {
                 if(critical&&p.stage>0&&permission(c))upcoming(maxOf(t+60,mark.optLong("sent",t)+repeat))
             }
             manager(c).activeNotifications.filter{it.tag?.startsWith(tag)==true&&it.tag!=tag+"test"&&it.tag?.removePrefix(tag) !in keys}.forEach{manager(c).cancel(it.tag,it.id)}
+            for(key in old.keys().asSequence())if(old.optJSONObject(key)?.optBoolean("pending")==true&&!marks.has(key))marks.put(key,old.getJSONObject(key))
             write(c,"state",JSONObject().put("items",items).put("marks",marks).put("synced",last))
             upcoming(last+day);upcoming(current.getLong("expires"))
             nextAlarm(c,next)
         }
+        if(remote!=null)try{WorkPush.sync(c,cfg)}catch(_:Exception){}
+        if(pendingCount(c)>0)return false
         return remote!=null
+    }
+    fun kickPush(c:Context){
+        if(!enabled(c))return
+        val request=OneTimeWorkRequestBuilder<WorkAlertWorker>()
+        if(Build.VERSION.SDK_INT>=31)request.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        WorkManager.getInstance(c).enqueueUniqueWork("nextdo-work-push-refresh",ExistingWorkPolicy.APPEND_OR_REPLACE,request.build())
     }
 }
 

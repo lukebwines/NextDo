@@ -1,5 +1,9 @@
 name: NextDo Android — release firmata
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/app/build.gradle.kts'
   workflow_dispatch:
     inputs:
       notes:
@@ -13,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.1.10-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -80,6 +84,10 @@ jobs:
           RELEASE_NOTES: ${{ inputs.notes }}
         run: |
           set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            test "$ANDROID_VERSION" = "0.1.10-test"
+            RELEASE_NOTES="NextDo: dashboard modulare, agenda professionale, avvisi avanzati, push Firebase opzionale e presa visione sincronizzata. Richiede NextDo server 0.1.41-test per le nuove funzioni; configurazione Firebase e collaudo dispositivo necessari."
+          fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "::error::La versione esiste già. Incrementare versionCode e versionName."

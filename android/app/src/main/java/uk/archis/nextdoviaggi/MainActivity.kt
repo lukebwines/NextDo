@@ -469,6 +469,15 @@ class MainActivity : ComponentActivity() {
         val cfg=workConnection?:return
         workTask({WorkApi(cfg.getString("url")).agenda(cfg.getString("token"))}){workAgenda=it}
     }
+    private fun ackWork(id:Long,revision:String){
+        val cfg=workConnection?:return
+        workTask({
+            val api=WorkApi(cfg.getString("url"))
+            api.acknowledge(cfg.getString("token"),id,revision)
+            WorkAlerts.kick(this)
+            api.agenda(cfg.getString("token"))
+        }){workAgenda=it}
+    }
     private fun loadWorkDetail(id:Long){
         val cfg=workConnection?:return
         workTask({WorkApi(cfg.getString("url")).detail(cfg.getString("token"),id)}){if(area==NextDoArea.WORK)workDetail=it}
@@ -564,7 +573,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     area==NextDoArea.TRIPS -> ConnectionScreen()
-                    area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()})
+                    area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()},{id,rev->ackWork(id,rev)})
                     area==NextDoArea.PERSONAL -> PersonalLanding(!busy){openArea(NextDoArea.TRIPS)}
                     area==NextDoArea.SETTINGS -> SettingsLanding()
                     else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy){openArea(it)}
@@ -614,7 +623,7 @@ class MainActivity : ComponentActivity() {
             Text(if(alertsEnabled)"Avvisi attivati" else "Avvisi disattivati",color=Teal,fontWeight=FontWeight.SemiBold)
             if(!alertsEnabled)Action("Attiva avvisi in background",workConnection!=null&&alertPermission&&!workBusy){enableWorkAlerts()}
             else {
-                Text("Le notifiche critiche si ripetono fino alla presa visione sul telefono. La presa visione non completa l’attività sul web.",fontSize=12.sp,color=Muted)
+                Text("Le notifiche critiche si ripetono fino alla presa visione sul telefono. La presa visione viene sincronizzata con il web e non completa l’attività.",fontSize=12.sp,color=Muted)
                 Text("Ripetizione avvisi critici",fontWeight=FontWeight.Bold)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                     for(n in listOf(15,30,60))FilterChip(selected=alertsRepeat==n,onClick={WorkAlerts.setRepeat(this@MainActivity,n);alertsRepeat=n},label={Text(n.toString()+" min")})
@@ -623,7 +632,10 @@ class MainActivity : ComponentActivity() {
                 TextButton(onClick={WorkAlerts.kick(this@MainActivity);refreshAlertStatus()}){Text("Sincronizza avvisi ora")}
             }
             Text("Scadenze: 24 ore prima e al termine. Appuntamenti con orario: anche 1 ora e 15 minuti prima. Se manca l’orario, promemoria alle 09:00 (fuso NextDo). Urgenze e voci da verificare segnalate anche senza data.",color=Muted,fontSize=12.sp)
-            Text("Controllo in background ogni 15 minuti circa; non è push in tempo reale. Il risparmio energetico può ritardare gli avvisi.",color=Sand,fontSize=12.sp)
+            Text("Push Firebase se configurato e registrato; controllo periodico ogni 15 minuti come riserva. Il risparmio energetico può ritardare gli avvisi.",color=Sand,fontSize=12.sp)
+            Text(if(WorkPush.active(this@MainActivity))"Push: registrato" else "Push: non ancora registrato (configura Firebase sul web e sincronizza gli avvisi).",fontSize=12.sp,color=Muted)
+            val pending=WorkAlerts.pendingCount(this@MainActivity)
+            if(pending>0)Text("Prese visione in attesa di sincronizzazione: "+pending,color=Sand,fontSize=12.sp)
             Action("Prova avviso critico",alertPermission){WorkAlerts.test(this@MainActivity)}
             TextButton(onClick={startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName))}){Text("Suoni e vibrazione in Android")}
         }

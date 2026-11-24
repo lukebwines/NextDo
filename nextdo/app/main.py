@@ -152,7 +152,7 @@ def can_edit(c,u,t):
  return workspace.can_write(c,u,t)
 
 def taskdetail(c,t,u=None):
- d=dict(t);d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['external_progress']=[dict(r) for r in c.execute('SELECT course_id,status,updated_at,source FROM external_course_progress WHERE task_id=?',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];d['can_edit']=workspace.can_write(c,u,t) if u else False;d['can_move']=workspace.can_move(c,u,t) if u else False;d['can_complete']=(t['status']!='review' and (workspace.can_finish(c,u,t) or (t['completion_mode']=='per_course' and bool(c.execute('SELECT 1 FROM task_courses tc JOIN course_assignees ca ON ca.course_id=tc.course_id WHERE tc.task_id=? AND ca.user_id=? LIMIT 1',(t['id'],u['id'])).fetchone())))) if u else False;return d
+ d=dict(t);d['work_revision']=work_mobile.revision(t);d['work_acknowledged']=work_mobile.seen(c,u,t) is not None if u and t['kind'] in ('task','appointment') else False;d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['external_progress']=[dict(r) for r in c.execute('SELECT course_id,status,updated_at,source FROM external_course_progress WHERE task_id=?',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];d['can_edit']=workspace.can_write(c,u,t) if u else False;d['can_move']=workspace.can_move(c,u,t) if u else False;d['can_complete']=(t['status']!='review' and (workspace.can_finish(c,u,t) or (t['completion_mode']=='per_course' and bool(c.execute('SELECT 1 FROM task_courses tc JOIN course_assignees ca ON ca.course_id=tc.course_id WHERE tc.task_id=? AND ca.user_id=? LIMIT 1',(t['id'],u['id'])).fetchone())))) if u else False;return d
 
 def check_course_code(code):
  # Historical INCA rule: M followed by 2-3 alphanumerics, including MM? and M??R.
@@ -709,7 +709,7 @@ calendar_import.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
 from . import personal_trips
 personal_trips.register_routes(app,user=user,csrf=csrf,conn=conn,data_path=DATA,ph=PH)
 from . import work_mobile
-work_mobile.register(app,conn=conn,user=user,csrf=csrf,accessible=accessible,tz=TZ,record=record)
+work_mobile.register(app,conn=conn,user=user,csrf=csrf,accessible=accessible,tz=TZ,record=record,data_path=DATA)
 from . import email_intake
 email_intake.register_routes(app,user=user,csrf=csrf,data_path=DATA)
 from . import gmail_auto
