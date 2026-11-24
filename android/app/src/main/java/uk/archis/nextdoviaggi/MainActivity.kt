@@ -81,13 +81,30 @@ class MainActivity : ComponentActivity() {
     private val authHandler = Handler(Looper.getMainLooper())
     private val autoLock = Runnable { lockLocal() }
     private val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    private data class ResumeResult(val token:String="",val trips:List<JSONObject> = emptyList(),val error:String="")
+    private fun resumeServer(cfg:JSONObject):ResumeResult {
+        val remembered=cfg.optString("remember_token")
+        if(remembered.isBlank()) return ResumeResult()
+        return try {
+            val api=TravelApi(cfg.getString("url"))
+            val response=api.obj("/resume",cfg.getString("token"),JSONObject().put("remember_token",remembered))
+            val s=response.getString("session_token")
+            ResumeResult(s,api.trips(s))
+        } catch(e:Exception) {
+            ResumeResult(error="Connessione automatica non riuscita. "+(e.message?.take(150) ?: "Riprova oppure inserisci il PIN."))
+        }
+    }
+    private fun retryServer() {
+        val cfg=connection ?: return
+        task({resumeServer(cfg)}) { r -> session=r.token;trips=r.trips;error=r.error }
+    }
     private fun finishDeviceUnlock() {
         task({
             val cfg = if (vault.exists("connection")) JSONObject(String(vault.read("connection"), Charsets.UTF_8)) else null
             val meta = if (vault.exists("offline_meta")) JSONObject(String(vault.read("offline_meta"), Charsets.UTF_8)) else null
-            Pair(cfg, meta)
-        }) { (cfg, meta) ->
-            connection = cfg; offlineMeta = meta; locked = false
+            Triple(cfg, meta, if(cfg!=null)resumeServer(cfg) else ResumeResult())
+        }) { (cfg, meta, resumed) ->
+            connection = cfg; offlineMeta = meta; locked = false; session=resumed.token; trips=resumed.trips; error=resumed.error
             authHandler.removeCallbacks(autoLock)
             authHandler.postDelayed(autoLock, 300_000L)
         }
@@ -200,10 +217,16 @@ class MainActivity : ComponentActivity() {
         val cfg = connection ?: return
         task({
             val api = TravelApi(cfg.getString("url"))
-            val response = api.obj("/unlock", cfg.getString("token"), JSONObject().put("pin", pin))
+            val response = api.obj("/unlock", cfg.getString("token"), JSONObject().put("pin", pin).put("remember",true))
             val s = response.getString("session_token")
-            Pair(s, api.trips(s))
-        }) { (s, list) -> session = s; trips = list; offline = false }
+            val updated=JSONObject(cfg.toString())
+            val remembered=response.optString("remember_token")
+            if(remembered.isNotBlank()) {
+                updated.put("remember_token",remembered)
+                vault.write("connection",updated.toString().toByteArray())
+            }
+            Triple(s, api.trips(s),updated)
+        }) { (s, list, updated) -> connection=updated;session = s; trips = list; offline = false }
     }
     private fun selectTrip(id: String) {
         val cfg = connection ?: return
@@ -394,7 +417,8 @@ class MainActivity : ComponentActivity() {
                 Action("Associa dispositivo",!busy&&url.isNotBlank()&&code.isNotBlank()) { val c=code;code="";connect(url,c) }
             }
         } else if(session.isBlank()) {
-            TravelCard("Viaggi sincronizzati","Inserisci il PIN della tua area personale NextDo.") {
+            TravelCard("Viaggi sincronizzati","Inserisci il PIN NextDo per autorizzare questo telefono. In seguito sarà sufficiente lo sblocco Android, fino alla scadenza o revoca.") {
+                if(cfg.optString("remember_token").isNotBlank()) Action("Riprova connessione automatica") { retryServer() }
                 OutlinedTextField(pin,{pin=it.filter(Char::isDigit).take(6)},label={Text("PIN NextDo")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),singleLine=true)
                 Action("Connetti",!busy&&pin.length==6) { val p=pin;pin="";unlockServer(p) }
             }
@@ -404,7 +428,7 @@ class MainActivity : ComponentActivity() {
             for (item in trips) TravelCard(item.str("title"),item.str("start")+"  —  "+item.str("end")) {
                 Action("Apri viaggio") { selectTrip(item.str("id")) }
             }
-            TextButton(onClick={session="";trips=emptyList()}) { Text("Riconnetti") }
+            TextButton(onClick={session="";trips=emptyList();retryServer()}) { Text("Riconnetti") }
         }
         offlineMeta?.let { meta ->
             TravelCard("Disponibile offline",meta.str("title")+" · "+meta.optInt("pdfs")+" PDF") {
