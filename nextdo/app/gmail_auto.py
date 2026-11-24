@@ -298,6 +298,7 @@ def _one(conn, cfg, gmail_id, token, label_id):
    _mark(conn, gmail_id, "duplicate", "Contenuto già acquisito", digest)
    return "duplicate", 0
   proposals = email_intake.analyze(email_intake.load_config(cfg["data_path"]), source)["proposals"]
+  if not proposals:proposals=[email_intake.manual_proposal(source)]
   created, duplicates = 0, 0
   with conn() as db:
    for item in proposals:
