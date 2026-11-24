@@ -53,7 +53,7 @@ def test_alert_scope_and_revocation(tmp_path):
  assert result.status_code==200,result.text
  data=result.json()["items"]
  assert len(data)==1 and data[0]["review"] and data[0]["date_only"]
- assert set(data[0])=={"key","kind","priority","review","when","date_only"}
+ assert set(data[0])=={"key","kind","priority","review","when","date_only","acknowledged"}
  assert "Secret" not in result.text
  assert c.get(m+"/agenda",headers=alert).status_code==401
  assert c.post(m+"/alerts/enable",headers=alert).status_code==401
@@ -62,4 +62,30 @@ def test_alert_scope_and_revocation(tmp_path):
  alert={"Authorization":"Bearer "+c.post(m+"/alerts/enable",headers=main).json()["alert_token"]}
  assert c.post(m+"/revoke",headers=main).status_code==200
  assert c.get(m+"/alerts",headers=alert).status_code==401
+ c.close()
+
+
+def test_ack_shared_per_user_revision(tmp_path):
+ c,h=init(tmp_path);p="/api/work-mobile";m="/api/mobile/v1/work"
+ other=create_user(c,h,"alice")
+ t=c.post("/api/tasks",headers=h,json={"title":"Review","scope":"common","status":"review","priority":"critical"}).json()["id"]
+ def device():
+  code=c.post(p+"/pair",headers=h).json()["code"]
+  dev={"Authorization":"Bearer "+c.post(m+"/pair",json={"code":code}).json()["device_token"]}
+  alert={"Authorization":"Bearer "+c.post(m+"/alerts/enable",headers=dev).json()["alert_token"]}
+  return dev,alert
+ d,a=device();d2,a2=device()
+ item=c.get(m+"/alerts",headers=a).json()["items"][0]
+ assert not item["acknowledged"]
+ assert c.post(m+"/alerts/ack",headers=a,json={"key":item["key"]}).status_code==200
+ assert c.get(m+"/alerts",headers=a2).json()["items"][0]["acknowledged"]
+ assert c.get("/api/tasks/"+str(t)).json()["work_acknowledged"]
+ assert c.get("/api/tasks/"+str(t)).json()["status"]=="review"
+ assert c.post(m+"/agenda/"+str(t)+"/ack",headers=d,json={"revision":"wrong"}).status_code==409
+ sign_in(c,h,"alice");d3,a3=device()
+ assert not c.get(m+"/alerts",headers=a3).json()["items"][0]["acknowledged"]
+ current=c.get("/api/tasks/"+str(t)).json()
+ assert c.post(p+"/ack/"+str(t),headers=h,json={"revision":current["work_revision"]}).status_code==200
+ assert c.get(m+"/alerts",headers=a3).json()["items"][0]["acknowledged"]
+ assert c.post(m+"/alerts/push/register",headers=a3,json={"token":"x"*50,"project_id":"test"}).status_code==409
  c.close()

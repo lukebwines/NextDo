@@ -89,9 +89,11 @@ def register_restore_routes(app,*,user,csrf,db_path,attachments_path,data_path,d
      # Imported archives from older NextDo versions must be upgraded before use.
      from . import workspace
      workspace.upgrade(db_path,data_path)
+     from . import work_mobile
      with sqlite3.connect(db_path) as conn:
+      work_mobile.ensure(conn)
       conn.execute('DELETE FROM sessions')
-      for table in ('work_mobile_alert_tokens','work_mobile_pairs','work_mobile_devices'):
+      for table in ('work_mobile_push','work_mobile_alert_tokens','work_mobile_pairs','work_mobile_devices'):
        if conn.execute('SELECT 1 FROM sqlite_master WHERE type="table" AND name=?',(table,)).fetchone():conn.execute('DELETE FROM '+table)
     except Exception:
      db_copy(old_db,db_path)
