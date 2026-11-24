@@ -20,7 +20,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-internal data class WorkItem(val id:Long,val title:String,val kind:String,val priority:String,val status:String,val day:String,val instant:String,val overdue:Boolean) {
+internal data class WorkItem(val id:Long,val title:String,val kind:String,val priority:String,val status:String,val day:String,val instant:String,val overdue:Boolean,val revision:String,val acknowledged:Boolean) {
     val urgent get()=priority=="high"||priority=="critical"
     val timeLabel get()=if(day.isBlank())"Data da definire" else day+(if(instant.isNotBlank())" · "+instant.drop(11).take(5) else if(kind=="appointment")" · orario da definire" else "")
 }
@@ -37,7 +37,7 @@ internal class WorkApi(private val base:String){
             val page=api.obj("/work/agenda?after="+after,token)
             if(first==null)first=page
             for(t in page.arr("items")){
-                items.add(WorkItem(t.getLong("id"),t.str("title"),t.str("kind"),t.str("priority"),t.str("status"),t.str("day"),t.str("instant"),t.optBoolean("overdue")))
+                items.add(WorkItem(t.getLong("id"),t.str("title"),t.str("kind"),t.str("priority"),t.str("status"),t.str("day"),t.str("instant"),t.optBoolean("overdue"),t.str("revision"),t.optBoolean("acknowledged")))
             }
             if(page.isNull("next_after"))break
             val next=page.getLong("next_after")
@@ -47,6 +47,7 @@ internal class WorkApi(private val base:String){
         val p=first?:error("Agenda non disponibile")
         return WorkAgenda(items,p.str("today"),p.str("week_start"),p.str("timezone"),p.str("updated_at"),p.str("display_name"))
     }
+    fun acknowledge(token:String,id:Long,revision:String)=api.obj("/work/agenda/"+id+"/ack",token,JSONObject().put("revision",revision))
     fun detail(token:String,id:Long)=api.obj("/work/agenda/"+id,token)
     fun revoke(token:String)=api.obj("/work/revoke",token,JSONObject())
 }
@@ -67,7 +68,7 @@ private fun WorkCard(title:String,body:@Composable ColumnScope.()->Unit){
     }
 }
 @Composable
-internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:String,defaultUrl:String,onPair:(String,String)->Unit,onRefresh:()->Unit,onDetail:(Long)->Unit,onDisconnect:()->Unit){
+internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:String,defaultUrl:String,onPair:(String,String)->Unit,onRefresh:()->Unit,onDetail:(Long)->Unit,onDisconnect:()->Unit,onAck:(Long,String)->Unit){
     var url by remember(defaultUrl){mutableStateOf(defaultUrl)}
     var code by remember{mutableStateOf("")}
     var confirm by remember{mutableStateOf(false)}
@@ -145,11 +146,15 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
         WorkCard(t.title){
             Text((if(t.kind=="appointment")"Appuntamento" else "Scadenza")+" · "+t.timeLabel,color=MutedWork,fontSize=13.sp)
             Text(statusName(t.status)+" · Priorità "+priorityName(t.priority)+(if(t.overdue)if(t.kind=="task")" · Scaduta" else " · Trascorso" else ""),color=if(t.overdue)RedWork else if(t.urgent||t.status=="review")SandWork else Blue,fontSize=12.sp)
-            TextButton(onClick={onDetail(t.id)},enabled=!busy){Text("Apri dettaglio")}
+            if(t.acknowledged)Text("Presa visione sincronizzata",color=Blue,fontSize=12.sp)
+            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                TextButton(onClick={onDetail(t.id)},enabled=!busy){Text("Apri dettaglio")}
+                if(!t.acknowledged)TextButton(onClick={onAck(t.id,t.revision)},enabled=!busy){Text("Presa visione")}
+            }
         }
     }
     if(visible<shown.size)OutlinedButton(onClick={visible+=50}){Text("Mostra altre voci")}
-    Text("Sola lettura. Modifiche e notifiche saranno abilitate in una fase successiva.",color=MutedWork,fontSize=12.sp)
+    Text("Presa visione sincronizzata; non modifica lo stato dell’attività.",color=MutedWork,fontSize=12.sp)
 }
 @Composable
 internal fun WorkDetailDialog(detail:JSONObject,close:()->Unit){

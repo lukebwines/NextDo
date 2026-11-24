@@ -10,14 +10,15 @@ android {
         applicationId = "uk.archis.nextdoviaggi"
         minSdk = 30
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.1.9-test"
+        versionCode = 11
+        versionName = "0.1.10-test"
     }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    implementation("com.google.firebase:firebase-messaging:24.1.2")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.activity:activity-compose:1.9.3")

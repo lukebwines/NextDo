@@ -7,8 +7,8 @@ Un'unica app NextDo, con dashboard generale e due aree separate, come sul web. V
 | --- | --- | --- |
 | 0.1.7-test | Nuovo nome e icona; dashboard, Professionale, Personale, Impostazioni, navigazione modulare; Viaggi integro | Integrata, CI superata |
 | 0.1.8-test | Associazione professionale esplicita, API dedicate e minimali, agenda settimanale, scadenze e appuntamenti anche da verificare, arretrati, priorità | Integrata, CI superata |
-| 0.1.9-test | Avvisi in background e locali, canali di priorità, ripetizione critica e presa visione locale, preferenze e permessi Android | Implementata, CI e collaudo richiesti; push istantaneo da sviluppare |
-| 0.1.10-test | Presa visione, rinvio, completamento e aggiornamento coerente con il web | Da sviluppare |
+| 0.1.9-test | Avvisi in background e locali, canali di priorità, ripetizione critica e presa visione locale, preferenze e permessi Android | Integrata, CI superata; collaudo fisico richiesto |
+| 0.1.10-test | Push FCM e presa visione condivisa per revisione | Implementata, test e configurazione Firebase richiesti |
 | 0.1.11-test | Agenda, note e promemoria personali con accesso separato | Da sviluppare |
 | Successive | Ripresa roadmap Viaggi | Sospesa |
 
@@ -26,3 +26,6 @@ Pairing dedicato nella Dashboard web (codice 5 minuti, token revocabile 30 giorn
 
 ## Avvisi professionali — server 0.1.40-test / Android 0.1.9-test
 Opt-in in Impostazioni dopo pairing e permesso Android. Credenziale limitata ai soli avvisi (chiavi opache, priorità, tipo, stato review e tempi), separata da Viaggi e dall'agenda, revocabile con il dispositivo o disattivazione. Nessun titolo o descrizione nelle notifiche. Keystore separato senza autenticazione biometrica per consentire il background; nessuna credenziale di lettura agenda memorizzata in tale vault. WorkManager circa ogni 15 minuti, sveglie locali non esatte per i promemoria e ripetizioni, cache cifrata dei soli metadati valida fino a 24h dall'ultimo contatto e non oltre scadenza token. Avvisi urgenti/review immediati al rilevamento, scadenze 24h e termine, appuntamenti con orario anche 1h/15min. Data senza orario: promemoria 09:00 nel fuso server, non orario effettivo. Critici ripetuti 15/30/60min fino a presa visione locale per quella revisione; nuova modifica può riattivare. Presa visione non cambia stato task sul server. Canali Android e prova, limiti per non saturare il telefono. Nessuna garanzia di tempi esatti sotto Doze/risparmio energetico, app arrestata forzatamente o permessi negati. Nessun servizio push esterno introdotto; push immediato richiederà una scelta dedicata (es. FCM). Collaudo fisico Samsung obbligatorio, soprattutto schermata bloccata, revoca, modalità offline, riavvio e risparmio energetico.
+
+## Push e presa visione — server 0.1.41-test / Android 0.1.10-test
+Presa visione per utente e revisione (non completamento); Android, notifica e web condividono lo stesso stato; offline accoda la presa visione e ritenta. Push opzionale FCM HTTP v1: amministratore carica i due JSON Firebase sul Raspberry, chiave privata fuori dal repository e APK. Il server verifica le modifiche visibili per dispositivo ogni 5 secondi e invia solo un segnale generico; WorkManager aggiorna dal Raspberry e mantiene il fallback periodico. Nessuna garanzia di latenza, FCM/Android possono ritardare. Il token di background non può leggere dettagli; revoca/disattivazione e restore eliminano iscrizioni. Configurazione reale e test fisico ancora necessari. Rinvio e completamento attività da Android rimangono successivi.
