@@ -17,6 +17,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Base64
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -64,6 +65,7 @@ private val White = Color(0xFFF3F8FC)
 class MainActivity : ComponentActivity() {
     private lateinit var vault: Vault
     private var locked by mutableStateOf(true)
+    private var area by mutableStateOf(NextDoArea.HOME)
     private var availableUpdate by mutableStateOf<TravelUpdate?>(null)
     private var updateBusy by mutableStateOf(false)
     private var updateMessage by mutableStateOf("")
@@ -85,11 +87,11 @@ class MainActivity : ComponentActivity() {
         val update = availableUpdate ?: return
         if (updateBusy) return
         if (!packageManager.canRequestPackageInstalls()) {
-            updateMessage = "Autorizza NextDo Viaggi a installare app da questa fonte, poi torna qui e riprova."
+            updateMessage = "Autorizza NextDo a installare app da questa fonte, poi torna qui e riprova."
             try {
                 startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + packageName)))
             } catch (_: Exception) {
-                updateMessage = "Apri Impostazioni Android e autorizza l’installazione da NextDo Viaggi."
+                updateMessage = "Apri Impostazioni Android e autorizza l’installazione da NextDo."
             }
             return
         }
@@ -197,7 +199,7 @@ class MainActivity : ComponentActivity() {
         pending?.cancel()
         locked = true; busy = false; connection = null; session = ""; trips = emptyList()
         editor = null; current = null; offlineMeta = null; offline = false; pdf = null; pageBitmap = null; pdfName = ""; error = ""
-        section = "Home"
+        section = "Home"; area=NextDoArea.HOME
     }
     private fun deviceUnlock() {
         if (authenticating || busy) return
@@ -215,8 +217,8 @@ class MainActivity : ComponentActivity() {
         authenticating = true
         error = ""
         val prompt = BiometricPrompt.Builder(this)
-            .setTitle("NextDo Viaggi")
-            .setSubtitle("Sblocca il tuo archivio personale")
+            .setTitle("NextDo")
+            .setSubtitle("Sblocca l’applicazione")
             .setDescription("Usa l’impronta digitale o il metodo di blocco del telefono.")
             .setAllowedAuthenticators(authenticators)
             .setConfirmationRequired(false)
@@ -339,7 +341,7 @@ class MainActivity : ComponentActivity() {
         }) { openTrip(it, false) }
     }
     private fun openTrip(t: TripPackage, cached: Boolean) {
-        current = t; offline = cached; section = "Home"
+        area=NextDoArea.TRIPS; current = t; offline = cached; section = "Home"
         selectedDay = t.days.firstOrNull { it.str("date") >= LocalDate.now().toString() }?.str("date")
             ?: t.days.firstOrNull()?.str("date").orEmpty()
     }
@@ -419,22 +421,37 @@ class MainActivity : ComponentActivity() {
     }
     private fun closePdf() { pdf = null; pdfName = ""; pageBitmap = null; page = 0; pageCount = 0 }
 
+    private fun openArea(next:NextDoArea) {
+        if(locked || busy) return
+        closePdf(); current=null; editor=null; offline=false; section="Home"; error=""
+        area=next
+    }
+    private fun backArea() {
+        if(busy)return
+        when {
+            pdf!=null -> closePdf()
+            current!=null -> openArea(NextDoArea.TRIPS)
+            area==NextDoArea.TRIPS -> openArea(NextDoArea.PERSONAL)
+            area!=NextDoArea.HOME -> openArea(NextDoArea.HOME)
+        }
+    }
     @Composable private fun App() {
         val t = current
+        BackHandler(enabled=!locked&&(t!=null||area!=NextDoArea.HOME||pdf!=null)){backArea()}
         if(!locked) editor?.let { e -> TravelEditDialog(e,busy,error,{editor=null;error=""},{submitEditor(e,it)}) }
         Scaffold(containerColor = Navy,
             topBar = {
                 Surface(color = Navy) {
                     Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=18.dp, vertical=12.dp), verticalAlignment=Alignment.CenterVertically) {
                         Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Teal), contentAlignment=Alignment.Center) {
-                            Icon(Icons.Default.Flight, contentDescription=null, tint=Navy)
+                            Icon(Icons.Default.DoneAll, contentDescription=null, tint=Navy)
                         }
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("NextDo", color=White, fontWeight=FontWeight.ExtraBold, fontSize=20.sp)
-                            Text("V I A G G I", color=Teal, fontSize=10.sp, fontWeight=FontWeight.Bold)
+                            Text(if(locked) "ACCESSO PROTETTO" else area.subtitle, color=if(area==NextDoArea.WORK&&!locked) Color(0xFF83B6FF) else Teal, fontSize=10.sp, fontWeight=FontWeight.Bold)
                         }
-                        if (t != null) IconButton(onClick={closePdf(); current=null; section="Home"}) { Icon(Icons.Default.ArrowBack,"Tutti i viaggi") }
+                        if (!locked && (t!=null || area!=NextDoArea.HOME)) IconButton(onClick={backArea()},enabled=!busy) { Icon(Icons.Default.ArrowBack,"Indietro") }
                         if (!locked) IconButton(onClick={lockLocal()}) { Icon(Icons.Default.Lock,"Blocca") }
                     }
                 }
@@ -450,12 +467,13 @@ class MainActivity : ComponentActivity() {
                             "Diario" -> Icons.Default.Place
                             else -> Icons.Default.Book
                         }
-                        NavigationBarItem(selected=section==label,onClick={section=label},icon={Icon(image,label)},label={Text(label,fontSize=11.sp)},
+                        NavigationBarItem(selected=section==label,onClick={section=label},enabled=!busy,icon={Icon(image,label)},label={Text(label,fontSize=11.sp)},
                             colors=NavigationBarItemDefaults.colors(indicatorColor=Teal.copy(alpha=.20f),selectedIconColor=Teal,selectedTextColor=Teal,unselectedIconColor=Muted,unselectedTextColor=Muted))
                     }
-                }
+                } else if(!locked && pdf==null) NextDoNavigation(area,!busy){openArea(it)}
             }) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement=Arrangement.spacedBy(14.dp)) {
+            val scroll=key(area,t?.id,section,pdf!=null){rememberScrollState()}
+            Column(Modifier.fillMaxSize().padding(padding).verticalScroll(scroll).padding(16.dp), verticalArrangement=Arrangement.spacedBy(14.dp)) {
                 UpdatePanel()
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color=Teal)
                 if (error.isNotBlank()) Card(colors=CardDefaults.cardColors(containerColor=Color(0xFF432E37))) {
@@ -481,16 +499,38 @@ class MainActivity : ComponentActivity() {
                             "Diario" -> TimelineScreen(t)
                         }
                     }
-                    else -> ConnectionScreen()
+                    area==NextDoArea.TRIPS -> ConnectionScreen()
+                    area==NextDoArea.WORK -> ProfessionalLanding()
+                    area==NextDoArea.PERSONAL -> PersonalLanding(!busy){openArea(NextDoArea.TRIPS)}
+                    area==NextDoArea.SETTINGS -> SettingsLanding()
+                    else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null){openArea(it)}
                 }
                 Spacer(Modifier.height(12.dp))
             }
         }
     }
+    @Composable private fun SettingsLanding() {
+        Text("Impostazioni",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
+        TravelCard("Applicazione","NextDo "+packageManager.getPackageInfo(packageName,0).versionName) {
+            Text("Un’unica app · aree separate",color=Muted)
+            Action("Verifica aggiornamenti",!updateBusy&&!busy){checkUpdates(true)}
+        }
+        TravelCard("Sicurezza","Accesso protetto dal dispositivo; blocco in background e dopo cinque minuti.") {
+            Action("Blocca applicazione",!busy){lockLocal()}
+        }
+        TravelCard("Associazioni","Il collegamento Viaggi rimane distinto dall’autorizzazione professionale.") {
+            Text(if(connection!=null)"Viaggi: dispositivo associato" else "Viaggi: non associato",color=Muted)
+            Action("Gestisci connessione e archivio Viaggi",!busy){openArea(NextDoArea.TRIPS)}
+            Text("Professionale: associazione dedicata da implementare. Nessun accesso ai dati di lavoro con le credenziali Viaggi.",color=Muted,fontSize=12.sp)
+        }
+        TravelCard("Notifiche","Le notifiche professionali saranno configurabili nel prossimo sviluppo.") {
+            Text("Non ancora attive.",color=Muted,fontSize=12.sp)
+        }
+    }
     @Composable private fun UpdatePanel() {
         val update = availableUpdate
         if (update != null) {
-            TravelCard("Aggiornamento disponibile", "NextDo Viaggi " + update.version) {
+            TravelCard("Aggiornamento disponibile", "NextDo " + update.version) {
                 if (showUpdateNotes && update.notes.isNotBlank()) Text(update.notes, color=Muted, fontSize=13.sp)
                 TextButton(onClick={showUpdateNotes=!showUpdateNotes}) { Text(if(showUpdateNotes) "Nascondi novità" else "Novità della versione") }
                 Action(if(updateBusy) "Attendi…" else "Scarica e installa", !updateBusy && !busy) { installUpdate() }
@@ -498,7 +538,7 @@ class MainActivity : ComponentActivity() {
         }
         if (updateMessage.isNotBlank()) Text(updateMessage, color=Sand, fontSize=12.sp)
         if (updateBusy) LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
-        if (locked || current == null) TextButton(onClick={checkUpdates(true)}, enabled=!updateBusy) { Text("Verifica aggiornamenti") }
+        if (locked || (current == null && area==NextDoArea.HOME)) TextButton(onClick={checkUpdates(true)}, enabled=!updateBusy) { Text("Verifica aggiornamenti") }
     }
     @Composable private fun Pill(text: String, color: Color=Teal) {
         Text(text, Modifier.clip(RoundedCornerShape(50)).background(color.copy(alpha=.14f)).padding(horizontal=12.dp, vertical=6.dp),
@@ -586,13 +626,13 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxWidth().height(260.dp).clip(RoundedCornerShape(28.dp)).background(Brush.linearGradient(listOf(Color(0xFF1B5271),Color(0xFF163E4B),Panel))), contentAlignment=Alignment.Center) {
             Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Default.Fingerprint,null,Modifier.size(64.dp),tint=Teal)
-                Text("Il mondo, con te.",color=White,fontSize=30.sp,fontWeight=FontWeight.ExtraBold)
-                Text("I tuoi viaggi. I tuoi documenti. La tua privacy.",color=Muted,fontSize=12.sp)
-                Action("Sblocca archivio",!busy&&!authenticating) { deviceUnlock() }
+                Text("La tua organizzazione.",color=White,fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
+                Text("Professionale e personale, in un unico spazio.",color=Muted,fontSize=12.sp)
+                Action("Sblocca NextDo",!busy&&!authenticating) { deviceUnlock() }
                 Text("Impronta digitale o blocco schermo",color=Muted,fontSize=12.sp)
             }
         }
-        Text("Accesso protetto da Android. Blocco automatico quando esci dall’app o dopo 5 minuti dallo sblocco. Foto e voucher offline restano cifrati.",color=Muted,fontSize=13.sp)
+        Text("Accesso protetto da Android. Blocco automatico quando esci dall’app o dopo 5 minuti dallo sblocco. I dati Viaggi offline restano cifrati.",color=Muted,fontSize=13.sp)
     }
     @Composable private fun ConnectionScreen() {
         var url by remember { mutableStateOf("") }
@@ -600,6 +640,7 @@ class MainActivity : ComponentActivity() {
         var pin by remember { mutableStateOf("") }
         var erase by remember { mutableStateOf(false) }
         val cfg = connection
+        Text("Viaggi",fontSize=26.sp,fontWeight=FontWeight.ExtraBold,color=White)
         if(cfg==null) {
             TravelCard("Collega NextDo","Da NextDo Web: Area personale → Viaggi → App Android. Genera un codice monouso.") {
                 OutlinedTextField(url,{url=it},label={Text("URL HTTPS di NextDo")},singleLine=true,modifier=Modifier.fillMaxWidth())

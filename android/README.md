@@ -1,4 +1,4 @@
-# NextDo Viaggi — Android test
+# NextDo — Android test
 
 App nativa Kotlin / Jetpack Compose (Android 11 o superiore). Prima versione in sola lettura, con PDF integrati e una copia offline cifrata del viaggio selezionato.
 
@@ -37,3 +37,6 @@ Vedi [Diario di bordo](../docs/travel-timeline.md). Import JSON con filtro local
 
 ## Diario consultabile (0.1.6-test / server 0.1.37-test)
 Visualizzazione e filtro giorno, confronto tappe geolocalizzate e tracce effettive, zoom/pan, sfondo cartografico opzionale (richiesta esplicita), statistiche e note. Il download offline include il diario; sfondo esterno disponibile solo online. Il backup ZIP con diario si esporta dal web; la normale importazione Android ripristina anche timeline.json, senza duplicati. Collaudo reale necessario.
+
+## App modulare (Android 0.1.7-test)
+Nome pubblico NextDo, icona e dashboard generale, aree Professionale e Personale separate, Impostazioni e Viaggi come modulo. Il blocco biometrico e l'identificativo pacchetto, firma, credenziali Viaggi e archivi cifrati restano invariati. L'area professionale è per ora una struttura non collegata, senza dati simulati né accesso ai dati professionali. Notifiche e moduli personali non Viaggi non sono ancora attivi. Non richiede migrazioni o aggiornamento server aggiuntivo. Vedi [roadmap Android](../docs/android-roadmap.md).
