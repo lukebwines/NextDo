@@ -91,7 +91,7 @@ def register_restore_routes(app,*,user,csrf,db_path,attachments_path,data_path,d
      workspace.upgrade(db_path,data_path)
      with sqlite3.connect(db_path) as conn:
       conn.execute('DELETE FROM sessions')
-      for table in ('work_mobile_pairs','work_mobile_devices'):
+      for table in ('work_mobile_alert_tokens','work_mobile_pairs','work_mobile_devices'):
        if conn.execute('SELECT 1 FROM sqlite_master WHERE type="table" AND name=?',(table,)).fetchone():conn.execute('DELETE FROM '+table)
     except Exception:
      db_copy(old_db,db_path)

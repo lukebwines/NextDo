@@ -37,3 +37,29 @@ def test_work_agenda_pair_permissions(tmp_path):
  assert c.post(m+"/revoke",headers=admin).status_code==200
  assert c.get(m+"/agenda",headers=admin).status_code==401
  c.close()
+
+
+def test_alert_scope_and_revocation(tmp_path):
+ c,h=init(tmp_path);p="/api/work-mobile";m="/api/mobile/v1/work"
+ a=c.post("/api/tasks",headers=h,json={"title":"Secret title","description":"Secret body","kind":"appointment","status":"review","priority":"critical","due_at":"2027-01-01"});assert a.status_code==200
+ code=c.post(p+"/pair",headers=h).json()["code"]
+ dev=c.post(m+"/pair",json={"code":code}).json()["device_token"]
+ main={"Authorization":"Bearer "+dev}
+ assert c.get(m+"/alerts",headers=main).status_code==401
+ result=c.post(m+"/alerts/enable",headers=main)
+ assert result.status_code==200,result.text
+ alert={"Authorization":"Bearer "+result.json()["alert_token"]}
+ result=c.get(m+"/alerts",headers=alert)
+ assert result.status_code==200,result.text
+ data=result.json()["items"]
+ assert len(data)==1 and data[0]["review"] and data[0]["date_only"]
+ assert set(data[0])=={"key","kind","priority","review","when","date_only"}
+ assert "Secret" not in result.text
+ assert c.get(m+"/agenda",headers=alert).status_code==401
+ assert c.post(m+"/alerts/enable",headers=alert).status_code==401
+ assert c.post(m+"/alerts/disable",headers=main).status_code==200
+ assert c.get(m+"/alerts",headers=alert).status_code==401
+ alert={"Authorization":"Bearer "+c.post(m+"/alerts/enable",headers=main).json()["alert_token"]}
+ assert c.post(m+"/revoke",headers=main).status_code==200
+ assert c.get(m+"/alerts",headers=alert).status_code==401
+ c.close()
