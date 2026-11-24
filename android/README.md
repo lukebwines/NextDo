@@ -43,3 +43,6 @@ Nome pubblico NextDo, icona e dashboard generale, aree Professionale e Personale
 
 ## Agenda professionale (0.1.8-test / server 0.1.39-test)
 Dalla Dashboard web: NextDo Android · Professionale → Genera codice; Android → Lavoro → URL HTTPS e codice. Associazione distinta da Viaggi, revocabile, sola lettura. Nessuna password in app. Agenda con tutte le voci aperte accessibili, incluse Da verificare e senza data. Aggiornamento quando si apre Home/Lavoro e manuale; niente notifiche o background in questa versione. Se si cambia password o scade l'associazione, revocare e associare nuovamente. Il gateway deve consentire solo le API mobile dedicate.
+
+## Notifiche professionali (0.1.9-test / server 0.1.40-test)
+Impostazioni → Notifiche professionali: concedi permessi, attiva, prova avviso critico. WorkManager interroga il server ogni 15 minuti circa e usa promemoria locali non esatti. Priorità bassa/silenziosa, normale, alta, critica; critici ripetuti fino a presa visione locale con intervallo 15/30/60 minuti. Suoni e vibrazioni dipendono dai canali Android; i dati di dettaglio non sono inviati al servizio background. Metadati cifrati temporanei (24 ore dall'ultimo sync). Non è push in tempo reale; Android può ritardare gli avvisi. Disattivazione e revoca separate da Viaggi. Non considerare il sistema collaudato prima dei test sul Samsung.

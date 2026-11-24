@@ -178,7 +178,7 @@ internal object WorkAlerts {
             val items=remote?.items?:state.optJSONArray("items")?:JSONArray()
             val last=if(remote!=null)t else state.optLong("synced",0)
             if(remote!=null){current.put("expires",remote.expires);write(c,"config",current)}
-            if(t-last>day||current.getLong("expires")<=t){cancelNotices(c);nextAlarm(c,null);return remote!=null}
+            if(t-last>=day||current.getLong("expires")<=t){cancelNotices(c);nextAlarm(c,null);return remote!=null}
             val marks=JSONObject();val keys=mutableSetOf<String>()
             var next:Long?=null
             fun upcoming(w:Long?){if(w!=null&&w>t)next=next?.let{minOf(it,w)}?:w}
@@ -198,7 +198,7 @@ internal object WorkAlerts {
                 if(needs&&sent<10&&permission(c)){
                     notice(c,item);mark.put("stage",p.stage).put("sent",t);sent++
                 }else if(needs&&permission(c))upcoming(t+60)
-                if(critical&&p.stage>0)upcoming(maxOf(t+60,mark.optLong("sent",t)+repeat))
+                if(critical&&p.stage>0&&permission(c))upcoming(maxOf(t+60,mark.optLong("sent",t)+repeat))
             }
             manager(c).activeNotifications.filter{it.tag?.startsWith(tag)==true&&it.tag!=tag+"test"&&it.tag?.removePrefix(tag) !in keys}.forEach{manager(c).cancel(it.tag,it.id)}
             write(c,"state",JSONObject().put("items",items).put("marks",marks).put("synced",last))
