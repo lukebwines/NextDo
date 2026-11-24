@@ -150,7 +150,10 @@ def process_one(conn,data,row):
     raise ValueError("Owner inactive")
    for item in proposals:
     title=item["title"][:250];evidence=item["evidence"][:600]
+    kind="appointment" if item.get("kind")=="appointment" else "task"
     due=item.get("due_date") or None
+    if kind=="appointment" and due and item.get("appointment_time"):
+     due+="T"+item["appointment_time"]+":00"
     fp=hashlib.sha256((title.casefold()+"\n"+(due or "")+"\n"+evidence.casefold()).encode()).hexdigest()
     if c.execute("SELECT 1 FROM cloudflare_mail_tasks WHERE fingerprint=?",(fp,)).fetchone():
      duplicate_count+=1;continue
@@ -160,11 +163,13 @@ def process_one(conn,data,row):
      "\nMittente intestazione: "+source["sender"]+"\nOggetto: "+source["subject"]+
      "\nData email: "+source["date"]+"\nFrase originale: "+evidence+
      "\nOra, CdS e incaricati: [DA VERIFICARE].")
+    if kind=="appointment":
+     description+="\n"+item.get("description","")
     cur=c.execute(
      "INSERT INTO tasks(title,description,kind,priority,status,due_at,start_at,owner_id,"
      "assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id)"
-     " VALUES(?,?,'task','normal','review',?,NULL,?,NULL,NULL,'global',0,'none',?,'personal',NULL)",
-     (title,description,due,owner,json.dumps(["Cloudflare Mail","Da verificare"],ensure_ascii=False)))
+     " VALUES(?,?,?,'normal','review',?,NULL,?,NULL,NULL,'global',0,'none',?,'personal',NULL)",
+     (title,description,kind,due,owner,json.dumps(["Cloudflare Mail","Da verificare"],ensure_ascii=False)))
     tid=cur.lastrowid
     c.execute("INSERT INTO cloudflare_mail_tasks(fingerprint,message_hash,task_id) VALUES(?,?,?)",(fp,sha,tid))
     c.execute("INSERT INTO audit(actor_id,action,object_type,object_id) VALUES(?,?,?,?)",

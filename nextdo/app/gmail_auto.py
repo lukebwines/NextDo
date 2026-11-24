@@ -303,7 +303,10 @@ def _one(conn, cfg, gmail_id, token, label_id):
    for item in proposals:
     title = item["title"]
     evidence = item["evidence"]
-    due = item.get("due_date") or None  # YYYY-MM-DD; no artificial hour.
+    kind="appointment" if item.get("kind")=="appointment" else "task"
+    due=item.get("due_date") or None
+    if kind=="appointment" and due and item.get("appointment_time"):
+     due+="T"+item["appointment_time"]+":00"
     fingerprint = hashlib.sha256((title.strip().casefold()+"\n"+(due or "")+"\n"+
                                   evidence.strip().casefold()).encode("utf-8")).hexdigest()
     if db.execute("SELECT 1 FROM gmail_auto_tasks WHERE fingerprint=?", (fingerprint,)).fetchone():
@@ -321,11 +324,13 @@ def _one(conn, cfg, gmail_id, token, label_id):
      "Azione proposta: "+str(item.get("description", "")).split("Azione proposta: ")[-1][:500]+"\n"
      "Orario, responsabili e CdS: [DA VERIFICARE]."
     )
+    if kind=="appointment":
+     description+="\n"+item.get("description","")
     cursor = db.execute(
      "INSERT INTO tasks(title,description,kind,priority,status,due_at,start_at,owner_id,"
      "assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id)"
-     " VALUES(?,?,'task','normal','review',?,NULL,?,NULL,NULL,'global',0,'none',?,'personal',NULL)",
-     (title, description, due, cfg["owner_id"], json.dumps(["Gmail NextDo", "Da verificare"], ensure_ascii=False)))
+     " VALUES(?,?,?,'normal','review',?,NULL,?,NULL,NULL,'global',0,'none',?,'personal',NULL)",
+     (title, description, kind, due, cfg["owner_id"], json.dumps(["Gmail NextDo", "Da verificare"], ensure_ascii=False)))
     task_id = cursor.lastrowid
     db.execute("INSERT INTO gmail_auto_tasks(fingerprint,gmail_id,task_id) VALUES(?,?,?)",
                (fingerprint, gmail_id, task_id))
