@@ -75,3 +75,6 @@ Il PDF storico rimane associato. Altri PDF possono essere caricati nell'archivio
 
 ### Trasferimento controllato (bozza)
 Trasferimenti individuali semplici e riclassificazione per gruppo di email già ricevute, con conferma e transazione unica. Blocchi espliciti per collegamenti, metadati non compatibili, duplicati, invii ICS in corso, mittenti misti o attività mancanti. Non ritira invii/copie già esportati. Web: anteprima nell'area protetta Personale; API mobile predisposta, interfaccia APK da completare. Gli impegni privati importati da email non sono ancora trasferibili in Professionale per preservarne la provenienza.
+
+### Backup gestionale privato (bozza)
+Il backup ZIP del gestionale include l'agenda privata: esportazione e ripristino richiedono lo sblocco personale se sono presenti dati privati e sono consentiti solo all'amministratore che ne è l'unico proprietario. Il ripristino rifiuta archivi che perdono identità personali esistenti. Non comprende il database Viaggi, le preferenze grafiche o le chiavi locali: per il backup completo usare Home Assistant. Nessun ripristino reale eseguito.

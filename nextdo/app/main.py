@@ -711,6 +711,8 @@ def backup(req:Request):
  with tempfile.TemporaryDirectory() as tmp:
   safe=Path(tmp)/'database.sqlite3'
   with conn() as c:
+   from . import private_backup
+   private_backup.authorize(c,app,req,u['id'])
    dest=sqlite3.connect(safe)
    try:c.backup(dest)
    finally:dest.close()

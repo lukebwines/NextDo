@@ -102,6 +102,14 @@ const NextDoPersonal=(()=>{
     if(!data.mail.length&&!data.tasks.length)out.append(paragraph('Nessun elemento individuato.'));
    }catch(e){report(e)}
   }
+  function protectedBackup(){
+   const {box,back}=modal('Backup protetto');back.setAttribute('data-personal-modal','');
+   const file=el('input',{type:'file',accept:'.zip',class:'field'}),confirmation=input('confirm','RIPRISTINA','');
+   box.append(paragraph('Solo amministratore proprietario dei dati personali. Il backup contiene l’agenda privata e il gestionale professionale, non il database Viaggi o le chiavi locali. Conservare il file in modo sicuro. Per un backup completo usare Home Assistant.'),el('a',{class:'btn primary',href:'api/backup',download:'nextdo-backup.zip',text:'Esporta backup gestionale'}),field('Archivio ZIP da ripristinare',file),field('Scrivi RIPRISTINA',confirmation),btn('Ripristina backup',async()=>{
+    if(busy||!file.files[0]||confirmation.value!=='RIPRISTINA'||!confirm('Ripristinare il database e gli allegati del gestionale? Le modifiche successive al backup saranno sostituite.'))return;
+    busy=true;try{const data=new FormData();data.append('file',file.files[0]);data.append('confirm',confirmation.value);await api('/backup/import',{method:'POST',body:data});location.reload()}catch(e){report(e)}finally{busy=false}
+   },'small'));
+  }
   const selectedKind=kinds.find(x=>x[0]===section);
   if(selectedKind){
    agenda.append(toolbar(btn('← Area personale',()=>{section='home';render(main)},'small'),btn('+ Nuovo',()=>editItem(section),'primary'),btn('Aggiorna',()=>render(main),'small')));
@@ -118,7 +126,7 @@ const NextDoPersonal=(()=>{
    }
    shell.append(hero,agenda);
   }else{
-   shell.append(hero,settings,grid,toolbar(btn('Sposta / riclassifica impegni',transfers,'small')));
+   shell.append(hero,settings,grid,toolbar(btn('Sposta / riclassifica impegni',transfers,'small'),btn('Backup protetto',protectedBackup,'small')));
    if(items){
     const upcoming=items.filter(x=>x.status!=='done'&&(x.status==='review'||x.due_at)).slice(0,5);
     if(upcoming.length){agenda.append(node('h2','','I tuoi impegni'),...upcoming.map(x=>el('button',{class:'personal-item-row',type:'button',onclick:()=>editItem(x.kind,x)},[el('div',{},[node('strong','',x.title),node('p','sub',(x.due_at?fmt(x.due_at):'Senza data')+(x.status==='review'?' · Da verificare':''))]),ico('chevron')])));shell.append(agenda)}

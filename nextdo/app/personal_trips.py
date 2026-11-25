@@ -380,6 +380,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
    if (owner,session) not in grants:fail("Area personale bloccata",423)
    grants[(owner,session)]=now+300
   return owner
+ app.state.personal_backup_authorize=allowed
  def grant(owner,session):
   with mutex:grants[(owner,session)]=time.monotonic()+300
  def load(c,owner,tid):

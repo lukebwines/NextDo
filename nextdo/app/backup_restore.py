@@ -75,6 +75,14 @@ def register_restore_routes(app,*,user,csrf,db_path,attachments_path,data_path,d
    old_db=stage/'before.sqlite3';old_files=stage/'before-attachments'
    saved=data_path/('nextdo-before-import-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+secrets.token_hex(4)+'.zip')
    with db_lock:
+    from . import private_backup
+    with sqlite3.connect(db_path) as current, sqlite3.connect(new_db) as incoming:
+     private_backup.authorize(current,app,req,actor['id'])
+     private_backup.authorize(incoming,app,req,actor['id'])
+     existing=private_backup.identities(current)
+     restored=private_backup.identities(incoming)
+     if any(restored.get(uid)!=identity for uid,identity in existing.items()):
+      reject('Il backup non conserva le identità personali esistenti. Usare un backup completo compatibile.',409)
     db_copy(db_path,old_db)
     with zipfile.ZipFile(saved,'x',zipfile.ZIP_DEFLATED) as z:
      z.write(old_db,'database.sqlite3')
@@ -91,12 +99,15 @@ def register_restore_routes(app,*,user,csrf,db_path,attachments_path,data_path,d
      workspace.upgrade(db_path,data_path)
      from . import archive_storage
      archive_storage.upgrade(db_path,data_path)
-     from . import work_mobile
+     from . import work_mobile,private_items,cloudflare_mail
      with sqlite3.connect(db_path) as conn:
+      conn.execute("CREATE TABLE IF NOT EXISTS personal_identities(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,owner TEXT UNIQUE NOT NULL)")
+      private_items.ensure(conn)
       work_mobile.ensure(conn)
       conn.execute('DELETE FROM sessions')
       for table in ('work_mobile_push','work_mobile_alert_tokens','work_mobile_pairs','work_mobile_devices'):
        if conn.execute('SELECT 1 FROM sqlite_master WHERE type="table" AND name=?',(table,)).fetchone():conn.execute('DELETE FROM '+table)
+     cloudflare_mail.upgrade(db_path)
     except Exception:
      db_copy(old_db,db_path)
      if moved:
