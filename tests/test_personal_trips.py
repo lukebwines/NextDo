@@ -47,3 +47,24 @@ def test_create_and_edit(tmp_path):
  assert c.put(url,headers=h,json=b).status_code==409
  assert c.get(url).json()["manifest"]["days"][0]["headline"]=="New plan"
  c.close()
+
+def test_private_cover_image(tmp_path):
+ from PIL import Image
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ r=c.post(p+"/trips",headers=h,json={"title":"Synthetic cover trip","start":"2027-01-01","end":"2027-01-02"})
+ url=p+"/trips/"+r.json()["id"]
+ assert c.get(url+"/cover-image").status_code==404
+ buf=io.BytesIO();Image.new("RGB",(32,20),"teal").save(buf,format="PNG")
+ assert c.post(url+"/cover",headers=h,files={"file":("cover.png",buf.getvalue(),"image/png")}).status_code==200
+ result=c.get(url+"/cover-image")
+ assert result.status_code==200 and result.headers["content-type"]=="image/jpeg"
+ assert result.headers["cache-control"]=="no-store, private"
+ assert result.content.startswith(b"\xff\xd8")
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.get(url+"/cover-image").status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456"}).status_code==200
+ create_user(c,h,"colleague");sign_in(c,h,"colleague")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+ assert c.get(url+"/cover-image").status_code==404
+ c.close()

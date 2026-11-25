@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
-import hashlib, io, json, os, re, secrets, sqlite3, threading, time, zipfile
+import base64, hashlib, io, json, os, re, secrets, sqlite3, threading, time, zipfile
 from fastapi import HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 from argon2.exceptions import VerificationError
@@ -302,6 +302,14 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   with db() as c:
    r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
    return {"manifest":m,"state":state,"revision":r["revision"]}
+ @app.get("/api/personal/trips/{tid}/cover-image")
+ def cover_image(tid:str,req:Request):
+  owner=allowed(req)
+  with db() as c:
+   r=load(c,owner,tid);m,_,_=read_archive(r["archive"])
+  image=m.get("cover")
+  if not image:fail("Copertina non disponibile",404)
+  return Response(base64.b64decode(image["jpeg"],validate=True),media_type="image/jpeg")
  @app.put("/api/personal/trips/{tid}")
  def update_trip(tid:str,req:Request,b:dict):
   owner=allowed(req,True)

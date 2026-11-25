@@ -17,7 +17,7 @@ const NextDoPersonal=(()=>{
   main=m;const token=++generation;let root=main.querySelector('#personal-content');if(!root){root=el('div',{id:'personal-content'});main.append(root)}root.replaceChildren(paragraph('Caricamento…'));
   try{
    const status=await api(path+'/status');if(token!==generation||!root.isConnected)return;
-   if(!status.unlocked){trip=null;clearTimeout(timer);const pin=input('pin','6 cifre','','password');pin.setAttribute('inputmode','numeric');pin.maxLength=6;const confirmPin=input('confirm','Conferma PIN','','password');confirmPin.setAttribute('inputmode','numeric');confirmPin.maxLength=6;
+   if(!status.unlocked){trip=null;section='home';root.classList.remove('travel-shell','personal-hub-shell');clearTimeout(timer);const pin=input('pin','6 cifre','','password');pin.setAttribute('inputmode','numeric');pin.maxLength=6;const confirmPin=input('confirm','Conferma PIN','','password');confirmPin.setAttribute('inputmode','numeric');confirmPin.maxLength=6;
     const f=el('form',{},[paragraph(status.configured?'Inserisci il PIN per accedere ai viaggi.':'Imposta un PIN privato di 6 cifre. Conservalo: il ripristino non è ancora disponibile.'),field('PIN',pin),...(status.configured?[]:[field('Conferma PIN',confirmPin)]),el('button',{class:'btn primary',type:'submit',text:status.configured?'Sblocca':'Imposta PIN'})]);
     f.addEventListener('submit',async e=>{e.preventDefault();try{await api(path+'/unlock',{method:'POST',body:JSON.stringify({pin:pin.value,confirm:confirmPin.value})});if(token===generation)render(main)}catch(e){report(e)}});root.replaceChildren(card('Area personale protetta',f));return;
    }
@@ -48,14 +48,60 @@ const NextDoPersonal=(()=>{
  }
  function travelOverview(root,token,list){
   root.classList.remove('personal-hub-shell');root.classList.add('travel-shell');
-  const pick=select('trip',[['','Seleziona viaggio'],...list.map(t=>[t.id,t.title+' · '+t.start+' — '+t.end])],trip?.manifest.trip.id||'');
+  const today=localDay(new Date());
+  const dateLabel=d=>new Date(d+'T12:00:00').toLocaleDateString('it-IT',{day:'numeric',month:'short',year:'numeric'});
+  const tripStatus=t=>{
+   if(t.start>today){const days=Math.round((Date.parse(t.start+'T12:00:00Z')-Date.parse(today+'T12:00:00Z'))/86400000);return {label:days===1?'Partenza domani':'Tra '+days+' giorni',kind:'upcoming'}}
+   if(t.end>=today)return {label:'In viaggio',kind:'active'};
+   return {label:'Concluso',kind:'past'};
+  };
+  const back=()=>{trip=null;render(main)};
+  const home=()=>{section='home';trip=null;render(main)};
+  const lockNow=async()=>{await lock();render(main)};
+  const top=el('div',{class:'travel-library-top'},[
+   el('div',{class:'travel-breadcrumb'},[btn('← Area personale',home,'small'),...(trip?[btn('Tutti i viaggi',back,'small')]:[])]),
+   el('div',{class:'travel-library-tools'},[btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',lockNow,'small')])
+  ]);
   const file=el('input',{type:'file',accept:'.zip',class:'field'});
-  const importBtn=btn('Importa ZIP',async()=>{if(!file.files[0])return msg('Seleziona un archivio ZIP',true);const data=new FormData();data.append('file',file.files[0]);try{const r=await api(path+'/trips/import',{method:'POST',body:data});await load(r.id);msg('Importato: '+r.bookings+' prenotazioni, '+r.days+' giornate, '+r.pdfs+' PDF')}catch(e){report(e)}},'primary');
-  pick.addEventListener('change',()=>pick.value?load(pick.value):(trip=null,render(main)));
-  const imports=el('details',{class:'travel-import'},[node('summary','','Importa / trasferisci viaggio'),paragraph('Gli ZIP con diario ripristinano anche la cronologia privata inclusa.'),toolbar(file,importBtn)]);
-  const back=toolbar(btn('← Area personale',()=>{section='home';trip=null;render(main)},'small'));
-  root.replaceChildren(back,el('div',{class:'travel-picker'},[el('div',{},[node('div','travel-kicker','AREA PERSONALE · VIAGGI'),pick]),toolbar(btn('+ Nuovo viaggio',newTrip,'primary'),btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',async()=>{await lock();render(main)})),imports]));
-  if(trip)show(root);else root.append(paragraph('Seleziona un viaggio oppure importane uno.'));
+  const importBtn=btn('Importa ZIP',async()=>{if(!file.files[0])return msg('Seleziona un archivio ZIP',true);importBtn.disabled=true;const data=new FormData();data.append('file',file.files[0]);try{const r=await api(path+'/trips/import',{method:'POST',body:data});if(token!==generation)return;await load(r.id);msg('Importato: '+r.bookings+' prenotazioni, '+r.days+' giornate, '+r.pdfs+' PDF')}catch(e){report(e)}finally{importBtn.disabled=false}},'primary');
+  const imports=el('details',{class:'travel-library-import'},[node('summary','','Importa / trasferisci viaggio'),paragraph('Importa un archivio ZIP di NextDo. Gli ZIP con diario ripristinano anche la cronologia privata inclusa.'),toolbar(file,importBtn)]);
+  root.replaceChildren(top);
+  if(trip){
+   const pick=select('trip',[['','Tutti i viaggi'],...list.map(t=>[t.id,t.title+' · '+dateLabel(t.start)])],trip.manifest.trip.id);
+   pick.setAttribute('aria-label','Cambia viaggio');pick.addEventListener('change',()=>pick.value?load(pick.value):back());
+   root.append(el('div',{class:'travel-detail-actions'},[pick,btn('+ Nuovo viaggio',newTrip,'primary')]),imports);
+   show(root);return;
+  }
+  const current=list.filter(t=>t.start<=today&&t.end>=today).sort((a,b)=>a.start.localeCompare(b.start));
+  const upcoming=list.filter(t=>t.start>today).sort((a,b)=>a.start.localeCompare(b.start));
+  const past=list.filter(t=>t.end<today).sort((a,b)=>b.end.localeCompare(a.end));
+  const next=current[0]||upcoming[0];
+  const hero=el('section',{class:'travel-library-hero'},[
+   el('div',{class:'travel-library-hero-copy'},[
+    node('div','travel-kicker','IL TUO SPAZIO PERSONALE'),node('h2','','Il mondo, a portata di viaggio.'),
+    node('p','','Organizza itinerari, prenotazioni, documenti e ricordi in un unico posto.'),
+    el('div',{class:'travel-library-hero-actions'},[btn('+ Nuovo viaggio',newTrip,'primary'),btn('Importa un viaggio',()=>{imports.open=true;imports.scrollIntoView({block:'nearest'})},'small')])
+   ]),
+   el('div',{class:'travel-library-hero-side'},[el('span',{class:'travel-library-plane','aria-hidden':'true'},[ico('plane')]),...(next?[node('span','travel-library-next-label',current.length?'VIAGGIO IN CORSO':'PROSSIMA PARTENZA'),node('strong','',next.title),node('span','',tripStatus(next).label)]:[node('span','travel-library-next-label','IL PROSSIMO CAPITOLO'),node('strong','','Pronto a partire?')])])
+  ]);
+  root.append(hero,el('div',{class:'travel-library-stats'},[
+   ...[[list.length,'Viaggi totali','plane'],[upcoming.length,'In programma','calendar'],[current.length,'In corso','clock'],[past.length,'Conclusi','check']].map(([n,label,icon])=>el('div',{class:'travel-library-stat'},[ico(icon),el('div',{},[node('strong','',String(n)),node('span','',label)])]))
+  ]),imports);
+  function tripCard(t){
+   const state=tripStatus(t);
+   const img=el('img',{class:'travel-library-photo',src:'api/personal/trips/'+encodeURIComponent(t.id)+'/cover-image',alt:'',loading:'lazy'});
+   img.addEventListener('error',()=>img.remove(),{once:true});
+   const art=el('div',{class:'travel-library-art'},[ico('plane'),img,node('span','travel-library-state '+state.kind,state.label)]);
+   const duration=Math.round((Date.parse(t.end+'T12:00:00Z')-Date.parse(t.start+'T12:00:00Z'))/86400000)+1;
+   return el('button',{type:'button',class:'travel-library-card',onclick:()=>load(t.id),'aria-label':'Apri viaggio '+t.title},[
+    art,el('div',{class:'travel-library-card-body'},[node('strong','travel-library-title',t.title),el('div',{class:'travel-library-date'},[ico('calendar'),node('span','',dateLabel(t.start)+' — '+dateLabel(t.end))]),el('div',{class:'travel-library-card-foot'},[node('span','',duration===1?'1 giorno':duration+' giorni'),node('span','travel-library-open','Apri viaggio →')])])
+   ]);
+  }
+  for(const [label,items] of [['In viaggio',current],['Prossimi viaggi',upcoming],['Viaggi conclusi',past]]){
+   if(!items.length)continue;
+   root.append(el('section',{class:'travel-library-section'},[el('div',{class:'travel-library-section-head'},[node('h2','',label),node('span','',String(items.length))]),el('div',{class:'travel-library-grid'},items.map(tripCard))]));
+  }
+  if(!list.length)root.append(el('section',{class:'travel-library-empty'},[el('span',{class:'travel-library-empty-icon'},[ico('plane')]),node('h2','','La tua prossima avventura inizia qui'),paragraph('Non hai ancora viaggi salvati. Creane uno oppure importa un archivio NextDo.'),btn('Crea il primo viaggio',newTrip,'primary')]));
  }
  async function load(id){section='trips';const token=generation;try{const result=await api(path+'/trips/'+encodeURIComponent(id));if(token!==generation||S.view!=='personal')return;trip=result;selected=trip.manifest.days[0]?.date||'';tab='panoramica';render(main)}catch(e){report(e)}}
  function editor(title,fields,submit){
