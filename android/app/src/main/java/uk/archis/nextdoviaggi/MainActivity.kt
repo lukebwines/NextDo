@@ -73,6 +73,22 @@ class MainActivity : ComponentActivity() {
     private var privateAgenda by mutableStateOf<List<JSONObject>?>(null)
     private var privateSection by mutableStateOf("")
     private var privateProblem by mutableStateOf("")
+    private var privateAlertsEnabled by mutableStateOf(false)
+    private fun togglePrivateAlerts(){
+        val cfg=connection
+        val s=session
+        if(privateAlertsEnabled){
+            PrivateAlerts.disable(this);privateAlertsEnabled=false
+            if(cfg!=null&&s.isNotBlank())task({TravelApi(cfg.str("url")).obj("/private-alerts/disable",s,JSONObject())}){}
+        }else{
+            if(!WorkAlerts.permission(this)){if(android.os.Build.VERSION.SDK_INT>=33)notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS);return}
+            if(cfg==null||s.isBlank())return
+            task({
+                val r=TravelApi(cfg.str("url")).obj("/private-alerts/enable",s,JSONObject())
+                PrivateAlerts.enable(this,cfg.str("url"),r.str("token"),r.optDouble("expires").toLong())
+            }){privateAlertsEnabled=PrivateAlerts.enabled(this)}
+        }
+    }
     private fun refreshPrivateAgenda(){
         val cfg=connection?:return
         val s=session
@@ -315,6 +331,8 @@ class MainActivity : ComponentActivity() {
         foreground=true;updateCaptureProtection()
         refreshAlertStatus()
         if(alertsEnabled)WorkAlerts.kick(this)
+        privateAlertsEnabled=PrivateAlerts.enabled(this)
+        if(privateAlertsEnabled)PrivateAlerts.kick(this)
     }
     private fun refreshAlertStatus(){
         alertPermission=WorkAlerts.permission(this)
@@ -418,7 +436,7 @@ class MainActivity : ComponentActivity() {
             val a = TravelApi(base)
             val r = a.obj("/pair", data = JSONObject().put("code", code.trim()).put("label", "Android " + android.os.Build.MODEL.take(60)))
             val cfg = JSONObject().put("url", base.trim()).put("token", r.getString("device_token"))
-            if(replacing){vault.remove("offline");vault.remove("offline_meta")}
+            if(replacing){PrivateAlerts.disable(this);vault.remove("offline");vault.remove("offline_meta")}
             vault.write("connection", cfg.toString().toByteArray())
             cfg
         }) { connection = it;travelAuthState=TravelAuthState.PIN_REQUIRED;if(replacing){offlineMeta=null;pendingZip=null;zipScope="";timelineFile=null;timelineScope="";timelineTrip=""} }
@@ -510,6 +528,7 @@ class MainActivity : ComponentActivity() {
         task({ TripPackage.parse(vault.read("offline")) }) { openTrip(it, true) }
     }
     private fun forget() {
+        PrivateAlerts.disable(this);privateAlertsEnabled=false
         timelineFile=null;timelineTrip="";timelineScope=""
         pendingZip=null;zipScope=""
         task({ vault.clear() }) { lockLocal() }
@@ -787,7 +806,7 @@ class MainActivity : ComponentActivity() {
                             !busy,personalAppearance,session.isNotBlank()&&personalAppearance!=null,appearanceError,
                             appearancePhoto!=null&&connection?.let{timelineOwner(it)==appearancePhotoOwner}==true,
                             {savePersonalAppearance(it)},{chooseAppearancePhoto()},{uploadAppearancePhoto()},
-                            privateAgenda,{privateSection=it}){openArea(NextDoArea.TRIPS)}
+                            privateAgenda,{privateSection=it},privateAlertsEnabled,{togglePrivateAlerts()}){openArea(NextDoArea.TRIPS)}
                         else PrivateAgendaScreen(privateSection,privateAgenda,personalAppearance,session.isNotBlank()&&!busy,privateProblem,{privateSection=""},{refreshPrivateAgenda()},{id,body->savePrivateItem(id,body)},{id->deletePrivateItem(id)})
                     }
                     area==NextDoArea.SETTINGS -> SettingsLanding()

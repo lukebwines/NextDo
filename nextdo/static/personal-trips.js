@@ -128,6 +128,9 @@ const NextDoPersonal=(()=>{
   }else{
    shell.append(hero,settings,grid,toolbar(btn('Sposta / riclassifica impegni',transfers,'small'),btn('Backup protetto',protectedBackup,'small')));
    if(items){
+    const today=localDay(new Date());
+    const alerts=items.filter(x=>x.status!=='done'&&(x.status==='review'||x.priority==='urgent'||(x.due_at&&x.due_at.slice(0,10)<=today)));
+    if(alerts.length)shell.append(el('section',{class:'personal-agenda'},[node('h2','','Promemoria'),paragraph(alerts.length+' impegni da verificare, urgenti o in scadenza'),...alerts.slice(0,5).map(x=>el('button',{class:'personal-item-row',type:'button',onclick:()=>editItem(x.kind,x)},[node('strong','',x.title),ico('chevron')]))]));
     const upcoming=items.filter(x=>x.status!=='done'&&(x.status==='review'||x.due_at)).slice(0,5);
     if(upcoming.length){agenda.append(node('h2','','I tuoi impegni'),...upcoming.map(x=>el('button',{class:'personal-item-row',type:'button',onclick:()=>editItem(x.kind,x)},[el('div',{},[node('strong','',x.title),node('p','sub',(x.due_at?fmt(x.due_at):'Senza data')+(x.status==='review'?' · Da verificare':''))]),ico('chevron')])));shell.append(agenda)}
    }

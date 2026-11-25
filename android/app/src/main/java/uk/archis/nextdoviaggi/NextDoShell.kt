@@ -138,7 +138,7 @@ internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolea
     }
 }
 @Composable
-internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Boolean,problem:String,photoPending:Boolean,save:(JSONObject)->Unit,choosePhoto:()->Unit,uploadPhoto:()->Unit,items:List<JSONObject>?,openItems:(String)->Unit,openTrips:()->Unit) {
+internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Boolean,problem:String,photoPending:Boolean,save:(JSONObject)->Unit,choosePhoto:()->Unit,uploadPhoto:()->Unit,items:List<JSONObject>?,openItems:(String)->Unit,alertsEnabled:Boolean,toggleAlerts:()->Unit,openTrips:()->Unit) {
     val theme=appearance?.optString("theme","dark")?:"dark"
     val palette=appearance?.optString("palette","ocean")?:"ocean"
     val background=appearance?.optString("background","gradient")?:"gradient"
@@ -188,6 +188,15 @@ internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Bo
                 if(jpeg.isNotBlank())TextButton(onClick={save(JSONObject().put("clear_photo",true))},enabled=enabled&&connected){Text("Rimuovi fotografia",color=if(light)start else accent)}
                 TextButton(onClick={save(JSONObject().put("theme","dark").put("palette","ocean").put("background","gradient").put("clear_photo",true))},enabled=enabled&&connected){Text("Ripristina aspetto",color=if(light)start else accent)}
             }
+        }
+    }
+    Card(colors=CardDefaults.cardColors(containerColor=cardColor),shape=RoundedCornerShape(18.dp)){
+        Column(Modifier.fillMaxWidth().padding(16.dp)){
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                Text("Promemoria personali",Modifier.weight(1f),color=textColor,fontWeight=FontWeight.Bold)
+                Switch(checked=alertsEnabled,onCheckedChange={toggleAlerts()},enabled=enabled&&(connected||alertsEnabled))
+            }
+            Text("Avvisi riservati anche in background. Controllo indicativo ogni 15 minuti.",color=muted,fontSize=12.sp)
         }
     }
     for((key,title,icon) in listOf(

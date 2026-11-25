@@ -239,3 +239,23 @@ def test_private_transfer_manual_roundtrip(tmp_path):
  assert c.get("/api/tasks").json()==[]
  assert c.get(p+"/items").json()["items"][0]["kind"]=="deadline"
  c.close()
+
+def test_private_alert_token_is_metadata_only(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ assert c.post(p+"/items",headers=h,json={"title":"Secret synthetic item","description":"Secret details","status":"review"}).status_code==200
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ dev={"Authorization":"Bearer "+d["device_token"]}
+ session={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers=dev,json={"pin":"123456"}).json()["session_token"]}
+ assert c.get(mobile+"/private-alerts",headers=session).status_code==401
+ result=c.post(mobile+"/private-alerts/enable",headers=session).json()
+ alert={"Authorization":"Bearer "+result["token"]}
+ r=c.get(mobile+"/private-alerts",headers=alert)
+ assert r.status_code==200,r.text
+ assert len(r.json()["items"])==1 and set(r.json()["items"][0])=={"key"}
+ assert "Secret" not in r.text
+ assert c.get(mobile+"/items",headers=alert).status_code==401
+ assert c.post(mobile+"/private-alerts/disable",headers=session).status_code==200
+ assert c.get(mobile+"/private-alerts",headers=alert).status_code==401
+ c.close()

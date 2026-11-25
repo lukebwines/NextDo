@@ -78,3 +78,6 @@ Trasferimenti individuali semplici e riclassificazione per gruppo di email già 
 
 ### Backup gestionale privato (bozza)
 Il backup ZIP del gestionale include l'agenda privata: esportazione e ripristino richiedono lo sblocco personale se sono presenti dati privati e sono consentiti solo all'amministratore che ne è l'unico proprietario. Il ripristino rifiuta archivi che perdono identità personali esistenti. Non comprende il database Viaggi, le preferenze grafiche o le chiavi locali: per il backup completo usare Home Assistant. Nessun ripristino reale eseguito.
+
+### Avvisi personali (bozza)
+Android: opt-in, canale e token separati, controllo WorkManager ogni 15 minuti indicativi e all'apertura, contenuto generico e impronte opache. Avvisi review/urgenti e finestre 24h, 1h/15min per appuntamenti con ora, scadenza. Non è un allarme esatto e non usa FCM. Web: riepilogo promemoria in area privata. Nessun ICS personale automatico. Collaudo fisico e CI necessari.
