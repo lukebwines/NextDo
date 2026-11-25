@@ -114,3 +114,5 @@
 .travel-booking-field-grid{display:grid;gap:8px;margin-bottom:12px}.travel-booking-field-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:7px;align-items:center}
 .travel-insurance-quick{margin:0 0 16px;border-color:#69e0d266}.travel-insurance-quick .toolbar{margin:0}
 @media(max-width:550px){.travel-booking-field-row{grid-template-columns:minmax(0,1fr) auto}.travel-booking-field-row input:first-child{grid-column:1/-1}.travel-template-row{gap:8px}}
+
+.travel-booking-field-row textarea{min-height:43px;resize:vertical;line-height:1.45}
