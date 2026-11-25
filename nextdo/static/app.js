@@ -84,6 +84,7 @@ async function refresh(){
  [S.tasks,S.courses,S.groups,S.users,S.projects,S.myCourseIds]=out;
  S.courseAssignees=await api('/course-assignee-defaults');
  [S.collaborators,S.courseCollaborators,S.archiveSummary]=await Promise.all([api('/collaborators'),api('/course-collaborators'),api('/archive/summary')]);
+ S.assistantUrl='';try{S.assistantUrl=(await api('/assistant-link')).url}catch{}
 }
 const iconDefs={paperclip:['M21.44 11.05l-8.49 8.49a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.4a2 2 0 0 1-2.83-2.83l8.49-8.49'],check:['M9 11l3 3L22 4','M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'],home:['M3 10l9-7 9 7','M5 9v12h14V9','M9 21v-8h6v8'],list:['M8 6h13','M8 12h13','M8 18h13','M3 6h.01','M3 12h.01','M3 18h.01'],calendar:['M8 2v4','M16 2v4','M3 10h18','M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2z'],note:['M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8l-5-5H8z','M16 3v5h5','M8 13h8','M8 17h5'],archive:['M3 4h18v5H3z','M5 9v12h14V9','M10 13h4'],settings:['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8','M4 12a8 8 0 0 1 16 0 8 8 0 0 1-16 0'],bell:['M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9','M10 21h4'],search:['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16','M21 21l-4.35-4.35'],user:['M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2','M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8'],clock:['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20','M12 6v6l4 2'],alert:['M12 3L2 21h20L12 3z','M12 9v4','M12 17h.01'],tag:['M3 3h8l10 10-8 8L3 11V3z','M7 7h.01'],plus:['M12 5v14','M5 12h14'],chevron:['M9 18l6-6-6-6']};
 Object.assign(iconDefs,{refresh:['M20 7v5h-5','M4 17v-5h5','M5.5 8a7.5 7.5 0 0 1 12.8-2L20 12','M4 12l1.7 6a7.5 7.5 0 0 0 12.8-2'],sun:['M12 2v2','M12 20v2','M2 12h2','M20 12h2','M5 5l1.5 1.5','M17.5 17.5L19 19','M5 19l1.5-1.5','M17.5 6.5L19 5','M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10'],appointment:['M8 2v4','M16 2v4','M3 10h18','M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2z','M12 12v4l3 2'],range:['M8 2v4','M16 2v4','M3 10h18','M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2z','M7 14h10','M7 17h7'],folder:['M3 6h7l2 2h9v12H3z'],school:['M2 9l10-5 10 5-10 5z','M6 11v6l6 3 6-3v-6','M22 9v7'],plane:['M3 12l7 1 5 7 2-1-2-7 6-6c2-2 0-4-2-2l-6 6-7-2z']});
@@ -117,6 +118,7 @@ function render(){
  const search=el('form',{class:'global-search'},[ico('search'),input('global-search','Cerca attività e note...',S.searchTerm)]);
  search.addEventListener('submit',e=>{e.preventDefault();S.searchTerm=search.querySelector('input').value;changeView('tasks')});
  toolbar.append(search,el('button',{type:'button',class:'iconbutton','aria-label':'Aggiorna dati',title:'Aggiorna dati',onclick:async()=>{try{await refresh();render();msg('Dati aggiornati')}catch(e){msg(e.message,true)}}},[ico('refresh')]),el('button',{type:'button',class:'iconbutton',title:'Notifiche',onclick:()=>settingsOpen('notifications')},[ico('bell')]),el('button',{type:'button',class:'iconbutton',title:'Profilo e impostazioni',onclick:()=>settingsOpen('general')},[ico('user')]));
+ toolbar.append(S.assistantUrl?el('a',{class:'btn small',href:S.assistantUrl,target:'_blank',rel:'noopener noreferrer',text:'ChatGPT Work',title:'Apri la conversazione configurata'}):btn('ChatGPT Work',()=>settingsOpen('general'),'small'));
  main.append(toolbar);
  const titles={dashboard:'Centro operativo',agenda:'Agenda', 'project-progress':'Avanzamenti e cronoprogrammi',mine:'Il mio spazio',tasks:'Attività e scadenze',appointments:'Appuntamenti',projects:'Progetti',notes:'Note',calendar:'Calendario',courses:'Corsi di Studio',groups:'Gruppi',archive:'Archivio',personal:'Area personale',settings:'Impostazioni'};
  const header=el('div',{class:'top'},[el('div',{},[node('h1','',titles[S.view]),node('div','sub',S.view==='dashboard'?new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long',year:'numeric'}):S.view==='agenda'&&S.dayFilter?'Impegni del '+fmt(S.dayFilter):'Organizza le attività, rispetta le scadenze.')]),el('div',{class:'top-actions'},[themeButton(),...(['personal','settings','dashboard','project-progress'].includes(S.view)?[]:[btn('+ Nuova',()=>taskForm(null,S.view==='appointments'?'appointment':S.view==='notes'?'note':'task'),'primary')])])]);
@@ -292,6 +294,11 @@ function calendarExportForm(tasks){
 function taskList(main,view){const tools=el('div',{class:'toolbar'});const search=input('q','Cerca testo, attività o note…');const csel=select('course',[['','Tutti i CdS'],...S.courses.map(c=>[String(c.id),c.code+' — '+c.name])]);const gsel=select('group',[['','Tutti i gruppi'],...S.groups.map(g=>[String(g.id),g.name])]);const status=select('status',[['','Tutti gli stati'],...Object.entries(statuses)]);const preset=select('preset',[['all','Tutte'],['review','Da verificare'],['urgent','Urgenti'],['overdue','Scadute / trascorse'],['today','Oggi'],['tomorrow','Domani'],['week','Prossimi 7 giorni'],['future','Oltre 7 giorni'],['undated','Senza data'],['done','Completate']],S.listPreset);search.value=S.searchTerm||'';for(const [control,label] of [[search,'Cerca attività'],[csel,'Filtra per CdS'],[gsel,'Filtra per gruppo'],[status,'Filtra per stato'],[preset,'Filtra per periodo o priorità']])control.setAttribute('aria-label',label);tools.append(search,csel,gsel,status,preset);if(S.dayFilter)tools.append(btn('Data: '+fmt(S.dayFilter)+' ×',()=>agendaOpen(),'small'));if(S.labelFilter)tools.append(btn('Etichetta: '+S.labelFilter+' ×',()=>changeView(view),'small'));if(['agenda','tasks','appointments','mine'].includes(view))tools.append(btn('Storico completo',()=>NextDoArchive.open('all',view==='agenda'?'agenda':view==='tasks'?'task':view==='appointments'?'appointment':'all'),'small'));if(view==='notes')tools.append(btn('+ Nota',()=>taskForm(null,'note'),'primary'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Importa calendario Excel',calendarImportForm,'small'));if(view==='tasks'&&S.me.role==='admin')tools.append(btn('Email → Scadenze AI',emailIntakeForm,'small'));main.append(tools);const panel=el('section',{class:'card'});main.append(panel);function draw(){panel.replaceChildren();let tasks=S.tasks.filter(t=>view==='mine'?t.scope==='personal':view==='notes'?t.kind==='note':view==='archive'?t.status==='done':(view==='agenda'?['task','appointment'].includes(t.kind):t.kind===(view==='appointments'?'appointment':'task'))&&(t.status!=='done'||preset.value==='done'));tasks=tasks.filter(t=>(!search.value||(t.title+' '+t.description).toLowerCase().includes(search.value.toLowerCase()))&&(!csel.value||t.courses.some(c=>c.id==csel.value))&&(!gsel.value||t.group_id==gsel.value)&&(!status.value||t.status===status.value)&&(!S.labelFilter||(t.labels||[]).includes(S.labelFilter))&&agendaMatch(t,preset.value)&&(!S.dayFilter||dueDay(t)===S.dayFilter));panel.append(node('h2','',`${tasks.length} elementi`));if(tasks.some(canExportICS))panel.append(btn('Esporta ICS',()=>calendarExportForm(tasks),'small'));if(!tasks.length)panel.append(node('p','empty','Nessun elemento trovato'));tasks.sort(agendaOrder).forEach(t=>panel.append(taskrow(t)));if(['tasks','agenda'].includes(view)&&tasks.length)panel.append(el('details',{class:'list-analytics'},[node('summary','','Distribuzione per etichetta'),labelDistribution(tasks.filter(t=>t.status!=='done'))]))}for(const x of [search,csel,gsel,status,preset])x.addEventListener('input',draw);draw()}
 function modal(title){const back=el('div',{class:'modalback'}),box=el('div',{class:'modal'});box.append(node('h2','',title));back.append(box);back.addEventListener('click',e=>{if(e.target===back)back.remove()});document.body.append(back);return {back,box}}
 function checkboxes(title,values,selected=[]){const outer=el('div',{class:'full'}),region=el('div',{class:'checkboxes'});outer.append(node('label','label',title),region);for(const [v,l] of values){const cb=el('input',{type:'checkbox',value:String(v),checked:selected.includes(Number(v))});region.append(el('label',{},[cb,' '+l]))}return {outer,selected:()=>[...region.querySelectorAll('input:checked')].map(e=>Number(e.value))}}
+function nextDoMapLinks(query){
+ query=String(query||'').trim();if(!query)return [];
+ const dest=encodeURIComponent(query),base='https://www.google.com/maps/';
+ return [['Apri in Maps','search/?api=1&query='],['Naviga','dir/?api=1&destination=']].map(([text,path],i)=>el('a',{class:'btn small',href:base+path+dest+(i?'&dir_action=navigate':''),target:'_blank',rel:'noopener noreferrer',text}));
+}
 function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  const editing=!!t;
  let currentId=t?.id||null;
@@ -300,6 +307,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  const title=input('title','Titolo',t?.title||suggestion?.title||'');
  const desc=el('textarea',{class:'field',name:'description',rows:'5'});
  desc.value=t?.description||suggestion?.description||'';
+ const address=input('address','Indirizzo completo, città e paese',t?.address||'');address.maxLength=500;
  const type=select('kind',[['task','Scadenza / attività'],['appointment','Appuntamento'],['note','Nota libera']],t?.kind||kind);
  const pr=select('priority',Object.entries(priority),t?.priority||suggestion?.priority||'normal');
  const st=select('status',Object.entries(statuses),t?.status||'todo');
@@ -335,6 +343,9 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  }
  scope.addEventListener('change',updateScope);
  form.append(field('Titolo *',title),field('Tipologia',type),el('div',{class:'full'},[field('Descrizione / nota',desc)]),field('Priorità',pr),field('Stato',st),field('Inizio previsto (facoltativo)',start),field('Data e ora scadenza / appuntamento',due),unknownWrap,field('Ricorrenza',rec),field('Ambito / visibilità',scope),courseWrap,projectWrap,groupWrap,field('Responsabile',assigned),modeWrap,field('Etichette (separate da virgola)',labels),field('Promemoria in minuti prima della scadenza',reminders),displayWrap);
+ const mapBox=el('div',{class:'full'},[field('Luogo / indirizzo (facoltativo)',address)]), mapActions=el('div',{class:'actions'});
+ mapBox.append(mapActions);form.append(mapBox);
+ const updateMaps=()=>{mapBox.hidden=type.value!=='appointment';mapActions.replaceChildren(...nextDoMapLinks(address.value))};address.addEventListener('input',updateMaps);type.addEventListener('change',updateMaps);updateMaps();
  updateScope();
  if(t?.completion_mode==='per_course'&&t.courses.length){
   const section=el('div',{class:'full card'},[node('h2','','Completamento per CdS')]);
@@ -389,7 +400,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
   if(start.value&&due.value&&new Date(start.value)>new Date(due.value)){busy=false;save.disabled=false;msg('La data di inizio non può essere successiva alla scadenza',true);return}
    const mins=reminders.value.split(',').map(x=>x.trim()).filter(Boolean).map(Number);
   const data={
-   title:title.value,description:desc.value,kind:type.value,priority:pr.value,status:st.value,
+   title:title.value,description:desc.value,address:address.value,kind:type.value,priority:pr.value,status:st.value,
    start_at:start.value?new Date(start.value).toISOString():null,
     due_at:due.value?(type.value==='appointment'&&unknownTime.checked?due.value:new Date(due.value).toISOString()):null,recurrence:rec.value,
    group_id:scope.value==='group'&&grp.value?Number(grp.value):null,assigned_to:scope.value==='personal'?null:assigned.value?Number(assigned.value):null,
@@ -996,6 +1007,9 @@ function settings(main){
  if(S.settingsTab==='general'){
   const card=section('Preferenze','Account indipendente da Home Assistant. Proteggere l’accesso remoto tramite HTTPS e Cloudflare Access.');
   card.append(themeButton(),nextDoBackPreference(),node('p','sub','Versione NextDo 0.2.8-test'));NextDoArchive.preferences(content);
+  const assistant=section('Assistente ChatGPT Work','Apri sempre la stessa conversazione. Incolla il suo URL privato dalla barra del browser; non usare il collegamento di condivisione.');
+  const workUrl=input('assistant-link','https://chatgpt.com/c/…',S.assistantUrl||'');
+  assistant.append(field('Collegamento conversazione',workUrl),btn('Salva collegamento',async()=>{try{const r=await api('/assistant-link',{method:'POST',body:JSON.stringify({url:workUrl.value})});S.assistantUrl=r.url;render();msg('Collegamento salvato')}catch(e){msg(e.message,true)}},'primary'),node('p','sub','Lascia vuoto per disattivare. Nessuna credenziale o dato della scheda viene trasferito automaticamente.'));
   NextDoWorkspace.settings(content,'profile')
  }else if(S.settingsTab==='notifications'){
   const card=section('Notifiche');if(admin)card.append(btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed);render()}catch(e){msg(e.message,true)}},'small'));

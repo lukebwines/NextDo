@@ -2,7 +2,7 @@
 import hashlib,re,secrets,time
 from datetime import datetime,date,timedelta,timezone
 from fastapi import HTTPException,Request
-from . import work_push
+from . import work_push, assistant_link
 
 def fail(code,msg):raise HTTPException(code,msg)
 def token():return secrets.token_urlsafe(32)
@@ -148,6 +148,10 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
    u,d=auth(c,req);c.execute("UPDATE work_mobile_devices SET revoked=1 WHERE id=?",(d["id"],))
    record(c,u["id"],"mobile_revoked","work_mobile",None)
   return {"ok":True}
+ @app.get("/api/mobile/v1/work/assistant-link")
+ def assistant_pref(req:Request):
+  with conn() as c:
+   u,d=auth(c,req);return assistant_link.get(c,u['id'])
  @app.get("/api/mobile/v1/work/agenda")
  def agenda(req:Request,after:int=0):
   if after<0:fail(400,"Cursore non valido")
@@ -170,7 +174,7 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
   with conn() as c:
    u,d=auth(c,req);t=c.execute("SELECT * FROM tasks WHERE id=? AND kind IN ('task','appointment')",(tid,)).fetchone()
    if not t or not accessible(c,u,t):fail(404,"Voce non disponibile")
-   return {"id":t["id"],"title":t["title"],"description":t["description"] or "","kind":t["kind"],"status":t["status"],"priority":t["priority"],"due_at":t["due_at"],"start_at":t["start_at"],"revision":revision(t),"acknowledged":seen(c,u,t) is not None}
+   return {"id":t["id"],"title":t["title"],"description":t["description"] or "","address":t["address"] or "","kind":t["kind"],"status":t["status"],"priority":t["priority"],"due_at":t["due_at"],"start_at":t["start_at"],"revision":revision(t),"acknowledged":seen(c,u,t) is not None}
 
  @app.post("/api/mobile/v1/work/alerts/enable")
  def enable_alerts(req:Request):
