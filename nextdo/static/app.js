@@ -1,5 +1,53 @@
 'use strict';
 const S={me:null,csrf:'',tasks:[],courses:[],groups:[],users:[],view:'dashboard',archivePeriod:'all',archiveKind:'all',archiveSummary:{period:'30',recent:0,total:0,unknown:0},settingsTab:'general',dayFilter:'',editing:null,month:new Date(),light:localStorage.getItem('nextdo-light')==='1',listPreset:'all',labelFilter:'',searchTerm:'',projects:[],courseAssignees:[],collaborators:[],courseCollaborators:[],myCourseIds:[],selectedProject:null,projectMode:localStorage.getItem('nextdo-project-view')==='gantt'?'gantt':'kanban',ganttZoom:localStorage.getItem('nextdo-gantt-zoom')||'normal'};
+
+// Browser back is hierarchical; it does not add entries on render or refresh.
+const nextDoBackEnabled=()=>{try{return localStorage.getItem('nextdo-back-mode')!=='classic'}catch{return true}};
+const nextDoDirtyModals=new WeakSet();
+const nextDoDirtyForms=new WeakSet();
+for(const event of ['input','change'])document.addEventListener(event,e=>{
+ const target=e.target;if(!(target instanceof Element))return;
+ const modal=target.closest('.modalback');if(modal){nextDoDirtyModals.add(modal);return}
+ const form=target.closest('form');if(form&&!form.classList.contains('global-search'))nextDoDirtyForms.add(form);
+},true);
+function nextDoConfirmBack(){
+ const forms=[...document.querySelectorAll('main form')];
+ if(forms.some(f=>nextDoDirtyForms.has(f)))return confirm('Potrebbero esserci modifiche non salvate. Tornare indietro?');
+ return true;
+}
+function nextDoInternalBack(){
+ if(!S.me)return false;
+ if(S.view==='personal'&&NextDoPersonal.isBusy()){msg('Operazione in corso: attendere il completamento.',true);return true}
+ const dialogs=document.querySelectorAll('.modalback');
+ const top=dialogs[dialogs.length-1];
+ if(top){if(!nextDoDirtyModals.has(top)||confirm('Chiudere la finestra? Le modifiche non salvate andranno perse.'))top.remove();return true}
+ const menu=document.querySelector('.sidebar.menu-open');
+ if(menu){menu.classList.remove('menu-open');menu.querySelector('.mobile-nav-toggle')?.setAttribute('aria-expanded','false');return true}
+ if(S.view==='dashboard')return false;
+ if(!nextDoConfirmBack())return true;
+ if(S.view==='personal'&&NextDoPersonal.goBack())return true;
+ if(S.view==='settings'&&S.settingsTab!=='general'){S.settingsTab='general';render();return true}
+ if(S.view==='project-progress'||(S.view==='projects'&&S.selectedProject!==null)){changeView('projects');return true}
+ changeView('dashboard');return true;
+}
+const nextDoBack=createNextDoBack(window.history,nextDoBackEnabled,()=>{
+ try{return nextDoInternalBack()}catch(e){msg('Navigazione non completata: '+e.message,true);return true}
+});
+function armNextDoBack(){if(S.me&&nextDoBackEnabled())try{nextDoBack.arm()}catch(e){console.warn('Cronologia NextDo non disponibile',e)}}
+document.addEventListener('click',armNextDoBack,true);
+document.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')armNextDoBack()},true);
+window.addEventListener('popstate',e=>{try{nextDoBack.pop(e)}catch(err){console.warn('Navigazione NextDo non disponibile',err)}});
+function nextDoBackPreference(){
+ const toggle=el('input',{type:'checkbox',checked:nextDoBackEnabled()});
+ toggle.addEventListener('change',()=>{
+  try{localStorage.setItem('nextdo-back-mode',toggle.checked?'internal':'classic')}
+  catch{toggle.checked=nextDoBackEnabled();msg('Impossibile salvare la preferenza',true);return}
+  if(toggle.checked)armNextDoBack();
+  msg(toggle.checked?'Navigazione interna attiva':'Navigazione classica ripristinata');
+ });
+ return el('div',{class:'settings-card'},[el('label',{class:'rowtask'},[toggle,' Tasto Indietro: navigazione interna NextDo']),node('p','sub','Disattiva per ripristinare il comportamento precedente di Chrome. Preferenza di questo browser; nessun dato modificato.')]);
+}
+
 const $=id=>document.getElementById(id), priority={low:'Bassa',normal:'Normale',high:'Alta',critical:'Critica'}, statuses={review:'Da verificare',todo:'Da fare',doing:'In corso',waiting:'In attesa',done:'Completata'};
 function el(tag,attrs={},children=[]){const n=document.createElement(tag);for(const [k,v] of Object.entries(attrs)){if(k==='class')n.className=v;else if(k==='text')n.textContent=v;else if(k==='html')throw Error('Unsafe HTML');else if(k.startsWith('on'))n.addEventListener(k.slice(2),v);else if(k==='value')n.value=v;else if(k==='checked')n.checked=!!v;else if(k==='style')n.setAttribute('style',v);else n.setAttribute(k,v)}for(const c of (Array.isArray(children)?children:[children]))if(c!=null)n.append(typeof c==='string'?document.createTextNode(c):c);return n}
 function node(tag,cls,txt){return el(tag,{class:cls,text:txt})}
@@ -947,7 +995,7 @@ function settings(main){
  function section(title,desc=''){const card=el('section',{class:'card settings-card'},[node('h2','',title),...(desc?[node('p','sub',desc)]:[])]);content.append(card);return card}
  if(S.settingsTab==='general'){
   const card=section('Preferenze','Account indipendente da Home Assistant. Proteggere l’accesso remoto tramite HTTPS e Cloudflare Access.');
-  card.append(themeButton(),node('p','sub','Versione NextDo 0.2.1-test'));NextDoArchive.preferences(content);
+  card.append(themeButton(),nextDoBackPreference(),node('p','sub','Versione NextDo 0.2.8-test'));NextDoArchive.preferences(content);
   NextDoWorkspace.settings(content,'profile')
  }else if(S.settingsTab==='notifications'){
   const card=section('Notifiche');if(admin)card.append(btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed);render()}catch(e){msg(e.message,true)}},'small'));

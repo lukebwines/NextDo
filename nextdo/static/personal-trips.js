@@ -496,8 +496,21 @@ const NextDoPersonal=(()=>{
     const cb=el('input',{type:'checkbox',checked:(st.checks[d.date]||[]).includes(i)});cb.addEventListener('change',()=>save(t=>{const a=new Set(t.state.checks[d.date]||[]);cb.checked?a.add(i):a.delete(i);t.state.checks[d.date]=[...a]}).catch(report));checks.append(el('label',{class:'rowtask'},[cb,c]))
    }
    checks.append(btn('+ Voce',()=>editor('Nuovo promemoria',[['text','Testo','']],v=>save(t=>t.manifest.days.find(x=>x.date===d.date).checks.push(v.text))),'small'));root.append(checks);
-   const notes=el('textarea',{class:'field',rows:'5',value:st.notes[d.date]||''});root.append(card('Note della giornata',notes,btn('Salva note',()=>save(t=>{t.state.notes[d.date]=notes.value}).catch(report),'primary')));
+   const notes=el('textarea',{class:'field',rows:'5','data-nextdo-day-note':'',value:st.notes[d.date]||''});root.append(card('Note della giornata',notes,btn('Salva note',()=>save(t=>{t.state.notes[d.date]=notes.value}).catch(report),'primary')));
   }
  }
- return {render,lock};
+ function goBack(){
+  if(busy)return true;
+  if(section!=='trips')return false;
+  if(trip&&tab!=='panoramica'){
+   if(tab==='giornata'){
+    const note=main?.querySelector('#personal-content textarea[data-nextdo-day-note]');
+    if(note&&note.value!==(trip.state.notes[selected]||'')&&!confirm('Abbandonare le note non salvate?'))return true;
+   }
+   tab='panoramica';render(main);return true;
+  }
+  if(trip){trip=null;render(main);return true}
+  section='home';render(main);return true;
+ }
+ return {render,lock,goBack,isBusy:()=>busy};
 })();
