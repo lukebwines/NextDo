@@ -1,6 +1,6 @@
 /* Private, native NextDo view. No localStorage, no work task integration. */
 const NextDoPersonal=(()=>{
- let generation=0,timer=null,main=null,trip=null,selected='',tab='panoramica',busy=false;
+ let generation=0,timer=null,main=null,trip=null,selected='',tab='panoramica',busy=false,section='home';
  const path='/personal';
  const clone=x=>JSON.parse(JSON.stringify(x));
  const uid=()=>crypto.getRandomValues(new Uint32Array(2)).join('-');
@@ -12,7 +12,7 @@ const NextDoPersonal=(()=>{
  const lines=a=>el('div',{},(a||[]).map(([k,v])=>el('p',{},[node('strong','',k+': '),String(v)])));
  const report=e=>{msg(e.message,true);if(e.message.includes('bloccata')){trip=null;render(main)}};
  function resetTimer(){clearTimeout(timer);timer=setTimeout(()=>{lock();if(S.view==='personal'&&main?.isConnected)render(main)},300000)}
- async function lock(){geoKey='';generation++;clearTimeout(timer);trip=null;selected='';busy=false;document.querySelectorAll('[data-personal-modal]').forEach(x=>x.remove());if(main?.isConnected)main.querySelector('#personal-content')?.replaceChildren();try{await api(path+'/lock',{method:'POST'})}catch{}}
+ async function lock(){geoKey='';generation++;clearTimeout(timer);trip=null;selected='';section='home';busy=false;document.querySelectorAll('[data-personal-modal]').forEach(x=>x.remove());if(main?.isConnected)main.querySelector('#personal-content')?.replaceChildren();try{await api(path+'/lock',{method:'POST'})}catch{}}
  async function render(m){
   main=m;const token=++generation;let root=main.querySelector('#personal-content');if(!root){root=el('div',{id:'personal-content'});main.append(root)}root.replaceChildren(paragraph('Caricamento…'));
   try{
@@ -26,14 +26,37 @@ const NextDoPersonal=(()=>{
  }
  async function overview(root,token){
   const list=await api(path+'/trips');if(token!==generation||!root.isConnected)return;
+  if(section==='trips'){travelOverview(root,token,list);return}
+  root.classList.remove('travel-shell');root.classList.add('personal-hub-shell');
+  const openTrips=()=>{section='trips';render(main)};
+  const hubCard=(title,subtitle,icon,available=false)=>{const head=el('div',{class:'personal-hub-card-head'},[
+   el('span',{class:'personal-hub-icon'},[ico(icon)]),
+   el('div',{class:'personal-hub-copy'},[node('h2','',title),node('p','sub',subtitle)]),
+   ...(available?[ico('chevron')]:[])
+  ]);const item=el('section',{class:'personal-hub-card'+(available?' is-available':'')},[head]);
+   item.append(available?btn('Apri Viaggi',openTrips,'primary'):node('span','personal-hub-status','Da sviluppare'));
+   return item;
+  };
+  const grid=el('div',{class:'personal-hub-grid'},[
+   hubCard('Viaggi','Itinerari, prenotazioni, PDF, guide e Diario di bordo','plane',true),
+   hubCard('Agenda personale','Da sviluppare','calendar'),
+   hubCard('Promemoria','Da sviluppare','bell'),
+   hubCard('Note personali','Da sviluppare','note')
+  ]);
+  root.replaceChildren(grid);
+ }
+ function travelOverview(root,token,list){
+  root.classList.remove('personal-hub-shell');root.classList.add('travel-shell');
   const pick=select('trip',[['','Seleziona viaggio'],...list.map(t=>[t.id,t.title+' · '+t.start+' — '+t.end])],trip?.manifest.trip.id||'');
   const file=el('input',{type:'file',accept:'.zip',class:'field'});
   const importBtn=btn('Importa ZIP',async()=>{if(!file.files[0])return msg('Seleziona un archivio ZIP',true);const data=new FormData();data.append('file',file.files[0]);try{const r=await api(path+'/trips/import',{method:'POST',body:data});await load(r.id);msg('Importato: '+r.bookings+' prenotazioni, '+r.days+' giornate, '+r.pdfs+' PDF')}catch(e){report(e)}},'primary');
   pick.addEventListener('change',()=>pick.value?load(pick.value):(trip=null,render(main)));
-  root.classList.add('travel-shell');const imports=el('details',{class:'travel-import'},[node('summary','','Importa / trasferisci viaggio'),paragraph('Gli ZIP con diario ripristinano anche la cronologia privata inclusa.'),toolbar(file,importBtn)]);root.replaceChildren(el('div',{class:'travel-picker'},[el('div',{},[node('div','travel-kicker','AREA PERSONALE · VIAGGI'),pick]),toolbar(btn('+ Nuovo viaggio',newTrip,'primary'),btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',async()=>{await lock();render(main)})),imports]));
+  const imports=el('details',{class:'travel-import'},[node('summary','','Importa / trasferisci viaggio'),paragraph('Gli ZIP con diario ripristinano anche la cronologia privata inclusa.'),toolbar(file,importBtn)]);
+  const back=toolbar(btn('← Area personale',()=>{section='home';trip=null;render(main)},'small'));
+  root.replaceChildren(back,el('div',{class:'travel-picker'},[el('div',{},[node('div','travel-kicker','AREA PERSONALE · VIAGGI'),pick]),toolbar(btn('+ Nuovo viaggio',newTrip,'primary'),btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',async()=>{await lock();render(main)})),imports]));
   if(trip)show(root);else root.append(paragraph('Seleziona un viaggio oppure importane uno.'));
  }
- async function load(id){const token=generation;try{const result=await api(path+'/trips/'+encodeURIComponent(id));if(token!==generation||S.view!=='personal')return;trip=result;selected=trip.manifest.days[0]?.date||'';tab='panoramica';render(main)}catch(e){report(e)}}
+ async function load(id){section='trips';const token=generation;try{const result=await api(path+'/trips/'+encodeURIComponent(id));if(token!==generation||S.view!=='personal')return;trip=result;selected=trip.manifest.days[0]?.date||'';tab='panoramica';render(main)}catch(e){report(e)}}
  function editor(title,fields,submit){
   const {box,back}=modal(title);back.setAttribute('data-personal-modal','');const f=el('form',{class:'formgrid'});const controls={};
   for(const [key,label,value,kind] of fields){const c=kind==='textarea'?el('textarea',{class:'field',rows:'4',value:value??''}):input(key,'',value??'',kind||'text');controls[key]=c;f.append(field(label,c))}

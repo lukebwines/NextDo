@@ -42,3 +42,21 @@
 .travel-spot-credit .btn{font-size:11px;padding:2px 6px}
 
 .travel-mini .sub{margin:4px 0;font-size:12px}.travel-mini>div{min-width:0;overflow-wrap:anywhere}.travel-card .formgrid{gap:12px}
+
+
+/* Area personale: hub Web allineato alla landing Android. */
+.personal-hub-shell{max-width:1120px;margin:0 auto}
+.personal-hub-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:stretch}
+.personal-hub-card{min-width:0;min-height:190px;display:flex;flex-direction:column;justify-content:space-between;gap:22px;padding:24px;border:1px solid var(--stroke);border-radius:24px;background:var(--panel);box-shadow:0 12px 30px #00000012}
+.personal-hub-card.is-available{border-color:#69e0d255;background:linear-gradient(145deg,#172b3d 0%,#172b3d 72%,#1b3a46 100%)}
+.personal-hub-card-head{display:flex;align-items:center;gap:16px;min-width:0}
+.personal-hub-icon{width:60px;height:60px;flex:0 0 60px;display:grid;place-items:center;border-radius:18px;background:#69e0d21a;color:#69e0d2}
+.personal-hub-icon .ico{width:28px;height:28px}
+.personal-hub-copy{min-width:0;flex:1}
+.personal-hub-copy h2{margin:0 0 5px;font-size:22px;line-height:1.25;letter-spacing:-.02em}
+.personal-hub-copy .sub{margin:0;font-size:14px;line-height:1.5}
+.personal-hub-card>.btn.primary{width:100%;border-radius:999px;padding:13px 18px;background:#69e0d2;border-color:#69e0d2;color:#08212c;font-size:15px;font-weight:750}
+.personal-hub-status{align-self:flex-start;display:inline-flex;align-items:center;border:1px solid var(--stroke);border-radius:999px;padding:6px 11px;color:var(--muted);font-size:12px;font-weight:700;background:var(--panel2)}
+.personal-trips-back{margin-bottom:12px}
+@media(max-width:700px){.personal-hub-grid{grid-template-columns:1fr;gap:14px}.personal-hub-card{min-height:160px;padding:20px}.personal-hub-copy h2{font-size:20px}}
+.light .personal-hub-card.is-available{background:linear-gradient(145deg,#fff 0%,#fff 72%,#e9f8f6 100%)}
