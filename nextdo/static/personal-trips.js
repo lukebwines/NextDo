@@ -86,7 +86,21 @@ const NextDoPersonal=(()=>{
     back.remove();if(token===generation){section=type.value;render(main)}
    }catch(e){if(token===generation)report(e)}finally{busy=false}},'primary');
    box.append(field('Titolo',title),field('Tipo',type),field('Data',day),field('Ora (facoltativa)',clock),field('Stato',status),field('Priorità',priority),field('Descrizione / email originale',desc),toolbar(commit,btn('Annulla',()=>back.remove(),'small')));
+   if(item.id)box.append(btn('Sposta in Professionale',async()=>{if(busy||!confirm('Spostare nell’area Professionale? Titolo e descrizione saranno gestiti come dati professionali.'))return;busy=true;try{await api(path+'/transfers',{method:'POST',body:JSON.stringify({action:'to_work',id:item.id,confirm:true})});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}},'small'));
    if(item.id)box.append(btn('Elimina',async()=>{if(busy||!confirm('Eliminare questo impegno personale?'))return;busy=true;try{await api(path+'/items/'+item.id,{method:'DELETE'});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}},'small'));
+  }
+  async function transfers(){
+   const {box,back}=modal('Sposta impegni · riclassifica email');back.setAttribute('data-personal-modal','');
+   const out=el('div');box.append(paragraph('Solo elementi individuali compatibili. Le email vengono spostate insieme a tutte le attività collegate. Invii e copie già esportate non si possono ritirare.'),out);
+   try{
+    const data=await api(path+'/transfers');if(token!==generation||!back.isConnected)return;
+    async function move(body){
+     if(busy||!confirm('Confermi lo spostamento? L’elemento non sarà più presente nell’area di origine.'))return;
+     busy=true;try{await api(path+'/transfers',{method:'POST',body:JSON.stringify({...body,confirm:true})});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}
+    }
+    out.append(node('h3','','Email personali già acquisite'),...data.mail.map(x=>card(x.titles.join(' · ')||'Email senza impegni',paragraph(x.received_at),x.reason?paragraph(x.reason):btn('Sposta in Personale',()=>move({action:'mail',digest:x.digest}),'primary'))),node('h3','','Altri impegni professionali individuali'),...data.tasks.map(x=>card(x.title,x.reason?paragraph(x.reason):btn('Sposta in Personale',()=>move({action:'to_private',id:x.id}),'small'))));
+    if(!data.mail.length&&!data.tasks.length)out.append(paragraph('Nessun elemento individuato.'));
+   }catch(e){report(e)}
   }
   const selectedKind=kinds.find(x=>x[0]===section);
   if(selectedKind){
@@ -104,7 +118,7 @@ const NextDoPersonal=(()=>{
    }
    shell.append(hero,agenda);
   }else{
-   shell.append(hero,settings,grid);
+   shell.append(hero,settings,grid,toolbar(btn('Sposta / riclassifica impegni',transfers,'small')));
    if(items){
     const upcoming=items.filter(x=>x.status!=='done'&&(x.status==='review'||x.due_at)).slice(0,5);
     if(upcoming.length){agenda.append(node('h2','','I tuoi impegni'),...upcoming.map(x=>el('button',{class:'personal-item-row',type:'button',onclick:()=>editItem(x.kind,x)},[el('div',{},[node('strong','',x.title),node('p','sub',(x.due_at?fmt(x.due_at):'Senza data')+(x.status==='review'?' · Da verificare':''))]),ico('chevron')])));shell.append(agenda)}

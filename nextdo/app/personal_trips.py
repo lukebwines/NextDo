@@ -407,7 +407,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   if timeline is None:return r["archive"]
   m,state,files=read_archive(r["archive"])
   return make_archive(m,state,files,timeline)
- travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive,save=save,new_manifest=new_manifest,limit=LIMIT,import_bundle=import_bundle,export_bundle=export_bundle,map_tile=lambda owner,z,x,y:tools.diary_tile(z,x,y,service(owner,"geoapify")))
+ travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive,save=save,new_manifest=new_manifest,limit=LIMIT,import_bundle=import_bundle,export_bundle=export_bundle,map_tile=lambda owner,z,x,y:tools.diary_tile(z,x,y,service(owner,"geoapify")),data_path=data_path)
  @app.middleware("http")
  async def private_cache(req:Request,call_next):
   res=await call_next(req)

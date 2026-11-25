@@ -225,3 +225,17 @@ def test_private_items_are_not_professional_or_shared(tmp_path):
  assert c.get(url).json()["items"]==[]
  assert c.post(url+"/"+str(i),headers=h,json={"title":"Unauthorized"}).status_code==404
  c.close()
+
+def test_private_transfer_manual_roundtrip(tmp_path):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ i=c.post(p+"/items",headers=h,json={"title":"Synthetic move","kind":"deadline","due_at":"2027-01-03"}).json()["id"]
+ assert c.post(p+"/transfers",headers=h,json={"action":"to_work","id":i}).status_code==400
+ r=c.post(p+"/transfers",headers=h,json={"action":"to_work","id":i,"confirm":True});assert r.status_code==200,r.text
+ tid=r.json()["id"]
+ assert c.get(p+"/items").json()["items"]==[]
+ assert c.get("/api/tasks").json()[0]["title"]=="Synthetic move"
+ r=c.post(p+"/transfers",headers=h,json={"action":"to_private","id":tid,"confirm":True});assert r.status_code==200,r.text
+ assert c.get("/api/tasks").json()==[]
+ assert c.get(p+"/items").json()["items"][0]["kind"]=="deadline"
+ c.close()

@@ -51,7 +51,8 @@ def remove(c,uid,i):
  if not c.execute("DELETE FROM private_items WHERE owner_id=? AND id=?",(uid,i)).rowcount:fail("Elemento non trovato",404)
  return {"ok":True}
 
-def register(app,conn,web_owner,mobile_owner):
+def register(app,conn,web_owner,mobile_owner,data_path):
+ from . import private_transfer as transfer
  def attach(prefix,authorize):
   @app.get(prefix+"/items")
   def read(req:Request):
@@ -70,5 +71,21 @@ def register(app,conn,web_owner,mobile_owner):
   def delete(item_id:int,req:Request):
    identity=authorize(req,True)
    with conn() as c:return remove(c,owner_id(c,identity),item_id)
+  @app.get(prefix+"/transfers")
+  def preview(req:Request):
+   identity=authorize(req,False)
+   with conn() as c:return transfer.candidates(c,owner_id(c,identity),identity,data_path)
+  @app.post(prefix+"/transfers")
+  def move(req:Request,b:dict):
+   identity=authorize(req,True)
+   if b.get("confirm") is not True:fail("Confermare lo spostamento")
+   with conn() as c:
+    uid=owner_id(c,identity)
+    action=b.get("action")
+    if action=="mail" and isinstance(b.get("digest"),str):return transfer.move_mail(c,uid,identity,data_path,b["digest"])
+    if type(b.get("id")) is int:
+     if action=="to_private":return transfer.work_to_private(c,uid,b["id"])
+     if action=="to_work":return transfer.to_work(c,uid,b["id"])
+    fail("Spostamento non valido")
  attach("/api/personal",web_owner)
  attach("/api/mobile/v1",mobile_owner)

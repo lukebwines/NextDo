@@ -13,7 +13,7 @@ def raw_token(value):
  if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}",value):fail(401,"Credenziale non valida")
  return digest(value)
 
-def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit,import_bundle,export_bundle,map_tile):
+def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit,import_bundle,export_bundle,map_tile,data_path):
  with db() as c:
   c.executescript("""CREATE TABLE IF NOT EXISTS mobile_pairings(code_hash TEXT PRIMARY KEY,owner TEXT NOT NULL,expires REAL NOT NULL);
   CREATE TABLE IF NOT EXISTS mobile_devices(id TEXT PRIMARY KEY,owner TEXT NOT NULL,label TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,expires REAL NOT NULL,created REAL NOT NULL,revoked INTEGER DEFAULT 0);
@@ -42,7 +42,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   return row
  from . import private_items
  with conn() as c:private_items.ensure(c)
- private_items.register(app,conn,allowed,lambda req,write:auth(req)["owner"])
+ private_items.register(app,conn,allowed,lambda req,write:auth(req)["owner"],data_path)
  travel_timeline.register(app,db=db,allowed=allowed,auth=auth,load=load,map_tile=map_tile)
  @app.get('/api/mobile/v1/assistant-link')
  def assistant_pref(req:Request):
