@@ -295,3 +295,10 @@ def test_private_sender_routes_separately(tmp_path,monkeypatch):
  assert len(items)==1 and items[0]["kind"]=="deadline" and items[0]["status"]=="review"
  assert deliver(c,secret,sample(),sender=other).json()["duplicate"]
  c.close()
+
+def test_private_sender_configuration_is_validated(tmp_path):
+ c,h=init(tmp_path);setup(c,h)
+ r=c.post("/api/cloudflare-mail/config",headers=h,json={"recipient":RECIPIENT,"allowed_sender":SENDER,"private_sender":"unauthorized@example.org","enabled":True})
+ assert r.status_code==400
+ assert c.get("/api/cloudflare-mail/config").json()["private_sender"]==""
+ c.close()

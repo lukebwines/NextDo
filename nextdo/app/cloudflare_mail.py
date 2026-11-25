@@ -90,6 +90,7 @@ def upgrade(db_path):
   cols={r[1] for r in db.execute("PRAGMA table_info(cloudflare_mail_inbox)")}
   if "area" not in cols:db.execute("ALTER TABLE cloudflare_mail_inbox ADD COLUMN area TEXT NOT NULL DEFAULT 'work'")
   if "private_owner" not in cols:db.execute("ALTER TABLE cloudflare_mail_inbox ADD COLUMN private_owner INTEGER")
+  if "private_identity" not in cols:db.execute("ALTER TABLE cloudflare_mail_inbox ADD COLUMN private_identity TEXT")
   # Separate ledger: never point private items at professional task IDs.
   db.execute("""CREATE TABLE IF NOT EXISTS cloudflare_private_fingerprints(
    fingerprint TEXT PRIMARY KEY,message_hash TEXT NOT NULL REFERENCES cloudflare_mail_inbox(message_hash),
@@ -97,6 +98,7 @@ def upgrade(db_path):
 
 def private_insert(c,owner,row,source,item,fp,title,description,kind,due):
  from . import private_items
+ if not c.execute("SELECT 1 FROM personal_identities p JOIN users u ON u.id=p.user_id WHERE u.id=? AND p.owner=? AND u.active=1 AND u.role='admin'",(owner,row.get("private_identity"))).fetchone():raise ValueError("Private destination inactive")
  if c.execute("SELECT 1 FROM cloudflare_private_fingerprints WHERE fingerprint=?",(fp,)).fetchone():return False
  if kind!="appointment":kind="deadline" if due else "task"
  tid=private_items.create(c,owner,{"title":title,"description":description,"kind":kind,"due_at":due,"status":"review"})
@@ -148,15 +150,16 @@ def enqueue(conn,data,raw,sender,recipient,cfg=None):
  source=email_intake.parse_mail(raw)
  cfg=cfg if cfg is not None else load_config(data)
  private=sender in sender_addresses(cfg.get("private_sender",""))
- owner=cfg.get("owner_id") if private else None
- if private and not isinstance(owner,int):fail("Destinazione personale non configurata",503)
+ owner=cfg.get("private_owner_id") if private else None
+ identity=cfg.get("private_identity") if private else None
+ if private and (not isinstance(owner,int) or not isinstance(identity,str) or not identity):fail("Destinazione personale non configurata",503)
  area="private" if private else "work"
- prefix=("private:"+str(owner)+":").encode() if private else b""
+ prefix=("private:"+identity+":").encode() if private else b""
  sha=hashlib.sha256(prefix+raw).hexdigest()
  fingerprint=hashlib.sha256(prefix+digest(source).encode()).hexdigest() if private else digest(source)
  with conn() as c:
   purge_expired(c)
-  if private and not c.execute("SELECT 1 FROM users WHERE id=? AND active=1 AND role='admin'",(owner,)).fetchone():fail("Destinazione personale non disponibile",503)
+  if private and not c.execute("SELECT 1 FROM personal_identities p JOIN users u ON u.id=p.user_id WHERE u.id=? AND p.owner=? AND u.active=1 AND u.role='admin'",(owner,identity)).fetchone():fail("Destinazione personale non disponibile",503)
   row=c.execute("SELECT * FROM cloudflare_mail_inbox WHERE message_hash=?",(sha,)).fetchone()
   if row:
    if row["status"] in ("processed","failed") and row["tasks_created"]==0 and row["duplicates"]==0 and not row["payload_encrypted"] and not represented(c,fingerprint,sha):
@@ -167,17 +170,17 @@ def enqueue(conn,data,raw,sender,recipient,cfg=None):
    return {"accepted":True,"duplicate":True,"state":row["status"]}
   encrypted=email_intake._cipher(data).encrypt(json.dumps(source,ensure_ascii=False).encode()).decode()
   if represented(c,fingerprint):
-   c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,completed_at,payload_encrypted,area,private_owner) VALUES(?,?,?,?,'duplicate',?,?,?,?)",
-    (sha,fingerprint,sender,recipient,stamp(),encrypted,area,owner))
+   c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,completed_at,payload_encrypted,area,private_owner,private_identity) VALUES(?,?,?,?,'duplicate',?,?,?,?,?)",
+    (sha,fingerprint,sender,recipient,stamp(),encrypted,area,owner,identity))
    return {"accepted":True,"duplicate":True,"state":"duplicate"}
-  c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,payload_encrypted,area,private_owner) VALUES(?,?,?,?,'queued',?,?,?)",
-   (sha,fingerprint,sender,recipient,encrypted,area,owner))
+  c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,payload_encrypted,area,private_owner,private_identity) VALUES(?,?,?,?,'queued',?,?,?,?)",
+   (sha,fingerprint,sender,recipient,encrypted,area,owner,identity))
  return {"accepted":True,"duplicate":False,"state":"queued"}
 
 def _claim(conn):
  with conn() as c:
   purge_expired(c)
-  r=c.execute("SELECT message_hash,source_digest,payload_encrypted,sender,recipient,attempt_count,area,private_owner FROM cloudflare_mail_inbox WHERE status IN ('queued','retry') AND payload_encrypted IS NOT NULL AND attempt_count<? AND next_attempt_epoch<=? ORDER BY received_at,message_hash LIMIT 1",(RETRY_LIMIT,sec())).fetchone()
+  r=c.execute("SELECT message_hash,source_digest,payload_encrypted,sender,recipient,attempt_count,area,private_owner,private_identity FROM cloudflare_mail_inbox WHERE status IN ('queued','retry') AND payload_encrypted IS NOT NULL AND attempt_count<? AND next_attempt_epoch<=? ORDER BY received_at,message_hash LIMIT 1",(RETRY_LIMIT,sec())).fetchone()
   if r:c.execute("UPDATE cloudflare_mail_inbox SET status='processing',attempt_count=attempt_count+1,started_at=?,error=NULL WHERE message_hash=?",(stamp(),r["message_hash"]))
   return dict(r) if r else None
 
@@ -209,7 +212,7 @@ def process_one(conn,data,row):
      due+="T"+item["appointment_time"]+":00"
     fp=hashlib.sha256((title.casefold()+"\n"+(due or "")+"\n"+evidence.casefold()).encode()).hexdigest()
     if item.get("manual_review"):fp=hashlib.sha256(("manual-review:"+row["source_digest"]).encode()).hexdigest()
-    if private:fp=hashlib.sha256(("private:"+str(owner)+":"+fp).encode()).hexdigest()
+    if private:fp=hashlib.sha256(("private:"+str(row.get("private_identity"))+":"+fp).encode()).hexdigest()
     if not private and c.execute("SELECT 1 FROM cloudflare_mail_tasks WHERE fingerprint=?",(fp,)).fetchone():
      duplicate_count+=1;continue
     description=("[DA VERIFICARE] Scadenza generata automaticamente, non convalidata.\n"
@@ -262,7 +265,7 @@ def process_one(conn,data,row):
      if c.execute("SELECT 1 FROM users WHERE id=? AND role='admin' AND active=1",(owner,)).fetchone():
       fp=hashlib.sha256(("manual-review:"+row["source_digest"]).encode()).hexdigest()
       if private:
-       fp=hashlib.sha256(("private:"+str(owner)+":"+fp).encode()).hexdigest()
+       fp=hashlib.sha256(("private:"+str(row.get("private_identity"))+":"+fp).encode()).hexdigest()
        proposal=email_intake.manual_proposal(source,"Analisi AI non riuscita dopo tre tentativi.")
        desc="[DA VERIFICARE] Analisi AI non riuscita.\n"+source["subject"]+"\n"+source["text"][:12000]
        if private_insert(c,owner,row,source,proposal,fp,proposal["title"],desc,"task",None):
@@ -336,8 +339,17 @@ def register_routes(app,*,conn,user,csrf,data_path):
   if any(len(sender)>254 or not email_ok(sender) for sender in senders):fail("Mittente non valido")
   if body.enabled and (not cfg.get("secret") or not recipient or not senders):
    fail("Configurare gli indirizzi e generare il segreto prima di attivare la ricezione")
+  if cfg.get("private_identity") and cfg.get("private_owner_id")!=owner["id"]:fail("La configurazione personale appartiene a un altro account",403)
   private_senders=sender_addresses(body.private_sender if body.private_sender is not None else cfg.get("private_sender",""))
   if any(x not in senders for x in private_senders):fail("I mittenti personali devono essere tra quelli autorizzati")
+  if private_senders:
+   if cfg.get("private_identity") and cfg.get("private_owner_id")!=owner["id"]:fail("La destinazione personale appartiene a un altro account",403)
+   with conn() as c:
+    c.execute("INSERT OR IGNORE INTO personal_identities(user_id,owner) VALUES(?,?)",(owner["id"],secrets.token_hex(32)))
+    identity=c.execute("SELECT owner FROM personal_identities WHERE user_id=?",(owner["id"],)).fetchone()[0]
+   cfg.update(private_owner_id=owner["id"],private_identity=identity)
+  else:
+   cfg.pop("private_owner_id",None);cfg.pop("private_identity",None)
   cfg.update(enabled=body.enabled,recipient=recipient,allowed_sender=", ".join(senders),private_sender=", ".join(private_senders),owner_id=owner["id"])
   save_config(data_path,cfg)
   return public(cfg)
