@@ -103,7 +103,7 @@ internal fun WorkItemRow(t:WorkItem,enabled:Boolean=true,onDetail:(Long)->Unit,o
                 }
             }
             Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)){
-                val label=if(t.day.isBlank())"Senza data" else if(t.instant.isNotBlank())t.instant.drop(11).take(5) else if(t.kind=="appointment")"Orario da definire" else "Scadenza"
+                val label=if(t.status=="done")"Completata · "+shortDate(t.day)+(if(t.instant.isNotBlank())" · "+t.instant.drop(11).take(5) else "") else if(t.day.isBlank())"Senza data" else if(t.instant.isNotBlank())t.instant.drop(11).take(5) else if(t.kind=="appointment")"Orario da definire" else "Scadenza"
                 Text(label,color=accent,fontSize=11.sp,fontWeight=FontWeight.SemiBold)
                 Text(t.title,color=ShellWhite,fontSize=14.sp,lineHeight=18.sp,fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
                 Text((if(t.kind=="appointment")"Appuntamento" else "Attività")+" · "+statusName(t.status)+(if(t.overdue) " · Trascorsa" else ""),color=if(t.status=="review"||t.overdue)accent else ShellMuted,fontSize=11.sp,lineHeight=14.sp)
@@ -123,8 +123,8 @@ internal fun monthCells(month:YearMonth):List<LocalDate>{
 }
 
 @Composable
-internal fun BentoCalendar(today:LocalDate,marked:Set<String>,review:Set<String> = emptySet(),selected:String="",onDay:(LocalDate)->Unit,title:String="Calendario"){
-    var month by remember(today){mutableStateOf(YearMonth.from(today))}
+internal fun BentoCalendar(today:LocalDate,marked:Set<String>,review:Set<String> = emptySet(),selected:String="",onDay:(LocalDate)->Unit,title:String="Calendario",initialMonth:YearMonth=YearMonth.from(today),travel:Boolean=false){
+    var month by remember(initialMonth){mutableStateOf(initialMonth)}
     BentoCard(title,Icons.Default.CalendarMonth,WorkBlue){
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){
             IconButton(onClick={month=month.minusMonths(1)}){Icon(Icons.Default.ChevronLeft,"Mese precedente",tint=WorkBlue)}
@@ -149,8 +149,8 @@ internal fun BentoCalendar(today:LocalDate,marked:Set<String>,review:Set<String>
             }
         }
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
-            Text("• Impegno   • Da verificare",Modifier.weight(1f),color=ShellMuted,fontSize=11.sp)
-            TextButton(onClick={month=YearMonth.from(today)}){Text("Oggi")}
+            Text(if(travel)"• Giorno con itinerario" else "• Impegno   • Da verificare",Modifier.weight(1f),color=ShellMuted,fontSize=11.sp)
+            TextButton(onClick={month=if(travel)initialMonth else YearMonth.from(today)}){Text(if(travel)"Viaggio" else "Oggi")}
         }
     }
 }
@@ -195,6 +195,10 @@ internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolea
     agenda?.completion?.let{completed->
         BentoCard("Completate · "+completionLabel(completed.period),Icons.Default.CheckCircle,ShellGreen,
             completed.count.toString()+" attività nel periodo",action=if(allowed){{openWork("completed")}} else null){}
+    }
+    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)){
+        OutlinedButton(onClick={openWork("calendar")},enabled=allowed&&ready,modifier=Modifier.weight(1f),contentPadding=PaddingValues(6.dp)){Icon(Icons.Default.CalendarMonth,null,Modifier.size(18.dp));Spacer(Modifier.width(5.dp));Text("Calendario",fontSize=12.sp)}
+        OutlinedButton(onClick={openWork("week")},enabled=allowed&&ready,modifier=Modifier.weight(1f),contentPadding=PaddingValues(6.dp)){Text("Settimana",fontSize=12.sp)}
     }
     if(ready){
         val late=items.filter{it.overdue}

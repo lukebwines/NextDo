@@ -18,7 +18,10 @@ def test_work_agenda_pair_permissions(tmp_path):
  items=c.get(m+"/agenda",headers=admin).json()["items"]
  assert {i["id"] for i in items}=={private,common}
  assert c.get(m+"/agenda",headers=admin).json()["completion_summary"]=={"period":"30","count":1}
- assert {i["id"] for i in c.get(m+"/completed",headers=admin).json()["items"]}=={finished}
+ completed=c.get(m+"/completed",headers=admin).json()
+ assert {i["id"] for i in completed["items"]}=={finished}
+ assert completed["items"][0]["day"]
+ assert c.get(m+"/completed").status_code==401
  assert next(i for i in items if i["id"]==private)["day"]=="2027-01-01"
  assert next(i for i in items if i["id"]==private)["status"]=="review"
  assert c.get("/api/mobile/v1/trips",headers=admin).status_code==401

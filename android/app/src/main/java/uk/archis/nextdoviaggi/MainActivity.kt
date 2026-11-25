@@ -528,7 +528,7 @@ class MainActivity : ComponentActivity() {
             try {
                 val value=withContext(Dispatchers.IO){WorkApi(cfg.getString("url")).completed(cfg.getString("token"),after)}
                 if(started==epoch&&!locked&&workConnection===cfg){val prev=completedWork;completedWork=if(after>0&&prev!=null&&prev.period==value.period)value.copy(items=(prev.items+value.items).distinctBy{it.id}) else value}
-            }catch(e:CancellationException){throw e}catch(e:Exception){if(started==epoch&&!locked)completedError="Storico non disponibile. Verifica l’aggiornamento dell’add-on."}finally{if(started==epoch)completedBusy=false}
+            }catch(e:CancellationException){throw e}catch(e:Exception){if(started==epoch&&!locked&&workConnection===cfg)completedError="Storico non disponibile. Verifica l’aggiornamento dell’add-on."}finally{if(started==epoch)completedBusy=false}
         }
     }
     private fun loadWorkDetail(id:Long){
@@ -942,7 +942,7 @@ class MainActivity : ComponentActivity() {
         val last=runCatching{LocalDate.parse(t.info.str("end"))}.getOrDefault(first)
         val calendarAnchor=tripToday.coerceIn(first,minOf(maxOf(first,last),first.plusYears(10)))
         val validDays=t.days.map{it.str("date")}.filter{it.isNotBlank()}.toSet()
-        BentoCalendar(calendarAnchor,validDays,selected=selectedDay,onDay={d->if(d.toString() in validDays){selectedDay=d.toString();section="Oggi"}},title="Calendario del viaggio")
+        BentoCalendar(tripToday,validDays,selected=selectedDay,onDay={d->if(d.toString() in validDays){selectedDay=d.toString();section="Oggi"}},title="Calendario del viaggio",initialMonth=java.time.YearMonth.from(calendarAnchor),travel=true)
         val next=t.days.firstOrNull{it.str("date")==selectedDay}
         TravelCard("La prossima tappa",next?.let { listOf(it.str("date"),it.str("place"),it.str("headline")).filter{v->v.isNotBlank()}.joinToString(" · ") } ?: "Programma da definire") {
             Action("Vai all’itinerario") { section="Oggi" }

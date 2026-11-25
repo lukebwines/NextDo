@@ -1,6 +1,7 @@
 package uk.archis.nextdoviaggi
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -136,10 +137,16 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
         "urgent" to "Urgenti","review" to "Da verificare","todo" to "Da fare",
         "late" to "Scadute","past" to "Trascorsi","undated" to "Senza data")
     for(group in filterOptions.chunked(3)){
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
-            for((key,label) in group)StatusTile(label,when(key){"appointments"->androidx.compose.material.icons.Icons.Default.CalendarToday;"review","urgent"->androidx.compose.material.icons.Icons.Default.Warning;else->androidx.compose.material.icons.Icons.Default.Event},if(key=="urgent"||key=="review")ShellSand else WorkBlue,Modifier.weight(1f),items.count{workMatches(it,key)}.toString(),!busy,filter==key){filter=key;chosen=""}
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+            for((key,label) in group)FilterChip(selected=filter==key,onClick={filter=key;chosen=""},label={Text(label+" "+items.count{workMatches(it,key)},fontSize=12.sp)},enabled=!busy)
         }
     }
+    if(filter=="calendar"){
+        BentoCalendar(today,items.mapNotNull{it.day.takeIf(String::isNotBlank)}.toSet(),items.filter{it.status=="review"}.map{it.day}.toSet(),onDay={filter="day:"+it;chosen=""})
+        TextButton(onClick={filter="week";offset=0;chosen=""}){Text("Agenda della settimana")}
+        return
+    }
+    TextButton(onClick={filter="calendar";chosen=""}){Icon(Icons.Default.CalendarMonth,null);Spacer(Modifier.width(6.dp));Text("Calendario mensile")}
     agenda.completion?.let{TextButton(onClick={filter="completed";onLoadCompleted(0)},enabled=!busy){Text("Completate · "+completionLabel(it.period)+" ("+it.count+")")}}
     val label=when(filter){
         "tasks"->"Scadenze e attività";"appointments"->"Appuntamenti";"todo"->"Da fare";"urgent"->"Urgenti";"review"->"Da verificare";"late"->"Scadute";"past"->"Appuntamenti trascorsi";"all"->"Tutte le voci aperte";"undated"->"Senza data";"overdue"->"Scadute / trascorsi";"future"->"Prossimi impegni";"week"->"Agenda della settimana";else->if(filter.startsWith("day:"))shortDate(filter.removePrefix("day:")) else "Agenda"
@@ -177,7 +184,8 @@ internal fun WorkDetailDialog(detail:JSONObject,close:()->Unit){
     AlertDialog(onDismissRequest=close,title={Text(detail.str("title"))},text={
         Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text(statusName(detail.str("status"))+" · "+priorityName(detail.str("priority")))
-            Text(detail.str("due_at").ifBlank{"Data da definire"},color=MutedWork)
+            Text("Scadenza: "+detail.str("due_at").ifBlank{"Data da definire"},color=MutedWork)
+            if(detail.str("completed_at").isNotBlank())Text("Completamento: "+detail.str("completed_at").replace("T"," ").removeSuffix("Z")+" UTC",color=MutedWork)
             Text(detail.str("description").take(12000).ifBlank{"Nessuna descrizione"})
             if(detail.str("description").length>12000)Text("Descrizione lunga: consulta il testo completo sul web.",fontSize=12.sp)
         }
