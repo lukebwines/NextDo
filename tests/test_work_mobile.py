@@ -7,7 +7,7 @@ def test_work_agenda_pair_permissions(tmp_path):
  private=task("Private administrator review",status="review",kind="appointment",due_at="2027-01-01")
  common=task("Shared deadline",scope="common",priority="critical")
  task("Private note",kind="note")
- task("Finished",status="done")
+ finished=task("Finished",status="done")
  def pair():
   code=c.post(p+"/pair",headers=h).json()["code"]
   result=c.post(m+"/pair",json={"code":code});assert result.status_code==200,result.text
@@ -17,6 +17,8 @@ def test_work_agenda_pair_permissions(tmp_path):
  admin=pair()
  items=c.get(m+"/agenda",headers=admin).json()["items"]
  assert {i["id"] for i in items}=={private,common}
+ assert c.get(m+"/agenda",headers=admin).json()["completion_summary"]=={"period":"30","count":1}
+ assert {i["id"] for i in c.get(m+"/completed",headers=admin).json()["items"]}=={finished}
  assert next(i for i in items if i["id"]==private)["day"]=="2027-01-01"
  assert next(i for i in items if i["id"]==private)["status"]=="review"
  assert c.get("/api/mobile/v1/trips",headers=admin).status_code==401
@@ -30,6 +32,8 @@ def test_work_agenda_pair_permissions(tmp_path):
  other=pair()
  assert {i["id"] for i in c.get(m+"/agenda",headers=other).json()["items"]}=={common}
  assert c.get(m+"/agenda/"+str(private),headers=other).status_code==404
+ assert c.get(m+"/completed",headers=other).json()["items"]==[]
+ assert c.get(m+"/agenda",headers=other).json()["completion_summary"]["count"]==0
  assert c.get(m+"/agenda/"+str(common),headers=other).status_code==200
  did=c.get(p+"/devices").json()[0]["id"]
  assert c.post(p+"/devices/"+did+"/revoke",headers=h).status_code==200

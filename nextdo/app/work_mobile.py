@@ -148,6 +148,26 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
    u,d=auth(c,req);c.execute("UPDATE work_mobile_devices SET revoked=1 WHERE id=?",(d["id"],))
    record(c,u["id"],"mobile_revoked","work_mobile",None)
   return {"ok":True}
+ def recent_completed(c,u):
+  from . import archive_storage
+  row=c.execute('SELECT period FROM archive_preferences WHERE user_id=?',(u['id'],)).fetchone()
+  period=row[0] if row and row[0] in archive_storage.PERIODS else '30'
+  tasks=archive_storage.scope_filter(c,u,accessible,state='done',kind='agenda',period=period,tz=tz)
+  return period,list(tasks)
+
+ @app.get("/api/mobile/v1/work/completed")
+ def completed(req:Request,after:int=0):
+  if after<0:fail(400,"Cursore non valido")
+  with conn() as c:
+   u,d=auth(c,req);period,complete=recent_completed(c,u)
+   page=sorted((t for t in complete if t['id']>after),key=lambda t:t['id'])[:201]
+   more=len(page)>200;page=page[:200]
+   rows=[]
+   for t in page:
+    day,instant=day_info(t['due_at'],tz)
+    rows.append({"id":t["id"],"title":t["title"],"kind":t["kind"],"priority":t["priority"],"status":t["status"],"day":day,"instant":instant,"overdue":False,"revision":revision(t),"acknowledged":True})
+   return {"items":rows,"next_after":rows[-1]["id"] if more else None,"period":period,"total":len(complete)}
+
  @app.get("/api/mobile/v1/work/agenda")
  def agenda(req:Request,after:int=0):
   if after<0:fail(400,"Cursore non valido")
@@ -164,7 +184,11 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
     rows.append({"id":t["id"],"title":t["title"],"kind":t["kind"],"priority":t["priority"],"status":t["status"],"due_at":t["due_at"],"day":day,"instant":instant,"overdue":overdue,"updated_at":t["updated_at"],"revision":revision(t),"acknowledged":seen(c,u,t) is not None})
     if len(rows)>200:break
    more=len(rows)>200;rows=rows[:200]
-   return {"items":rows,"next_after":rows[-1]["id"] if more else None,"today":today.isoformat(),"week_start":monday.isoformat(),"timezone":str(tz),"updated_at":now.isoformat(),"display_name":u["display_name"]}
+   result={"items":rows,"next_after":rows[-1]["id"] if more else None,"today":today.isoformat(),"week_start":monday.isoformat(),"timezone":str(tz),"updated_at":now.isoformat(),"display_name":u["display_name"]}
+   if after==0:
+    period,complete=recent_completed(c,u)
+    result['completion_summary']={'period':period,'count':len(complete)}
+   return result
  @app.get("/api/mobile/v1/work/agenda/{tid}")
  def detail(tid:int,req:Request):
   with conn() as c:

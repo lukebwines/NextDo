@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.1.13-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.0-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.1.13-test"
-            RELEASE_NOTES="NextDo Android: dashboard professionale navigabile, tutte le attività aperte incluse senza data, filtri e dettagli diretti, screenshot Home/Lavoro configurabili. Protezione Viaggi e blocco mantenuti. Collaudo fisico necessario."
+            test "$ANDROID_VERSION" = "0.2.0-test"
+            RELEASE_NOTES="NextDo Android: dashboard Bento, calendario interattivo, impegni in evidenza, Viaggi coordinati, navigazione edge-to-edge, screenshot personali facoltativi con protezione blocco e app recenti. Contatore completate con add-on 0.2.2-test. Collaudo fisico necessario."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then

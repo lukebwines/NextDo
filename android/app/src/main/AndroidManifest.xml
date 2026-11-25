@@ -8,7 +8,7 @@
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
   <uses-permission android:name="android.permission.USE_BIOMETRIC" />
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-  <application android:name=".NextDoApplication" android:allowBackup="false" android:usesCleartextTraffic="false" android:label="NextDo" android:icon="@drawable/ic_nextdo" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+  <application android:name=".NextDoApplication" android:allowBackup="false" android:usesCleartextTraffic="false" android:label="NextDo" android:icon="@drawable/ic_nextdo" android:theme="@style/Theme.NextDo">
     <provider android:name="androidx.core.content.FileProvider" android:authorities="uk.archis.nextdoviaggi.updates" android:exported="false" android:grantUriPermissions="true">
       <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths"/>
     </provider>
