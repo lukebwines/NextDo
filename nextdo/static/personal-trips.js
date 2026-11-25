@@ -43,7 +43,8 @@ const NextDoPersonal=(()=>{
    hubCard('Promemoria','Da sviluppare','bell'),
    hubCard('Note personali','Da sviluppare','note')
   ]);
-  root.replaceChildren(grid);
+  const lockAction=el('div',{class:'personal-hub-toolbar'},[btn('Blocca',async()=>{await lock();render(main)},'small')]);
+  root.replaceChildren(lockAction,grid);
  }
  function travelOverview(root,token,list){
   root.classList.remove('personal-hub-shell');root.classList.add('travel-shell');
