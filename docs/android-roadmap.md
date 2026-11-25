@@ -1,5 +1,27 @@
 # NextDo Android — roadmap prioritaria
 
+## Priorità concordate il 25 novembre 2026 — APK prima del Web
+
+Questa sezione sostituisce l'ordine delle priorità precedenti; le sezioni storiche rimangono come registro degli sviluppi. Obiettivo: un solo sistema scalabile, retrocompatibile, con Raspberry come fonte autorevole e fruibilità Android anche senza rete. Prima della partenza prevista a dicembre: consolidare le funzionalità essenziali e sospendere le aggiunte non indispensabili se il collaudo non è concluso.
+
+| Priorità | Intervento | Criterio di completamento | Stato |
+| --- | --- | --- | --- |
+| P0 | Collaudo APK 0.2.2-test | Verificare sul Samsung sblocco biometrico, PIN soltanto quando necessario, lettore PDF a schermo intero, zoom, rotazione, pagine, download, condivisione, apertura esterna, modalità aereo e ritorno all'app. Firma e test CI superati; conservare configurazioni e dati aggiornando senza disinstallare. | Release pubblicata; collaudo fisico da completare |
+| P0 | Aggiornamenti APK affidabili | Verifica manuale e automatica delle release firmate; distinguere aggiornamento assente, errore di rete e metadati non leggibili. Non ridurre controlli di firma, hash o versionCode. | Da verificare |
+| P1 | Tipologie dinamiche Web–APK | Leggere il catalogo privato per utente dal Raspberry, renderizzare icone e campi specifici, modificare campi e tipologie delle prenotazioni online; mantenere dati storici, formati ZIP e compatibilità. I modelli definiti sul Web sono utilizzabili nell'APK senza nuova release per ogni modello; salvare una copia del catalogo per la consultazione offline. Gestione del catalogo direttamente da Android come estensione successiva. | Da sviluppare |
+| P1 | Assicurazione ed emergenze | Accesso rapido dalla panoramica Android a polizza originale, contatti e procedura di assistenza, anche offline; nessuna nuova sezione principale, nessun dato inventato. | Da sviluppare |
+| P1 | Sincronizzazione offline | Confrontare revisione locale e server, mostrare data dell'ultima sincronizzazione, segnalare copie obsolete e aggiornare quando online e autorizzati. Conservare copia cifrata valida in caso di errore; aggiornare insieme manifest, allegati e diario; testare sostituzione PDF e assenza rete. Nessuna sovrascrittura di modifiche locali non riconciliate. | Da sviluppare |
+| P1 | Sostituzione documenti PDF (supporto Web/server) | Azione esplicita Sostituisci PDF con anteprima/conferma e controllo revisione; preservare collegamenti esistenti, validare PDF, gestire eventuale uso condiviso tra prenotazioni e guide, evitare duplicati; nessuna cancellazione automatica dei documenti ancora collegati. Aggiornare copie Android tramite sincronizzazione. | Proposta da implementare |
+| P2 | Budget e spese | Previste/sostenute/residuo, categorie, multivaluta senza conversioni implicite, ricevute e consultazione mobile. | Parziale sul Web; da estendere |
+| P2 | Spazio e archivio | Monitoraggio dimensioni, allegati, export, backup/ripristino e viaggi conclusi; nessuna eliminazione automatica non autorizzata. | Da sviluppare |
+| P3 | Moduli personali | Agenda, promemoria e note personali, mantenendo separazione dall'area professionale. | Da sviluppare |
+
+### Stato documenti (verificato nel codice)
+- Web 0.2.5-test: upload di PDF con nome univoco; un nome già presente genera 409. Si può associare un nuovo PDF dalla modifica della prenotazione; il precedente non è eliminato automaticamente. Il caricamento e l'associazione incrementano la revisione del viaggio.
+- Android 0.2.2-test online: all'apertura rilegge il manifest dal server e alla consultazione scarica il PDF associato dal Raspberry. Un viaggio già aperto può avere riferimenti non aggiornati: riaprirlo.
+- Offline: snapshot ZIP cifrato, aggiornabile manualmente dalla schermata Home del viaggio online tramite Scarica / aggiorna offline; non c'è ancora sincronizzazione automatica. I file esportati in Download o app esterne sono copie indipendenti.
+- Evitare nuove sezioni per ciascuna categoria: un unico archivio prenotazioni, modelli riutilizzabili e documenti associati.
+
 ## Obiettivo
 Un'unica app NextDo, con dashboard generale e due aree separate, come sul web. Viaggi rimane un modulo personale; nessuna perdita di dati o funzioni esistenti. L'identificativo uk.archis.nextdoviaggi, la firma APK, i tag android-v e gli asset nextdo-viaggi.apk/json restano invariati per compatibilità.
 

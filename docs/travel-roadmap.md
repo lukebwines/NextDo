@@ -1,5 +1,8 @@
 # NextDo Viaggi — roadmap aggiornata
 
+## Priorità attuale (25 novembre 2026)
+La precedente sospensione dello sviluppo Viaggi è superata dalla decisione di dare precedenza all'APK e alla stabilità prima della partenza. La scaletta corrente e i criteri di collaudo sono in [roadmap Android](android-roadmap.md#priorità-concordate-il-25-novembre-2026--apk-prima-del-web): PDF e autenticazione già pubblicati in Android 0.2.2-test, catalogo configurabile Web 0.2.5-test, allineamento APK, assicurazione, sincronizzazione offline e sostituzione PDF come prossime priorità. Le sezioni seguenti restano storiche; non prevalgono sul nuovo ordine. Nessun nuovo rilascio software per questa modifica documentale.
+
 ## Principi
 - Motore universale, senza dati personali nel repository; il Raspberry resta fonte autorevole, separato dall'area professionale.
 - Stesso formato ZIP, migrazioni additive, revisioni, test e collaudo prima dei rilasci.
