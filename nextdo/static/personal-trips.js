@@ -299,7 +299,8 @@ const NextDoPersonal=(()=>{
   editor('Evento',[...fieldlist(e,[['time','Orario'],['type','Tipo'],['title','Titolo'],['details','Dettagli','textarea'],['bid','ID prenotazione (facoltativo)'],['gid','ID guida (facoltativo)']]),['reference','Riferimenti disponibili (copia solo ID)',refs+'\n'+gs,'textarea']],v=>save(t=>{delete v.reference;const arr=t.manifest.days.find(x=>x.date===d.date).events;const n={...e,...v};if(index<0)arr.push(n);else arr[index]=n}))
  }
  const dayFmt=d=>new Date(d+'T12:00:00').toLocaleDateString('it-IT',{weekday:'short',day:'numeric',month:'short'});
- const navLink=b=>b?.map?safeLink(b.map,'Naviga'):b?.place?safeLink('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(b.place),'Cerca su Maps'):null;
+ const mapQuery=p=>located(p)?p.lat+','+p.lon:p?.address||p?.place||'';
+ const navLink=b=>{if(!b)return null;const q=mapQuery(b);const links=q?nextDoMapLinks(q):[safeLink(b.map,'Apri in Maps')].filter(Boolean);return links.length?toolbar(...links):null};
  const allDocs=m=>{const docs=new Map();for(const d of m.documents)docs.set(d.file,d.title);for(const g of m.guides)if(g.doc)docs.set(g.doc,g.title);for(const e of m.expenses||[])if(e.doc)docs.set(e.doc,e.title);for(const b of m.bookings)for(const a of bookingDocs(b))docs.set(a.file,b.title+' · '+a.label);return docs};
  const switchTab=k=>{tab=k;render(main)};
  const tripURL=()=>path+'/trips/'+encodeURIComponent(trip.manifest.trip.id);
@@ -346,7 +347,7 @@ const NextDoPersonal=(()=>{
  }
  let geoKey='';
  const located=p=>typeof p?.lat==='number'&&typeof p?.lon==='number';
- const locationNav=p=>located(p)?safeLink('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(p.lat+','+p.lon),'Naviga'):p?.address?safeLink('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(p.address),'Cerca su Maps'):null;
+ const locationNav=p=>navLink(p);
  const locationLine=p=>el('div',{class:'travel-mini'},[el('div',{},[node('strong','',p.role?p.role+' · '+p.label:p.label),paragraph([p.code,p.address,p.time,located(p)?p.lat+', '+p.lon:'Coordinate da verificare'].filter(Boolean).join(' · '))]),locationNav(p)]);
  function placeEditor(initial,roles,onSave){
   const {box,back}=modal('Luogo e coordinate');back.setAttribute('data-personal-modal','');

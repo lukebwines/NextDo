@@ -103,6 +103,9 @@ def migrate_legacy_database():
 
 migrate_legacy_database()
 init()
+from . import assistant_link
+with conn() as c:
+ if 'address' not in {r[1] for r in c.execute('PRAGMA table_info(tasks)')}:c.execute("ALTER TABLE tasks ADD COLUMN address TEXT NOT NULL DEFAULT ''")
 from . import workspace
 workspace.upgrade(DB,DATA)
 from . import collaborators
@@ -146,6 +149,7 @@ def csrf(req):
  cookie=req.cookies.get('nextdo_csrf','')
  if not supplied or not secrets.compare_digest(supplied,cookie):err(403,'Token CSRF mancante')
 def mutation(req):user(req);csrf(req)
+assistant_link.register(app,conn,user,csrf)
 def is_admin(u):return u['role']=='admin'
 def accessible(c,u,t,write=False):
  return workspace.can_read(c,u,t)
@@ -337,6 +341,7 @@ async def course_import(req:Request,file:UploadFile=File(...)):
 class TaskIn(BaseModel):
  title:str=Field(min_length=1,max_length=250)
  description:str=Field(default='',max_length=50000)
+ address:Optional[str]=Field(default=None,max_length=500)
  kind:str='task';priority:str='normal';status:str='todo';due_at:Optional[str]=None;start_at:Optional[str]=None
  assigned_to:Optional[int]=None;group_id:Optional[int]=None
  completion_mode:str='global';display_enabled:bool=False;recurrence:str='none'
@@ -394,6 +399,7 @@ def task_create(b:TaskIn,req:Request):
    err(400,'Completare i singoli CdS prima di chiudere la scadenza')
   r=c.execute('INSERT INTO tasks(title,description,kind,priority,status,due_at,start_at,owner_id,assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.start_at,u['id'],b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id))
   tid=r.lastrowid
+  if b.address is not None:c.execute('UPDATE tasks SET address=? WHERE id=?',(b.address.strip(),tid))
   if b.scope=='project' and b.completion_mode=='per_course':
    ids=[r[0] for r in c.execute('SELECT course_id FROM project_courses WHERE project_id=?',(b.project_id,))]
    if not ids:
@@ -482,6 +488,7 @@ def task_update(tid:int,b:TaskIn,req:Request):
    progress=c.execute('SELECT COUNT(*),SUM(done) FROM task_courses WHERE task_id=?',(tid,)).fetchone()
    if not progress[0] or progress[1]!=progress[0]:err(400,'Completare i singoli CdS prima di chiudere la scadenza')
   c.execute('UPDATE tasks SET title=?,description=?,kind=?,priority=?,status=?,due_at=?,start_at=?,assigned_to=?,group_id=?,completion_mode=?,display_enabled=?,recurrence=?,labels=?,scope=?,project_id=?,updated_at=? WHERE id=?',(b.title.strip(),b.description,b.kind,b.priority,b.status,b.due_at,b.start_at,b.assigned_to,b.group_id,b.completion_mode,int(b.display_enabled),b.recurrence,json.dumps(b.labels,ensure_ascii=False),b.scope,b.project_id,iso(),tid))
+  if b.address is not None:c.execute('UPDATE tasks SET address=? WHERE id=?',(b.address.strip(),tid))
   if b.scope=='project':
    ids=[r[0] for r in c.execute('SELECT course_id FROM task_courses WHERE task_id=?',(tid,))]
    if b.completion_mode=='per_course' and not ids:

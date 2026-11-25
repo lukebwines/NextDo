@@ -500,20 +500,51 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private fun navigate(b: JSONObject) {
+    private fun launchExternal(url:String,maps:Boolean=false){
+        try {
+            val intent=Intent(Intent.ACTION_VIEW,Uri.parse(url))
+            if(maps)try{startActivity(Intent(intent).setPackage("com.google.android.apps.maps"));return}catch(_:Exception){}
+            startActivity(intent)
+        }catch(_:Exception){error="Applicazione esterna non disponibile"}
+    }
+    private fun openAssistant(){
+        if(locked)return
+        val w=workConnection;val travel=connection;val token=session
+        if(w==null&&(travel==null||token.isBlank())){error="Collega NextDo online; il link Work si imposta sul web.";return}
+        task({
+            if(w!=null)TravelApi(w.str("url")).obj("/work/assistant-link",w.str("token"))
+            else TravelApi(travel!!.str("url")).obj("/assistant-link",token)
+        }){result->
+            val link=result.str("url")
+            if(link.isBlank()){error="Configura la conversazione ChatGPT Work nelle Impostazioni web di NextDo.";return@task}
+            val uri=Uri.parse(link)
+            if(uri.scheme=="https"&&uri.encodedAuthority=="chatgpt.com"&&uri.query==null&&uri.fragment==null)launchExternal(link)
+            else error="Collegamento ChatGPT non valido"
+        }
+    }
+    private fun mapQuery(b:JSONObject):String {
         val lat = b.optDouble("lat"); val lon = b.optDouble("lon")
-        val query = when {
+        return when {
             lat.isFinite() && lon.isFinite() && lat in -90.0..90.0 && lon in -180.0..180.0 -> "$lat,$lon"
             b.str("address").isNotBlank() -> b.str("address")
             else -> b.str("place")
         }
-        val explicit = b.str("map")
-        val url = when {
-            query.isNotBlank() -> "https://www.google.com/maps/search/?api=1&query=" + Uri.encode(query)
-            explicit.startsWith("https://") -> explicit
+    }
+    private fun navigate(b:JSONObject,directions:Boolean=false){
+        val q=mapQuery(b);val explicit=b.str("map")
+        val url=when {
+            q.isNotBlank()&&directions -> "https://www.google.com/maps/dir/?api=1&destination="+Uri.encode(q)+"&dir_action=navigate"
+            q.isNotBlank() -> "https://www.google.com/maps/search/?api=1&query="+Uri.encode(q)
+            !directions&&explicit.startsWith("https://") -> explicit
             else -> return
         }
-        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) { error = "Navigazione non disponibile" }
+        launchExternal(url,q.isNotBlank())
+    }
+    @Composable private fun MapActions(b:JSONObject){
+        if(mapQuery(b).isNotBlank()||b.str("map").startsWith("https://"))Row(horizontalArrangement=Arrangement.spacedBy(4.dp)){
+            TextButton(onClick={navigate(b)}){Text("Apri in Maps")}
+            if(mapQuery(b).isNotBlank())TextButton(onClick={navigate(b,true)}){Text("Naviga")}
+        }
     }
     private fun closePdf() { pdf = null; pdfName = ""; pageBitmap = null; pageCount = 0; pdfMessage = "" }
 
@@ -587,7 +618,7 @@ class MainActivity : ComponentActivity() {
         }
         val t = current
         BackHandler(enabled=!locked&&(t!=null||area!=NextDoArea.HOME||pdf!=null)){backArea()}
-        if(!locked && (area==NextDoArea.WORK||area==NextDoArea.HOME)) workDetail?.let { detail -> WorkDetailDialog(detail){workDetail=null} }
+        if(!locked && (area==NextDoArea.WORK||area==NextDoArea.HOME)) workDetail?.let { detail -> WorkDetailDialog(detail,{d->navigate(detail,d)}){workDetail=null} }
         if(!locked && pdf != null) {
             PdfScreen()
             return
@@ -611,6 +642,10 @@ class MainActivity : ComponentActivity() {
                 }
             },
             bottomBar = {
+              Column {
+                if(!locked && pdf==null)Surface(color=Panel){
+                    TextButton(onClick={openAssistant()},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("ChatGPT Work",color=Teal)}
+                }
                 if(t != null && !locked && pdf == null) NavigationBar(containerColor=Panel) {
                     listOf("Home","Oggi","Prenota","PDF","Guide","Diario").forEach { label ->
                         val image = when(label) {
@@ -625,6 +660,7 @@ class MainActivity : ComponentActivity() {
                             colors=NavigationBarItemDefaults.colors(indicatorColor=Teal.copy(alpha=.20f),selectedIconColor=Teal,selectedTextColor=Teal,unselectedIconColor=Muted,unselectedTextColor=Muted))
                     }
                 } else if(!locked && pdf==null) NextDoNavigation(area,!busy){openArea(it)}
+              }
             }) { padding ->
             val scroll=key(area,t?.id,section,pdf!=null){rememberScrollState()}
             Column(Modifier.fillMaxSize().padding(padding).verticalScroll(scroll).padding(16.dp), verticalArrangement=Arrangement.spacedBy(14.dp)) {
@@ -682,6 +718,11 @@ class MainActivity : ComponentActivity() {
         TravelCard("Applicazione","NextDo "+packageManager.getPackageInfo(packageName,0).versionName) {
             Text("Un’unica app · aree separate",color=Muted)
             Action("Verifica aggiornamenti",!updateBusy&&!busy){checkUpdates(true)}
+        }
+        TravelCard("Assistente ChatGPT Work","Un’unica conversazione, configurata nelle impostazioni web dello stesso account.") {
+            val base=workConnection?.str("url")?:connection?.str("url")
+            if(!base.isNullOrBlank())Action("Configura sul web",!busy){launchExternal(base)}
+            Text("L’accesso a Work richiede Internet. Non vengono trasferiti PIN, documenti o credenziali.",color=Muted,fontSize=12.sp)
         }
         TravelCard("Sicurezza","Accesso protetto dal dispositivo; blocco in background e dopo cinque minuti.") {
             Action("Blocca applicazione",!busy){lockLocal()}
@@ -1064,8 +1105,8 @@ class MainActivity : ComponentActivity() {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(9.dp)) {
             Icon(Icons.Default.Place,null,tint=Teal)
             Column(Modifier.weight(1f)) { Text(b.str("label").ifBlank{b.str("place")},fontWeight=FontWeight.SemiBold,color=White);Text(b.str("address"),color=Muted,fontSize=12.sp) }
-            TextButton(onClick={navigate(b)}){Text("Naviga")}
         }
+        MapActions(b)
     }
     private fun bookingDocuments(b:JSONObject):List<Pair<String,String>> {
         val docs=linkedMapOf<String,String>()
@@ -1080,7 +1121,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun BookingActions(b:JSONObject) {
         bookingDocuments(b).forEach{(name,label)->Action(label){viewPdf(name)}}
         if(b.arr("locations").isNotEmpty())b.arr("locations").forEach{Location(it)}
-        else if(b.str("place").isNotBlank()||b.str("map").isNotBlank())TextButton(onClick={navigate(b)}){Icon(Icons.Default.Place,null);Spacer(Modifier.width(5.dp));Text("Apri mappa")}
+        else MapActions(b)
     }
     @Composable private fun BookingScreen(t:TripPackage) {
         Text("Le tue prenotazioni",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)

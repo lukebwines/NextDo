@@ -41,6 +41,14 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   active(row["owner"])
   return row
  travel_timeline.register(app,db=db,allowed=allowed,auth=auth,load=load,map_tile=map_tile)
+ @app.get('/api/mobile/v1/assistant-link')
+ def assistant_pref(req:Request):
+  from . import assistant_link
+  owner=auth(req)['owner']
+  with conn() as c:
+   row=c.execute('SELECT u.id FROM personal_identities p JOIN users u ON u.id=p.user_id WHERE p.owner=? AND u.active=1',(owner,)).fetchone()
+   if not row:fail(401,'Account non disponibile')
+   return assistant_link.get(c,row['id'])
  @app.get("/api/personal/mobile/devices")
  def devices(req:Request):
   owner=allowed(req)

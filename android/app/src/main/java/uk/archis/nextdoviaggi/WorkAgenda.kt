@@ -180,11 +180,15 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
     Text("Presa visione sincronizzata; non modifica lo stato dell’attività.",color=MutedWork,fontSize=12.sp)
 }
 @Composable
-internal fun WorkDetailDialog(detail:JSONObject,close:()->Unit){
+internal fun WorkDetailDialog(detail:JSONObject,onMap:(Boolean)->Unit,close:()->Unit){
     AlertDialog(onDismissRequest=close,title={Text(detail.str("title"))},text={
         Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text(statusName(detail.str("status"))+" · "+priorityName(detail.str("priority")))
             Text(detail.str("due_at").ifBlank{"Data da definire"},color=MutedWork)
+            if(detail.str("kind")=="appointment"&&detail.str("address").isNotBlank()){
+                Text(detail.str("address"),color=MutedWork)
+                Row{TextButton(onClick={onMap(false)}){Text("Apri in Maps")};TextButton(onClick={onMap(true)}){Text("Naviga")}}
+            }
             Text(detail.str("description").take(12000).ifBlank{"Nessuna descrizione"})
             if(detail.str("description").length>12000)Text("Descrizione lunga: consulta il testo completo sul web.",fontSize=12.sp)
         }
