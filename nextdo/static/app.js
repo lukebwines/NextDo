@@ -1006,7 +1006,7 @@ function settings(main){
  function section(title,desc=''){const card=el('section',{class:'card settings-card'},[node('h2','',title),...(desc?[node('p','sub',desc)]:[])]);content.append(card);return card}
  if(S.settingsTab==='general'){
   const card=section('Preferenze','Account indipendente da Home Assistant. Proteggere l’accesso remoto tramite HTTPS e Cloudflare Access.');
-  card.append(themeButton(),nextDoBackPreference(),node('p','sub','Versione NextDo 0.2.8-test'));NextDoArchive.preferences(content);
+  card.append(themeButton(),nextDoBackPreference(),node('p','sub','Versione NextDo 0.2.9-test'));NextDoArchive.preferences(content);
   const assistant=section('Assistente ChatGPT Work','Apri sempre la stessa conversazione. Incolla il suo URL privato dalla barra del browser; non usare il collegamento di condivisione.');
   const workUrl=input('assistant-link','https://chatgpt.com/c/…',S.assistantUrl||'');
   assistant.append(field('Collegamento conversazione',workUrl),btn('Salva collegamento',async()=>{try{const r=await api('/assistant-link',{method:'POST',body:JSON.stringify({url:workUrl.value})});S.assistantUrl=r.url;render();msg('Collegamento salvato')}catch(e){msg(e.message,true)}},'primary'),node('p','sub','Lascia vuoto per disattivare. Nessuna credenziale o dato della scheda viene trasferito automaticamente.'));
