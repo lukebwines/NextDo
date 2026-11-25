@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.4-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.5-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.4-test"
-            RELEASE_NOTES="Assistente ChatGPT Work: unico pulsante web e APK, collegamento privato configurabile dal profilo web. Google Maps: Apri in Maps e Naviga per prenotazioni e appuntamenti con destinazione, nuovo campo indirizzo. Richiede NextDo Web 0.2.9-test per il collegamento Assistente. PIN, GroqCloud e permessi invariati. Il trasferimento automatico del contesto non è incluso; apertura della conversazione e autenticazione Work da collaudare sul dispositivo."
+            test "$ANDROID_VERSION" = "0.2.5-test"
+            RELEASE_NOTES="Area Personale: dashboard, tema e sfondi sincronizzati, attività, scadenze, appuntamenti e avvisi riservati opt-in. Richiede NextDo Web 0.2.10-test. Smistamento dei mittenti personali configurabile sul web; spostamento e riclassificazione con conferma sul web. Avvisi periodici indicativi, non allarmi esatti. Collaudo fisico richiesto."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then
