@@ -140,3 +140,6 @@
 .personal-custom-shell .personal-appearance-settings .field,.personal-custom-shell .personal-appearance-settings select,.personal-custom-shell .personal-appearance-settings .btn.small{color:var(--personal-text);background:var(--personal-card);border-color:var(--personal-line)}
 .personal-custom-shell .personal-appearance-settings label{color:var(--personal-text)}
 @media(max-width:650px){.personal-appearance-options{grid-template-columns:1fr}.personal-custom-shell .personal-hero{min-height:180px}}
+
+.personal-agenda{display:grid;gap:10px;margin:20px 0;color:var(--personal-text)}
+.personal-agenda h2{margin:0 0 8px;color:var(--personal-text);font-size:21px}.personal-item-row{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;padding:16px;text-align:left;color:var(--personal-text);background:var(--personal-card);border:1px solid var(--personal-line);border-radius:16px;cursor:pointer}.personal-item-row strong{overflow-wrap:anywhere}.personal-item-row .sub{margin:5px 0 0;color:var(--personal-muted)}.personal-item-row .ico{flex:none;color:var(--personal-muted)}.personal-item-row:hover{border-color:var(--personal-accent)}

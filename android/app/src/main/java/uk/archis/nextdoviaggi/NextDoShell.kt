@@ -10,6 +10,7 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import org.json.JSONObject
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -137,7 +138,7 @@ internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolea
     }
 }
 @Composable
-internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Boolean,problem:String,photoPending:Boolean,save:(JSONObject)->Unit,choosePhoto:()->Unit,uploadPhoto:()->Unit,openTrips:()->Unit) {
+internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Boolean,problem:String,photoPending:Boolean,save:(JSONObject)->Unit,choosePhoto:()->Unit,uploadPhoto:()->Unit,items:List<JSONObject>?,openItems:(String)->Unit,openTrips:()->Unit) {
     val theme=appearance?.optString("theme","dark")?:"dark"
     val palette=appearance?.optString("palette","ocean")?:"ocean"
     val background=appearance?.optString("background","gradient")?:"gradient"
@@ -189,17 +190,85 @@ internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Bo
             }
         }
     }
-    for((title,subtitle,icon) in listOf(
-        Triple("Viaggi","Itinerari, prenotazioni, PDF, guide e Diario di bordo",Icons.Default.Flight),
-        Triple("Attività","Da sviluppare",Icons.Default.Checklist),
-        Triple("Scadenze","Da sviluppare",Icons.Default.Event),
-        Triple("Appuntamenti","Da sviluppare",Icons.Default.CalendarToday))){
+    for((key,title,icon) in listOf(
+        Triple("task","Attività",Icons.Default.Checklist),
+        Triple("deadline","Scadenze",Icons.Default.Event),
+        Triple("appointment","Appuntamenti",Icons.Default.CalendarToday),
+        Triple("trips","Viaggi",Icons.Default.Flight))){
+        val subset=items?.filter{it.str("kind")==key&&it.str("status")!="done"}
+        val subtitle=if(key=="trips")"Itinerari, prenotazioni, PDF, guide e Diario di bordo" else subset?.let{it.size.toString()+" aperti · "+it.count{x->x.str("status")=="review"}+" da verificare"}?:"Agenda non disponibile"
         Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(22.dp),colors=CardDefaults.cardColors(containerColor=cardColor)){
-            Row(Modifier.fillMaxWidth().then(if(title=="Viaggi")Modifier.clickable(enabled=enabled,onClick=openTrips) else Modifier).padding(18.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
+            Row(Modifier.fillMaxWidth().clickable(enabled=enabled){if(key=="trips")openTrips() else openItems(key)}.padding(18.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
                 Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(start),contentAlignment=Alignment.Center){Icon(icon,null,tint=accent)}
                 Column(Modifier.weight(1f)){Text(title,color=textColor,fontWeight=FontWeight.Bold,fontSize=19.sp);Text(subtitle,color=muted,fontSize=12.sp)}
-                if(title=="Viaggi")Icon(Icons.Default.ChevronRight,"Apri Viaggi",tint=if(light)start else accent)
+                Icon(Icons.Default.ChevronRight,"Apri "+title,tint=if(light)start else accent)
             }
         }
+    }
+}
+
+@Composable
+internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:JSONObject?,enabled:Boolean,problem:String,back:()->Unit,refresh:()->Unit,save:(String,JSONObject)->Unit,delete:(String)->Unit){
+    val names=mapOf("task" to "Attività","deadline" to "Scadenze","appointment" to "Appuntamenti")
+    val light=appearance?.optString("theme")=="light"
+    val panel=if(light)Color.White else ShellPanel
+    val ink=if(light)Color(0xFF172B3D) else ShellWhite
+    val muted=if(light)Color(0xFF475569) else ShellMuted
+    val accent=if(light)Color(0xFF176E71) else PrivateTeal
+    var editing by remember(kind){mutableStateOf<JSONObject?>(null)}
+    var remove by remember(kind){mutableStateOf(false)}
+    TextButton(onClick=back){Text("← Area personale")}
+    Text(names[kind].orEmpty(),color=ShellWhite,fontSize=28.sp,fontWeight=FontWeight.Bold)
+    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+        Button(onClick={editing=JSONObject().put("kind",kind)},enabled=enabled){Text("+ Nuovo")}
+        OutlinedButton(onClick=refresh,enabled=enabled){Text("Aggiorna")}
+    }
+    if(problem.isNotBlank())Text(problem,color=ShellSand)
+    if(items==null)Text("Agenda non disponibile. Verifica il collegamento a NextDo.",color=ShellMuted)
+    else {
+        val rows=items.filter{it.str("kind")==kind}
+        if(rows.isEmpty())Text("Nessun elemento.",color=ShellMuted)
+        for(item in rows){
+            val status=when(item.str("status")){"review"->"Da verificare";"done"->"Completato";else->"Da fare"}
+            Card(Modifier.fillMaxWidth().clickable{editing=item},colors=CardDefaults.cardColors(containerColor=panel),shape=RoundedCornerShape(18.dp)){
+                Row(Modifier.fillMaxWidth().padding(16.dp),verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text(item.str("title"),color=ink,fontWeight=FontWeight.Bold,fontSize=17.sp)
+                        Text(item.str("due_at").takeIf{it.isNotBlank()&&it!="null"}?.replace("T"," ")?.take(16)?:"Senza data",color=muted,fontSize=13.sp)
+                        Text(status,color=accent,fontSize=12.sp)
+                    }
+                    Icon(Icons.Default.ChevronRight,"Apri",tint=accent)
+                }
+            }
+        }
+    }
+    editing?.let{item->
+        val id=item.optString("id","")
+        var title by remember(item){mutableStateOf(item.str("title"))}
+        var desc by remember(item){mutableStateOf(item.str("description"))}
+        var type by remember(item){mutableStateOf(item.str("kind").ifBlank{kind})}
+        var day by remember(item){mutableStateOf(item.str("due_at").takeIf{it!="null"}.orEmpty().take(10))}
+        var time by remember(item){mutableStateOf(item.str("due_at").takeIf{it.length>=16}.orEmpty().drop(11).take(5))}
+        var status by remember(item){mutableStateOf(item.str("status").ifBlank{"todo"})}
+        var priority by remember(item){mutableStateOf(item.str("priority").ifBlank{"normal"})}
+        val validDate=day.isBlank()||runCatching{LocalDate.parse(day);true}.getOrDefault(false)
+        val validTime=time.isBlank()||(day.isNotBlank()&&runCatching{java.time.LocalTime.parse(time);time.length==5}.getOrDefault(false))
+        AlertDialog(onDismissRequest={editing=null},title={Text(if(id.isBlank())"Nuovo impegno" else "Modifica impegno")},text={
+            Column(Modifier.heightIn(max=470.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                OutlinedTextField(title,{title=it},label={Text("Titolo")},singleLine=true)
+                for((k,label) in names)FilterChip(selected=type==k,onClick={type=k},label={Text(label)})
+                OutlinedTextField(day,{day=it},label={Text("Data (AAAA-MM-GG)")},singleLine=true,isError=!validDate)
+                OutlinedTextField(time,{time=it},label={Text("Ora facoltativa (HH:MM)")},singleLine=true,isError=!validTime)
+                for((k,label) in listOf("review" to "Da verificare","todo" to "Da fare","done" to "Completato"))FilterChip(selected=status==k,onClick={status=k},label={Text(label)})
+                for((k,label) in listOf("low" to "Bassa","normal" to "Normale","high" to "Alta","urgent" to "Urgente"))FilterChip(selected=priority==k,onClick={priority=k},label={Text(label)})
+                OutlinedTextField(desc,{desc=it},label={Text("Descrizione / email originale")},minLines=3)
+                if(id.isNotBlank())TextButton(onClick={remove=true},enabled=enabled){Text("Elimina")}
+            }
+        },confirmButton={TextButton(enabled=enabled&&title.isNotBlank()&&validDate&&validTime&&(type=="task"||status=="review"||day.isNotBlank()),onClick={
+            val due=if(day.isBlank())JSONObject.NULL else day+if(time.isBlank())"" else "T"+time+":00"
+            save(id,JSONObject().put("title",title).put("description",desc).put("kind",type).put("due_at",due).put("status",status).put("priority",priority))
+            editing=null
+        }){Text("Salva")}},dismissButton={TextButton(onClick={editing=null}){Text("Annulla")}})
+        if(remove)AlertDialog(onDismissRequest={remove=false},title={Text("Eliminare l'impegno?")},confirmButton={TextButton(onClick={remove=false;delete(id);editing=null},enabled=enabled){Text("Elimina")}},dismissButton={TextButton(onClick={remove=false}){Text("Annulla")}})
     }
 }

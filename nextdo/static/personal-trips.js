@@ -32,19 +32,20 @@ const NextDoPersonal=(()=>{
   try{appearance=await api(path+'/appearance')}catch(e){if(token!==generation||!root.isConnected)return;appearance={theme:'dark',palette:'ocean',background:'gradient',photo:null};msg('Preferenze personali non disponibili',true)}
   if(token!==generation||!root.isConnected)return;
   const openTrips=()=>{section='trips';render(main)};
-  const hubCard=(title,subtitle,icon,available=false)=>{const head=el('div',{class:'personal-hub-card-head'},[
+  let items=null;try{items=(await api(path+'/items')).items}catch(e){if(token===generation)msg('Agenda personale non disponibile',true)}
+  if(token!==generation||!root.isConnected)return;
+  const kinds=[['task','Attività','note'],['deadline','Scadenze','bell'],['appointment','Appuntamenti','calendar']];
+  const hubCard=(title,subtitle,icon,action)=>{const head=el('div',{class:'personal-hub-card-head'},[
    el('span',{class:'personal-hub-icon'},[ico(icon)]),
    el('div',{class:'personal-hub-copy'},[node('h2','',title),node('p','sub',subtitle)]),
-   ...(available?[ico('chevron')]:[])
-  ]);const item=el('section',{class:'personal-hub-card'+(available?' is-available':'')},[head]);
-   item.append(available?btn('Apri Viaggi',openTrips,'primary'):node('span','personal-hub-status','Da sviluppare'));
+   ...(action?[ico('chevron')]:[])
+  ]);const item=el('section',{class:'personal-hub-card'+(action?' is-available':'')},[head]);
+   item.append(action?btn('Apri '+title,action,'primary'):node('span','personal-hub-status','Non disponibile'));
    return item;
   };
   const grid=el('div',{class:'personal-hub-grid'},[
-   hubCard('Viaggi','Itinerari, prenotazioni, PDF, guide e Diario di bordo','plane',true),
-   hubCard('Attività','Da sviluppare','note'),
-   hubCard('Scadenze','Da sviluppare','bell'),
-   hubCard('Appuntamenti','Da sviluppare','calendar')
+   ...kinds.map(([key,label,icon])=>{const subset=items?.filter(x=>x.kind===key&&x.status!=='done');return hubCard(label,subset?subset.length+' aperte · '+subset.filter(x=>x.status==='review').length+' da verificare':'Agenda non disponibile',icon,()=>{section=key;render(main)})}),
+   hubCard('Viaggi','Itinerari, prenotazioni, PDF, guide e Diario di bordo','plane',openTrips)
   ]);
   const lockAction=el('div',{class:'personal-hub-toolbar'},[btn('Blocca',async()=>{await lock();render(main)},'small')]);
   const hero=el('section',{class:'personal-hero'},[node('div','personal-hero-kicker','IL TUO SPAZIO'),node('h2','','Area personale'),node('p','','Organizza il tuo tempo, i tuoi impegni e i tuoi viaggi.')]);
@@ -70,7 +71,46 @@ const NextDoPersonal=(()=>{
   const reset=btn('Ripristina aspetto',()=>changeAppearance('/appearance',JSON.stringify({theme:'dark',palette:'ocean',background:'gradient',clear_photo:true})),'small');
   panel.append(node('h2','','Personalizza'),el('div',{class:'personal-appearance-options'},[field('Tema',theme),field('Colore',palette),field('Sfondo',background)]),toolbar(save,reset),field('Fotografia privata (max 5 MB)',file),toolbar(upload,...(appearance.photo?[btn('Rimuovi foto',()=>changeAppearance('/appearance',JSON.stringify({clear_photo:true})),'small')]:[])));
   const settings=el('details',{class:'personal-appearance-details'},[node('summary','','Personalizza il tuo spazio'),panel]);
-  shell.append(hero,settings,grid);paint();root.replaceChildren(lockAction,shell);
+  const agenda=el('section',{class:'personal-agenda'});
+  function editItem(kind,item={}){
+   const {box,back}=modal(item.id?'Modifica impegno':'Nuovo impegno');back.setAttribute('data-personal-modal','');
+   const title=input('title','Titolo',item.title||''),desc=el('textarea',{class:'field',rows:'5',value:item.description||''});
+   const day=input('date','',String(item.due_at||'').slice(0,10),'date'),clock=input('time','',String(item.due_at||'').slice(11,16),'time');
+   const type=select('kind',kinds.map(([k,l])=>[k,l]),item.kind||kind);
+   const status=select('status',[['review','Da verificare'],['todo','Da fare'],['done','Completato']],item.status||'todo');
+   const priority=select('priority',[['low','Bassa'],['normal','Normale'],['high','Alta'],['urgent','Urgente']],item.priority||'normal');
+   const commit=btn('Salva',async()=>{if(busy||token!==generation)return;busy=true;try{
+    const due=day.value?(day.value+(clock.value?'T'+clock.value+':00':'')):null;
+    if(clock.value&&!day.value)throw Error('Inserisci anche la data');
+    await api(path+'/items'+(item.id?'/'+item.id:''),{method:'POST',body:JSON.stringify({title:title.value,description:desc.value,kind:type.value,due_at:due,status:status.value,priority:priority.value})});
+    back.remove();if(token===generation){section=type.value;render(main)}
+   }catch(e){if(token===generation)report(e)}finally{busy=false}},'primary');
+   box.append(field('Titolo',title),field('Tipo',type),field('Data',day),field('Ora (facoltativa)',clock),field('Stato',status),field('Priorità',priority),field('Descrizione / email originale',desc),toolbar(commit,btn('Annulla',()=>back.remove(),'small')));
+   if(item.id)box.append(btn('Elimina',async()=>{if(busy||!confirm('Eliminare questo impegno personale?'))return;busy=true;try{await api(path+'/items/'+item.id,{method:'DELETE'});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}},'small'));
+  }
+  const selectedKind=kinds.find(x=>x[0]===section);
+  if(selectedKind){
+   agenda.append(toolbar(btn('← Area personale',()=>{section='home';render(main)},'small'),btn('+ Nuovo',()=>editItem(section),'primary'),btn('Aggiorna',()=>render(main),'small')));
+   agenda.append(node('h2','',selectedKind[1]));
+   if(items===null)agenda.append(paragraph('Agenda non disponibile. Riprova.'));
+   else{
+    const rows=items.filter(x=>x.kind===section);
+    if(!rows.length)agenda.append(paragraph('Nessun elemento.'));
+    for(const x of rows){
+     const statusLabel={review:'Da verificare',todo:'Da fare',done:'Completato'}[x.status];
+     agenda.append(el('button',{class:'personal-item-row',type:'button',onclick:()=>editItem(section,x)},[
+       el('div',{},[node('strong','',x.title),node('p','sub',[x.due_at?fmt(x.due_at):'Senza data',statusLabel,x.priority==='urgent'?'Urgente':''].filter(Boolean).join(' · '))]),ico('chevron')]));
+    }
+   }
+   shell.append(hero,agenda);
+  }else{
+   shell.append(hero,settings,grid);
+   if(items){
+    const upcoming=items.filter(x=>x.status!=='done'&&(x.status==='review'||x.due_at)).slice(0,5);
+    if(upcoming.length){agenda.append(node('h2','','I tuoi impegni'),...upcoming.map(x=>el('button',{class:'personal-item-row',type:'button',onclick:()=>editItem(x.kind,x)},[el('div',{},[node('strong','',x.title),node('p','sub',(x.due_at?fmt(x.due_at):'Senza data')+(x.status==='review'?' · Da verificare':''))]),ico('chevron')])));shell.append(agenda)}
+   }
+  }
+  paint();root.replaceChildren(lockAction,shell);
  }
  function travelOverview(root,token,list){
   root.classList.remove('personal-hub-shell');root.classList.add('travel-shell');
@@ -528,7 +568,7 @@ const NextDoPersonal=(()=>{
  }
  function goBack(){
   if(busy)return true;
-  if(section!=='trips')return false;
+  if(section!=='trips'){if(section!=='home'){section='home';render(main);return true}return false}
   if(trip&&tab!=='panoramica'){
    if(tab==='giornata'){
     const note=main?.querySelector('#personal-content textarea[data-nextdo-day-note]');

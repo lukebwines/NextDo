@@ -65,6 +65,7 @@ def register(app,conn,web_owner,mobile_owner):
   def edit(item_id:int,req:Request,b:dict):
    identity=authorize(req,True)
    with conn() as c:return update(c,owner_id(c,identity),item_id,b)
+  @app.post(prefix+"/items/{item_id}/delete")
   @app.delete(prefix+"/items/{item_id}")
   def delete(item_id:int,req:Request):
    identity=authorize(req,True)
