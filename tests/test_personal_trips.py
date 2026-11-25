@@ -208,3 +208,20 @@ def test_personal_appearance_private_and_validated(tmp_path):
  assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
  assert c.get(url).json()["theme"]=="dark"
  c.close()
+
+def test_private_items_are_not_professional_or_shared(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";url=p+"/items"
+ assert c.get(url).status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ r=c.post(url,headers=h,json={"title":"Synthetic private item","kind":"deadline","due_at":"2027-01-01"})
+ assert r.status_code==200,r.text
+ i=r.json()["id"]
+ assert c.get(url).json()["items"][0]["title"]=="Synthetic private item"
+ assert c.get("/api/tasks").json()==[]
+ assert c.post(url+"/"+str(i),headers=h,json={"status":"done"}).status_code==200
+ assert c.get("/api/mobile/v1/items").status_code==401
+ create_user(c,h,"private-items-colleague");sign_in(c,h,"private-items-colleague")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+ assert c.get(url).json()["items"]==[]
+ assert c.post(url+"/"+str(i),headers=h,json={"title":"Unauthorized"}).status_code==404
+ c.close()

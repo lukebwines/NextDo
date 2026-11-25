@@ -40,6 +40,9 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   if not row:fail(401,"Sessione scaduta o dispositivo revocato")
   active(row["owner"])
   return row
+ from . import private_items
+ with conn() as c:private_items.ensure(c)
+ private_items.register(app,conn,allowed,lambda req,write:auth(req)["owner"])
  travel_timeline.register(app,db=db,allowed=allowed,auth=auth,load=load,map_tile=map_tile)
  @app.get('/api/mobile/v1/assistant-link')
  def assistant_pref(req:Request):
