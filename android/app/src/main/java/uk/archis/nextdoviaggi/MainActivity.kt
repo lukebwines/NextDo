@@ -17,6 +17,9 @@ import android.os.ParcelFileDescriptor
 import android.util.Base64
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
+import androidx.core.view.WindowCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +37,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -55,9 +59,9 @@ import java.io.File
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
-private val Navy = Color(0xFF0B1726)
-private val Panel = Color(0xFF172B3D)
-private val Teal = Color(0xFF69E0D2)
+private val Navy = Color(0xFF071B2C)
+private val Panel = ShellPanel
+private val Teal = PrivateTeal
 private val Sand = Color(0xFFFFD49A)
 private val Muted = Color(0xFFADC1D2)
 private val White = Color(0xFFF3F8FC)
@@ -68,9 +72,13 @@ class MainActivity : ComponentActivity() {
     private var area by mutableStateOf(NextDoArea.HOME)
     private var workFilter by mutableStateOf("all")
     private var allowWorkScreenshots by mutableStateOf(true)
+    private var allowPersonalScreenshots by mutableStateOf(false)
+    private var completedWork by mutableStateOf<CompletedPage?>(null)
+    private var completedBusy by mutableStateOf(false)
+    private var completedError by mutableStateOf("")
     private var foreground = false
     private fun updateCaptureProtection(){
-        val allowed=foreground&&!locked&&allowWorkScreenshots&&android.os.Build.VERSION.SDK_INT>=33&&(area==NextDoArea.HOME||area==NextDoArea.WORK)
+        val allowed=captureAllowed(foreground,locked,android.os.Build.VERSION.SDK_INT,area,allowWorkScreenshots,allowPersonalScreenshots)
         if(allowed)window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
     private var workConnection by mutableStateOf<JSONObject?>(null)
@@ -203,9 +211,13 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(statusBarStyle=SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),navigationBarStyle=SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
+        WindowCompat.getInsetsController(window,window.decorView).apply { isAppearanceLightStatusBars=false;isAppearanceLightNavigationBars=false }
+        window.isNavigationBarContrastEnforced=false
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         if(android.os.Build.VERSION.SDK_INT>=33)setRecentsScreenshotEnabled(false)
         allowWorkScreenshots=getPreferences(MODE_PRIVATE).getBoolean("allow_work_screenshots",true)
+        allowPersonalScreenshots=getPreferences(MODE_PRIVATE).getBoolean("allow_personal_screenshots",false)
         vault = Vault(this)
         checkUpdates()
         WorkAlerts.channels(this)
@@ -250,7 +262,7 @@ class MainActivity : ComponentActivity() {
         authenticating = false
         pending?.cancel()
         locked = true; busy = false; connection = null; session = ""; trips = emptyList()
-        workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false
+        workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false;completedWork=null;completedBusy=false;completedError=""
         editor = null; current = null; offlineMeta = null; offline = false; pdf = null; pageBitmap = null; pdfName = ""; error = ""
         section = "Home"; area=NextDoArea.HOME;workFilter="all";updateCaptureProtection()
     }
@@ -507,6 +519,18 @@ class MainActivity : ComponentActivity() {
             api.agenda(cfg.getString("token"))
         }){workAgenda=it}
     }
+    private fun loadCompleted(after:Long=0){
+        val cfg=workConnection?:return
+        if(locked||completedBusy)return
+        val started=epoch;completedBusy=true;completedError=""
+        if(after==0L)completedWork=null
+        lifecycleScope.launch {
+            try {
+                val value=withContext(Dispatchers.IO){WorkApi(cfg.getString("url")).completed(cfg.getString("token"),after)}
+                if(started==epoch&&!locked&&workConnection===cfg){val prev=completedWork;completedWork=if(after>0&&prev!=null&&prev.period==value.period)value.copy(items=(prev.items+value.items).distinctBy{it.id}) else value}
+            }catch(e:CancellationException){throw e}catch(e:Exception){if(started==epoch&&!locked&&workConnection===cfg)completedError="Storico non disponibile. Verifica l’aggiornamento dell’add-on."}finally{if(started==epoch)completedBusy=false}
+        }
+    }
     private fun loadWorkDetail(id:Long){
         val cfg=workConnection?:return
         workTask({WorkApi(cfg.getString("url")).detail(cfg.getString("token"),id)}){if(area==NextDoArea.WORK||area==NextDoArea.HOME)workDetail=it}
@@ -518,7 +542,7 @@ class MainActivity : ComponentActivity() {
             val revoked=try{WorkApi(cfg.getString("url")).revoke(cfg.getString("token"));true}catch(_:Exception){false}
             vault.remove("work_connection")
             revoked
-        }){revoked->workConnection=null;workAgenda=null;workDetail=null;refreshAlertStatus();workError=if(revoked)"" else "Dati locali rimossi. Revoca il dispositivo anche dal web."}
+        }){revoked->workConnection=null;workAgenda=null;workDetail=null;completedWork=null;completedError="";refreshAlertStatus();workError=if(revoked)"" else "Dati locali rimossi. Revoca il dispositivo anche dal web."}
     }
     private fun openArea(next:NextDoArea) {
         if(locked || busy) return
@@ -546,13 +570,11 @@ class MainActivity : ComponentActivity() {
         BackHandler(enabled=!locked&&(t!=null||area!=NextDoArea.HOME||pdf!=null)){backArea()}
         if(!locked && (area==NextDoArea.WORK||area==NextDoArea.HOME)) workDetail?.let { detail -> WorkDetailDialog(detail){workDetail=null} }
         if(!locked) editor?.let { e -> TravelEditDialog(e,busy,error,{editor=null;error=""},{submitEditor(e,it)}) }
-        Scaffold(containerColor = Navy,
+        Scaffold(containerColor = Navy,contentWindowInsets=WindowInsets.safeDrawing,
             topBar = {
                 Surface(color = Navy) {
-                    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=18.dp, vertical=12.dp), verticalAlignment=Alignment.CenterVertically) {
-                        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Teal), contentAlignment=Alignment.Center) {
-                            Icon(Icons.Default.DoneAll, contentDescription=null, tint=Navy)
-                        }
+                    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=14.dp, vertical=6.dp), verticalAlignment=Alignment.CenterVertically) {
+                        Image(painterResource(R.drawable.ic_nextdo),contentDescription=null,modifier=Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)))
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("NextDo", color=White, fontWeight=FontWeight.ExtraBold, fontSize=20.sp)
@@ -580,7 +602,7 @@ class MainActivity : ComponentActivity() {
                 } else if(!locked && pdf==null) NextDoNavigation(area,!busy){openArea(it)}
             }) { padding ->
             val scroll=key(area,t?.id,section,pdf!=null){rememberScrollState()}
-            Column(Modifier.fillMaxSize().padding(padding).verticalScroll(scroll).padding(16.dp), verticalArrangement=Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).verticalScroll(scroll).padding(horizontal=12.dp,vertical=10.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
                 UpdatePanel()
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color=Teal)
                 if (error.isNotBlank()) Card(colors=CardDefaults.cardColors(containerColor=Color(0xFF432E37))) {
@@ -607,10 +629,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     area==NextDoArea.TRIPS -> ConnectionScreen()
-                    area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()},{id,rev->ackWork(id,rev)},workFilter)
-                    area==NextDoArea.PERSONAL -> PersonalLanding(!busy){openArea(NextDoArea.TRIPS)}
+                    area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()},{id,rev->ackWork(id,rev)},workFilter,completedWork,completedBusy,completedError,{loadCompleted(it)})
+                    area==NextDoArea.PERSONAL -> PersonalLanding(!busy,trips,session.isNotBlank(),offlineMeta,{openArea(NextDoArea.TRIPS)},{id->openArea(NextDoArea.TRIPS);selectTrip(id)},{openArea(NextDoArea.TRIPS);openOffline()})
                     area==NextDoArea.SETTINGS -> SettingsLanding()
-                    else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy,workError,{filter->openArea(NextDoArea.WORK);workFilter=filter},{id->loadWorkDetail(id)},{refreshWork()}){openArea(it)}
+                    else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy,workError,{filter->openArea(NextDoArea.WORK);workFilter=filter;if(filter=="completed")loadCompleted()},{id->loadWorkDetail(id)},{refreshWork()}){openArea(it)}
                 }
                 Spacer(Modifier.height(12.dp))
             }
@@ -643,9 +665,16 @@ class MainActivity : ComponentActivity() {
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
                     Column(Modifier.weight(1f)){
                         Text("Consenti screenshot in Home e Lavoro")
-                        Text("Le catture possono contenere dati riservati. Viaggi, schermata bloccata e app recenti restano protetti.",color=Muted,fontSize=12.sp)
+                        Text("Le catture possono contenere dati riservati. Il blocco e le app recenti restano protetti.",color=Muted,fontSize=12.sp)
                     }
                     Switch(checked=allowWorkScreenshots,onCheckedChange={allowWorkScreenshots=it;getPreferences(MODE_PRIVATE).edit().putBoolean("allow_work_screenshots",it).apply();updateCaptureProtection()})
+                }
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text("Consenti screenshot in Personale e Viaggi")
+                        Text("Disattivato di default. Le catture possono includere voucher e documenti riservati.",color=Muted,fontSize=12.sp)
+                    }
+                    Switch(checked=allowPersonalScreenshots,onCheckedChange={allowPersonalScreenshots=it;getPreferences(MODE_PRIVATE).edit().putBoolean("allow_personal_screenshots",it).apply();updateCaptureProtection()})
                 }
             } else Text("Screenshot protetti su Android 12 e precedenti per tutelare le anteprime delle app recenti.",color=Muted,fontSize=12.sp)
         }
@@ -738,15 +767,15 @@ class MainActivity : ComponentActivity() {
         }
         if (updateMessage.isNotBlank()) Text(updateMessage, color=Sand, fontSize=12.sp)
         if (updateBusy) LinearProgressIndicator(Modifier.fillMaxWidth(),color=Teal)
-        if (locked || (current == null && area==NextDoArea.HOME)) TextButton(onClick={checkUpdates(true)}, enabled=!updateBusy) { Text("Verifica aggiornamenti") }
+        if (locked) TextButton(onClick={checkUpdates(true)}, enabled=!updateBusy) { Text("Verifica aggiornamenti") }
     }
     @Composable private fun Pill(text: String, color: Color=Teal) {
         Text(text, Modifier.clip(RoundedCornerShape(50)).background(color.copy(alpha=.14f)).padding(horizontal=12.dp, vertical=6.dp),
             color=color, fontSize=11.sp, fontWeight=FontWeight.SemiBold)
     }
     @Composable private fun TravelCard(title: String, subtitle: String="", content: @Composable ColumnScope.() -> Unit) {
-        Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(22.dp),colors=CardDefaults.cardColors(containerColor=Panel)) {
-            Column(Modifier.padding(17.dp),verticalArrangement=Arrangement.spacedBy(9.dp)) {
+        Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(16.dp),border=androidx.compose.foundation.BorderStroke(1.dp,Teal.copy(alpha=.12f)),colors=CardDefaults.cardColors(containerColor=Panel)) {
+            Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(7.dp)) {
                 Text(title,color=White,fontWeight=FontWeight.Bold,fontSize=18.sp)
                 if(subtitle.isNotBlank()) Text(subtitle,color=Muted,fontSize=13.sp,lineHeight=19.sp)
                 content()
@@ -890,12 +919,12 @@ class MainActivity : ComponentActivity() {
             val now=LocalDate.now(); val start=LocalDate.parse(info.str("start"));val end=LocalDate.parse(info.str("end"))
             when { now<start -> ChronoUnit.DAYS.between(now,start).toString()+" giorni alla partenza";now<=end -> "In viaggio";else -> "Viaggio concluso" }
         } catch(_:Exception) { "Il tuo viaggio" }
-        Box(Modifier.fillMaxWidth().height(258.dp).clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(Color(0xFF245D78),Color(0xFF132D42),Color(0xFF91714B))))) {
+        Box(Modifier.fillMaxWidth().height(196.dp).clip(RoundedCornerShape(16.dp)).background(Brush.linearGradient(listOf(Color(0xFF245D78),Color(0xFF132D42),Color(0xFF91714B))))) {
             if(bmp!=null) Image(bmp.asImageBitmap(),null,Modifier.matchParentSize(),contentScale=ContentScale.Crop)
             Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xD90B1726)))))
             Column(Modifier.align(Alignment.BottomStart).padding(20.dp),verticalArrangement=Arrangement.spacedBy(7.dp)) {
                 Pill(countdown,Sand)
-                Text(info.str("title"),fontSize=32.sp,fontWeight=FontWeight.ExtraBold,color=White,lineHeight=34.sp)
+                Text(info.str("title"),fontSize=26.sp,fontWeight=FontWeight.ExtraBold,color=White,lineHeight=29.sp)
                 Text(info.str("subtitle"),color=White,fontSize=13.sp)
                 Text(info.str("start")+" — "+info.str("end"),color=Muted,fontSize=12.sp)
             }
@@ -908,6 +937,12 @@ class MainActivity : ComponentActivity() {
             Metric(t.bookings.size.toString(),"Prenotazioni",Modifier.weight(1f)){section="Prenota"}
             Metric(documentMap(t).size.toString(),"PDF",Modifier.weight(1f)){section="PDF"}
         }
+        val tripToday=LocalDate.now()
+        val first=runCatching{LocalDate.parse(t.info.str("start"))}.getOrDefault(tripToday)
+        val last=runCatching{LocalDate.parse(t.info.str("end"))}.getOrDefault(first)
+        val calendarAnchor=tripToday.coerceIn(first,minOf(maxOf(first,last),first.plusYears(10)))
+        val validDays=t.days.map{it.str("date")}.filter{it.isNotBlank()}.toSet()
+        BentoCalendar(tripToday,validDays,selected=selectedDay,onDay={d->if(d.toString() in validDays){selectedDay=d.toString();section="Oggi"}},title="Calendario del viaggio",initialMonth=java.time.YearMonth.from(calendarAnchor),travel=true)
         val next=t.days.firstOrNull{it.str("date")==selectedDay}
         TravelCard("La prossima tappa",next?.let { listOf(it.str("date"),it.str("place"),it.str("headline")).filter{v->v.isNotBlank()}.joinToString(" · ") } ?: "Programma da definire") {
             Action("Vai all’itinerario") { section="Oggi" }
@@ -924,7 +959,7 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun Metric(value:String,label:String,modifier:Modifier,onClick:()->Unit) {
         Column(modifier.clip(RoundedCornerShape(18.dp)).background(Panel).clickable(onClick=onClick).padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-            Text(value,color=Teal,fontSize=25.sp,fontWeight=FontWeight.ExtraBold);Text(label,color=Muted,fontSize=11.sp)
+            Text(value,color=Teal,fontSize=22.sp,fontWeight=FontWeight.ExtraBold);Text(label,color=Muted,fontSize=11.sp)
         }
     }
     @Composable private fun DayScreen(t: TripPackage) {

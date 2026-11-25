@@ -947,7 +947,7 @@ function settings(main){
  function section(title,desc=''){const card=el('section',{class:'card settings-card'},[node('h2','',title),...(desc?[node('p','sub',desc)]:[])]);content.append(card);return card}
  if(S.settingsTab==='general'){
   const card=section('Preferenze','Account indipendente da Home Assistant. Proteggere l’accesso remoto tramite HTTPS e Cloudflare Access.');
-  card.append(themeButton(),node('p','sub','Versione NextDo 0.2.1-test'));NextDoArchive.preferences(content);
+  card.append(themeButton(),node('p','sub','Versione NextDo 0.2.2-test'));NextDoArchive.preferences(content);
   NextDoWorkspace.settings(content,'profile')
  }else if(S.settingsTab==='notifications'){
   const card=section('Notifiche');if(admin)card.append(btn('Elabora promemoria',async()=>{try{const r=await api('/reminders/process',{method:'POST'});msg('Promemoria creati: '+r.processed);render()}catch(e){msg(e.message,true)}},'small'));
