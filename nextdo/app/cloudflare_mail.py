@@ -51,6 +51,7 @@ def save_config(data,cfg):
 def public(cfg):
  return {"enabled":bool(cfg.get("enabled")),"secret_configured":bool(cfg.get("secret")),
   "recipient":cfg.get("recipient",""),"allowed_sender":cfg.get("allowed_sender",""),
+  "private_sender":cfg.get("private_sender",""),
   "ingest_path":PATH,"interval_seconds":INTERVAL,"requires_gmail":False,"retention_days":RETENTION_DAYS}
 
 def email_ok(s):return bool(re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}",s))
@@ -62,6 +63,7 @@ class Config(BaseModel):
  enabled:bool=False
  recipient:str=Field(default="",max_length=254)
  allowed_sender:str=Field(default="",max_length=4096)
+ private_sender:str|None=Field(default=None,max_length=4096)
 
 def upgrade(db_path):
  with sqlite3.connect(db_path) as db:
@@ -85,6 +87,21 @@ def upgrade(db_path):
     task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP);
   """)
+  cols={r[1] for r in db.execute("PRAGMA table_info(cloudflare_mail_inbox)")}
+  if "area" not in cols:db.execute("ALTER TABLE cloudflare_mail_inbox ADD COLUMN area TEXT NOT NULL DEFAULT 'work'")
+  if "private_owner" not in cols:db.execute("ALTER TABLE cloudflare_mail_inbox ADD COLUMN private_owner INTEGER")
+  # Separate ledger: never point private items at professional task IDs.
+  db.execute("""CREATE TABLE IF NOT EXISTS cloudflare_private_fingerprints(
+   fingerprint TEXT PRIMARY KEY,message_hash TEXT NOT NULL REFERENCES cloudflare_mail_inbox(message_hash),
+   private_item_id INTEGER REFERENCES private_items(id) ON DELETE SET NULL)""")
+
+def private_insert(c,owner,row,source,item,fp,title,description,kind,due):
+ from . import private_items
+ if c.execute("SELECT 1 FROM cloudflare_private_fingerprints WHERE fingerprint=?",(fp,)).fetchone():return False
+ if kind!="appointment":kind="deadline" if due else "task"
+ tid=private_items.create(c,owner,{"title":title,"description":description,"kind":kind,"due_at":due,"status":"review"})
+ c.execute("INSERT INTO cloudflare_private_fingerprints VALUES(?,?,?)",(fp,row["message_hash"],tid))
+ return True
 
 def purge_expired(c):
  # Delete message text, never the operational tasks or deduplication ledger.
@@ -127,12 +144,19 @@ def digest(source):
  body=re.sub(r"\s+"," ",source["text"]).strip().casefold()
  return hashlib.sha256((title+"\n"+body).encode()).hexdigest()
 
-def enqueue(conn,data,raw,sender,recipient):
+def enqueue(conn,data,raw,sender,recipient,cfg=None):
  source=email_intake.parse_mail(raw)
- sha=hashlib.sha256(raw).hexdigest()
- fingerprint=digest(source)
+ cfg=cfg if cfg is not None else load_config(data)
+ private=sender in sender_addresses(cfg.get("private_sender",""))
+ owner=cfg.get("owner_id") if private else None
+ if private and not isinstance(owner,int):fail("Destinazione personale non configurata",503)
+ area="private" if private else "work"
+ prefix=("private:"+str(owner)+":").encode() if private else b""
+ sha=hashlib.sha256(prefix+raw).hexdigest()
+ fingerprint=hashlib.sha256(prefix+digest(source).encode()).hexdigest() if private else digest(source)
  with conn() as c:
   purge_expired(c)
+  if private and not c.execute("SELECT 1 FROM users WHERE id=? AND active=1 AND role='admin'",(owner,)).fetchone():fail("Destinazione personale non disponibile",503)
   row=c.execute("SELECT * FROM cloudflare_mail_inbox WHERE message_hash=?",(sha,)).fetchone()
   if row:
    if row["status"] in ("processed","failed") and row["tasks_created"]==0 and row["duplicates"]==0 and not row["payload_encrypted"] and not represented(c,fingerprint,sha):
@@ -143,17 +167,17 @@ def enqueue(conn,data,raw,sender,recipient):
    return {"accepted":True,"duplicate":True,"state":row["status"]}
   encrypted=email_intake._cipher(data).encrypt(json.dumps(source,ensure_ascii=False).encode()).decode()
   if represented(c,fingerprint):
-   c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,completed_at,payload_encrypted) VALUES(?,?,?,?,'duplicate',?,?)",
-    (sha,fingerprint,sender,recipient,stamp(),encrypted))
+   c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,completed_at,payload_encrypted,area,private_owner) VALUES(?,?,?,?,'duplicate',?,?,?,?)",
+    (sha,fingerprint,sender,recipient,stamp(),encrypted,area,owner))
    return {"accepted":True,"duplicate":True,"state":"duplicate"}
-  c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,payload_encrypted) VALUES(?,?,?,?,'queued',?)",
-   (sha,fingerprint,sender,recipient,encrypted))
+  c.execute("INSERT INTO cloudflare_mail_inbox(message_hash,source_digest,sender,recipient,status,payload_encrypted,area,private_owner) VALUES(?,?,?,?,'queued',?,?,?)",
+   (sha,fingerprint,sender,recipient,encrypted,area,owner))
  return {"accepted":True,"duplicate":False,"state":"queued"}
 
 def _claim(conn):
  with conn() as c:
   purge_expired(c)
-  r=c.execute("SELECT message_hash,source_digest,payload_encrypted,sender,recipient,attempt_count FROM cloudflare_mail_inbox WHERE status IN ('queued','retry') AND payload_encrypted IS NOT NULL AND attempt_count<? AND next_attempt_epoch<=? ORDER BY received_at,message_hash LIMIT 1",(RETRY_LIMIT,sec())).fetchone()
+  r=c.execute("SELECT message_hash,source_digest,payload_encrypted,sender,recipient,attempt_count,area,private_owner FROM cloudflare_mail_inbox WHERE status IN ('queued','retry') AND payload_encrypted IS NOT NULL AND attempt_count<? AND next_attempt_epoch<=? ORDER BY received_at,message_hash LIMIT 1",(RETRY_LIMIT,sec())).fetchone()
   if r:c.execute("UPDATE cloudflare_mail_inbox SET status='processing',attempt_count=attempt_count+1,started_at=?,error=NULL WHERE message_hash=?",(stamp(),r["message_hash"]))
   return dict(r) if r else None
 
@@ -170,7 +194,8 @@ def process_one(conn,data,row):
   proposals=email_intake.analyze(email_intake.load_config(data),source)["proposals"]
   if not proposals:proposals=[email_intake.manual_proposal(source)]
   cfg=load_config(data)
-  owner=cfg.get("owner_id")
+  private=row.get("area")=="private"
+  owner=row.get("private_owner") if private else cfg.get("owner_id")
   created=duplicate_count=0
   auto_items=[]
   with conn() as c:
@@ -184,7 +209,8 @@ def process_one(conn,data,row):
      due+="T"+item["appointment_time"]+":00"
     fp=hashlib.sha256((title.casefold()+"\n"+(due or "")+"\n"+evidence.casefold()).encode()).hexdigest()
     if item.get("manual_review"):fp=hashlib.sha256(("manual-review:"+row["source_digest"]).encode()).hexdigest()
-    if c.execute("SELECT 1 FROM cloudflare_mail_tasks WHERE fingerprint=?",(fp,)).fetchone():
+    if private:fp=hashlib.sha256(("private:"+str(owner)+":"+fp).encode()).hexdigest()
+    if not private and c.execute("SELECT 1 FROM cloudflare_mail_tasks WHERE fingerprint=?",(fp,)).fetchone():
      duplicate_count+=1;continue
     description=("[DA VERIFICARE] Scadenza generata automaticamente, non convalidata.\n"
      "Origine: Cloudflare Email Routing\nMessaggio: "+sha+"\nImpronta testo: "+row["source_digest"]+
@@ -193,7 +219,11 @@ def process_one(conn,data,row):
      "\nData email: "+source["date"]+"\nFrase originale: "+evidence+
      "\nOra, CdS e incaricati: [DA VERIFICARE].")
     description+="\n"+item.get("description","")
-    if item.get("manual_review"):description+="\nNessuna data assegnata. Aprire il registro email per esaminare il testo disponibile."
+    if item.get("manual_review"):description+="\nNessuna data assegnata." + ("\nTesto email:\n"+source["text"][:12000] if private else " Aprire il registro email per esaminare il testo disponibile.")
+    if private:
+     if private_insert(c,owner,row,source,item,fp,title,description,kind,due):created+=1
+     else:duplicate_count+=1
+     continue
     cur=c.execute(
      "INSERT INTO tasks(title,description,kind,priority,status,due_at,start_at,owner_id,"
      "assigned_to,group_id,completion_mode,display_enabled,recurrence,labels,scope,project_id)"
@@ -207,6 +237,7 @@ def process_one(conn,data,row):
    c.execute("UPDATE cloudflare_mail_inbox SET status='processed',completed_at=?,tasks_created=?,duplicates=? WHERE message_hash=?",
     (stamp(),created,duplicate_count,sha))
    # Outbox creation is atomic with tasks; an optional feature failure never rolls back intake.
+   if private:return {"created":created}
    c.execute("SAVEPOINT automatic_ics")
    try:
     from . import automatic_ics
@@ -225,11 +256,18 @@ def process_one(conn,data,row):
   with conn() as c:
    if final and isinstance(exc,HTTPException):
     try:
-     owner=load_config(data).get("owner_id")
+     private=row.get("area")=="private"
+     owner=row.get("private_owner") if private else load_config(data).get("owner_id")
      source=decode_source(data,row)
      if c.execute("SELECT 1 FROM users WHERE id=? AND role='admin' AND active=1",(owner,)).fetchone():
       fp=hashlib.sha256(("manual-review:"+row["source_digest"]).encode()).hexdigest()
-      if not c.execute("SELECT 1 FROM cloudflare_mail_tasks WHERE fingerprint=?",(fp,)).fetchone():
+      if private:
+       fp=hashlib.sha256(("private:"+str(owner)+":"+fp).encode()).hexdigest()
+       proposal=email_intake.manual_proposal(source,"Analisi AI non riuscita dopo tre tentativi.")
+       desc="[DA VERIFICARE] Analisi AI non riuscita.\n"+source["subject"]+"\n"+source["text"][:12000]
+       if private_insert(c,owner,row,source,proposal,fp,proposal["title"],desc,"task",None):
+        c.execute("UPDATE cloudflare_mail_inbox SET tasks_created=tasks_created+1 WHERE message_hash=?",(sha,));fallback_created=1
+      elif not c.execute("SELECT 1 FROM cloudflare_mail_tasks WHERE fingerprint=?",(fp,)).fetchone():
        proposal=email_intake.manual_proposal(source,"Analisi AI non riuscita dopo tre tentativi.")
        desc="[DA VERIFICARE] Analisi AI non riuscita. Origine: Cloudflare Email Routing\nMessaggio: "+sha+"\nOggetto: "+source["subject"]+"\nConsultare il registro email per il testo. Nessuna data assegnata."
        cur=c.execute("""INSERT INTO tasks(title,description,kind,priority,status,owner_id,scope,labels)
@@ -298,7 +336,9 @@ def register_routes(app,*,conn,user,csrf,data_path):
   if any(len(sender)>254 or not email_ok(sender) for sender in senders):fail("Mittente non valido")
   if body.enabled and (not cfg.get("secret") or not recipient or not senders):
    fail("Configurare gli indirizzi e generare il segreto prima di attivare la ricezione")
-  cfg.update(enabled=body.enabled,recipient=recipient,allowed_sender=", ".join(senders),owner_id=owner["id"])
+  private_senders=sender_addresses(body.private_sender if body.private_sender is not None else cfg.get("private_sender",""))
+  if any(x not in senders for x in private_senders):fail("I mittenti personali devono essere tra quelli autorizzati")
+  cfg.update(enabled=body.enabled,recipient=recipient,allowed_sender=", ".join(senders),private_sender=", ".join(private_senders),owner_id=owner["id"])
   save_config(data_path,cfg)
   return public(cfg)
  @app.post("/api/cloudflare-mail/secret")
@@ -317,8 +357,9 @@ def register_routes(app,*,conn,user,csrf,data_path):
   if size>MAX_BYTES:fail("Messaggio troppo grande",413)
   raw=await req.body()
   if not raw or len(raw)>MAX_BYTES:fail("Messaggio vuoto o troppo grande",413)
-  sender,recipient=verify(req.headers,raw,load_config(data_path))
-  return JSONResponse(enqueue(conn,data_path,raw,sender,recipient),status_code=202)
+  cfg=load_config(data_path)
+  sender,recipient=verify(req.headers,raw,cfg)
+  return JSONResponse(enqueue(conn,data_path,raw,sender,recipient,cfg),status_code=202)
  @app.post("/api/cloudflare-mail/process")
  def process(req:Request):
   admin(req);csrf(req);return run_queue(conn,data_path)
@@ -333,7 +374,7 @@ def register_routes(app,*,conn,user,csrf,data_path):
   if not re.fullmatch(r"[a-f0-9]{64}",sha):fail("Messaggio non valido",404)
   purge_expired(c)
   row=c.execute("SELECT * FROM cloudflare_mail_inbox WHERE message_hash=?",(sha,)).fetchone()
-  if not row:fail("Messaggio non trovato",404)
+  if not row or row["area"]!="work":fail("Messaggio non trovato",404)
   return row
  def links(c,row):
   return [dict(t) for t in c.execute("""SELECT l.task_id,t.title,t.status FROM cloudflare_mail_tasks l
@@ -346,7 +387,7 @@ def register_routes(app,*,conn,user,csrf,data_path):
    purge_expired(c)
    rows=c.execute("""SELECT message_hash,source_digest,sender,recipient,status,attempt_count,tasks_created,duplicates,
      received_at,completed_at,error,payload_encrypted,datetime(received_at,'+30 days') AS retained_until
-     FROM cloudflare_mail_inbox ORDER BY received_at DESC LIMIT 40""").fetchall()
+     FROM cloudflare_mail_inbox WHERE area='work' ORDER BY received_at DESC LIMIT 40""").fetchall()
    output=[]
    for row in rows:
     item={k:row[k] for k in row.keys() if k!="payload_encrypted"}

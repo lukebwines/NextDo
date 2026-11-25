@@ -276,3 +276,22 @@ def test_final_model_failure_creates_manual_review(tmp_path,monkeypatch):
  assert t["due_at"] is None
  assert c.post("/api/cloudflare-mail/retry-failed",headers=h).json()["queued"]==0
  c.close()
+
+def test_private_sender_routes_separately(tmp_path,monkeypatch):
+ c,h=init(tmp_path);secret=setup(c,h)
+ other="personal@example.org"
+ r=c.post("/api/cloudflare-mail/config",headers=h,json={"recipient":RECIPIENT,"allowed_sender":SENDER+", "+other,"private_sender":other,"enabled":True})
+ assert r.status_code==200,r.text
+ from app import email_intake
+ monkeypatch.setattr(email_intake,"analyze",lambda cfg,src:{"proposals":[{"title":"Synthetic deadline","due_date":"2026-12-10","evidence":"Test"}]})
+ assert deliver(c,secret,sample(),sender=SENDER).status_code==202
+ assert deliver(c,secret,sample(),sender=other).status_code==202
+ assert c.post("/api/cloudflare-mail/process",headers=h).json()["created"]==2
+ assert len(c.get("/api/tasks").json())==1
+ assert len(c.get("/api/cloudflare-mail/history").json())==1
+ assert c.get("/api/personal/items").status_code==423
+ assert c.post("/api/personal/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ items=c.get("/api/personal/items").json()["items"]
+ assert len(items)==1 and items[0]["kind"]=="deadline" and items[0]["status"]=="review"
+ assert deliver(c,secret,sample(),sender=other).json()["duplicate"]
+ c.close()

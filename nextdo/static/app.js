@@ -921,19 +921,22 @@ function cloudflareMailSettings(main){
    grid.replaceChildren();
    const recipient=input('recipient','Esempio: scadenze@posta.archis.uk',cfg.recipient||'');
    const sender=input('allowed_sender','Separa gli indirizzi con una virgola',cfg.allowed_sender||'');
+   const privateSender=input('private_sender','Indirizzi personali autorizzati',cfg.private_sender||'');
    const active=el('input',{type:'checkbox',checked:cfg.enabled});
    const url=el('input',{class:'field',readOnly:true,value:location.origin+cfg.ingest_path});
    grid.append(node('p','sub','Segreto Worker: '+(cfg.secret_configured?'configurato':'non configurato')+
       ' · Ricezione: '+(cfg.enabled?'attiva':'disattivata')),
     field('Indirizzo email dedicato (da creare in Cloudflare)',recipient),
     field('Mittenti autorizzati per gli inoltri',sender),
+    field('Mittenti da destinare all’area Personale',privateSender),
+    node('p','sub','Gli altri mittenti autorizzati continuano a creare attività professionali. Nessuna riclassificazione dello storico.'),
     field('Endpoint HTTPS NextDo per il Worker',url),
     el('label',{class:'full'},[active,' Abilita la ricezione automatica']));
    const actions=el('div',{class:'actions full'});
    actions.append(btn('Salva impostazioni Cloudflare',async()=>{
     try{
      await api('/cloudflare-mail/config',{method:'POST',body:JSON.stringify({
-      recipient:recipient.value,allowed_sender:sender.value,enabled:active.checked
+      recipient:recipient.value,allowed_sender:sender.value,private_sender:privateSender.value,enabled:active.checked
      })});
      msg('Impostazioni Cloudflare salvate');await load();
     }catch(e){msg(e.message,true)}
