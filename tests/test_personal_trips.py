@@ -95,3 +95,55 @@ def test_booking_templates_private_reusable(tmp_path):
  assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
  assert all(x["label"]!=data["label"] for x in c.get(url).json())
  c.close()
+
+def test_replace_pdf_keeps_links_and_refreshes_mobile(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ raw,m=sample()
+ assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
+ tid=m["trip"]["id"];url=p+"/trips/"+tid;mu=mobile+"/trips/"+tid
+ b=c.get(url).json()
+ b["manifest"]["documents"].append({"file":"test.pdf","title":"test.pdf"})
+ b["manifest"]["expenses"]=[{"title":"Synthetic expense","amount":"10","currency":"EUR","doc":"test.pdf"}]
+ assert c.put(url,headers=h,json=b).status_code==200
+ assert c.post(url+"/documents",headers=h,files={"file":("collision.pdf",b"%PDF-other","application/pdf")}).status_code==200
+ before=c.get(url).json();rev=before["revision"]
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ device={"Authorization":"Bearer "+d["device_token"]}
+ session={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers=device,json={"pin":"123456"}).json()["session_token"]}
+ def replace(name,content,revision=rev,shared=True):
+  return c.post(url+"/documents/test.pdf/replace",params={"revision":revision,"confirm_shared":shared,"original":True},headers=h,files={"file":(name,content,"application/pdf")})
+ assert replace("original.pdf",b"%PDF-original",shared=False).status_code==409
+ assert replace("original.pdf",b"%PDF-original",revision=rev-1).status_code==409
+ assert replace("collision.pdf",b"%PDF-original").status_code==409
+ assert replace("original.pdf",b"not pdf").status_code==400
+ assert c.get(url).json()==before
+ assert c.get(mu+"/documents/test.pdf",headers=session).content==b"%PDF-synthetic"
+ r=replace("original.pdf",b"%PDF-original");assert r.status_code==200,r.text
+ assert r.json()=={"revision":rev+1,"file":"original.pdf","linked":3}
+ after=c.get(mu,headers=session).json()
+ assert after["revision"]==rev+1
+ assert after["state"]==before["state"]
+ assert after["manifest"]["days"]==before["manifest"]["days"]
+ assert after["manifest"]["bookings"][0]["doc"]=="original.pdf"
+ assert after["manifest"]["bookings"][0]["original"] is True
+ assert after["manifest"]["bookings"][0]["lines"]==before["manifest"]["bookings"][0]["lines"]
+ assert after["manifest"]["guides"][0]["doc"]=="original.pdf"
+ assert after["manifest"]["expenses"][0]["doc"]=="original.pdf"
+ assert after["manifest"]["documents"][0]=={"file":"original.pdf","title":"original.pdf"}
+ assert c.get(mu+"/documents/test.pdf",headers=session).status_code==404
+ assert c.get(mu+"/documents/original.pdf",headers=session).content==b"%PDF-original"
+ snapshot=c.get(mu+"/offline",headers=session)
+ with zipfile.ZipFile(io.BytesIO(snapshot.content)) as z:
+  assert "documenti/test.pdf" not in z.namelist()
+  assert z.read("documenti/original.pdf")==b"%PDF-original"
+  assert z.read("documenti/collision.pdf")==b"%PDF-other"
+ assert c.post(url+"/documents/original.pdf/replace",params={"revision":rev+1,"confirm_shared":True},headers=h,files={"file":("original.pdf",b"%PDF-same-name","application/pdf")}).status_code==200
+ assert c.get(mu+"/documents/original.pdf",headers=session).content==b"%PDF-same-name"
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.post(url+"/documents/original.pdf/replace",params={"revision":rev+2},headers=h,files={"file":("original.pdf",b"%PDF-locked","application/pdf")}).status_code==423
+ create_user(c,h,"colleague");sign_in(c,h,"colleague")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+ assert c.post(url+"/documents/original.pdf/replace",params={"revision":rev+2},headers=h,files={"file":("original.pdf",b"%PDF-other-account","application/pdf")}).status_code==404
+ c.close()

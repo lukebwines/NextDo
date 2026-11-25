@@ -513,6 +513,30 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
    if name in files:fail("Documento già presente",409)
    files[name]=raw;m.setdefault("documents",[]).append({"file":name,"title":name})
    return {"revision":save(c,owner,m,state,files,r["revision"])}
+ @app.post("/api/personal/trips/{tid}/documents/{name}/replace")
+ def replace_doc(tid:str,name:str,req:Request,revision:int,confirm_shared:bool=False,original:bool=False,file:UploadFile=File(...)):
+  owner=allowed(req,True)
+  new_name=file.filename or ""
+  raw=file.file.read(LIMIT+1)
+  if not NAME.fullmatch(new_name) or len(raw)>LIMIT or not raw.startswith(b"%PDF-"):fail("Caricare un PDF valido (massimo 32 MB)")
+  with db() as c:
+   r=load(c,owner,tid)
+   if r["revision"]!=revision:fail("Il viaggio è stato modificato: ricaricare",409)
+   m,state,files=read_archive(r["archive"])
+   if name not in files:fail("Documento non trovato",404)
+   if new_name!=name and new_name in files:fail("Esiste già un altro PDF con questo nome. Rinominare il nuovo file.",409)
+   refs=[(section,item) for section in ("bookings","guides","expenses") for item in m.get(section,[]) if item.get("doc")==name]
+   if len(refs)>1 and not confirm_shared:fail("Il documento è condiviso da più elementi. Confermare la sostituzione per tutti.",409)
+   for section,item in refs:
+    item["doc"]=new_name
+    if section=="bookings" and original:item["original"]=True
+   for item in m.get("documents",[]):
+    if item.get("file")==name:
+     item["file"]=new_name
+     if item.get("title")==name:item["title"]=new_name
+   if new_name!=name:del files[name]
+   files[new_name]=raw
+   return {"revision":save(c,owner,m,state,files,revision),"file":new_name,"linked":len(refs)}
  @app.get("/api/personal/trips/{tid}/documents/{name}")
  def download_doc(tid:str,name:str,req:Request):
   owner=allowed(req)
