@@ -43,6 +43,7 @@ internal fun pdfPan(offset:Float,content:Float,viewport:Float,scale:Float):Float
     return offset.coerceIn(-bound,bound)
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun NextDoPdfViewer(
     window:Window,name:String,count:Int,firstPage:Bitmap?,render:(Int)->Bitmap,
