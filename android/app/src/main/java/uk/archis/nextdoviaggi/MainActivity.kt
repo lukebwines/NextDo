@@ -68,6 +68,41 @@ class MainActivity : ComponentActivity() {
     private lateinit var vault: Vault
     private var locked by mutableStateOf(true)
     private var area by mutableStateOf(NextDoArea.HOME)
+    private var personalAppearance by mutableStateOf<JSONObject?>(null)
+    private var appearanceError by mutableStateOf("")
+    private var appearancePhoto by mutableStateOf<Uri?>(null)
+    private var appearancePhotoOwner=""
+    private val appearancePicker=registerForActivityResult(ActivityResultContracts.GetContent()){uri->
+        appearancePhoto=uri
+    }
+    private fun chooseAppearancePhoto(){
+        val cfg=connection?:return
+        if(locked||session.isBlank()||busy)return
+        appearancePhotoOwner=timelineOwner(cfg);appearancePhoto=null
+        appearancePicker.launch("image/*")
+    }
+    private fun savePersonalAppearance(body:JSONObject){
+        val cfg=connection?:return
+        val s=session
+        if(locked||s.isBlank())return
+        task({TravelApi(cfg.getString("url")).obj("/appearance",s,body)}){personalAppearance=it;appearanceError=""}
+    }
+    private fun uploadAppearancePhoto(){
+        val cfg=connection?:return
+        val uri=appearancePhoto?:return
+        val s=session
+        if(locked||s.isBlank()||appearancePhotoOwner!=timelineOwner(cfg))return
+        task({
+            val raw=contentResolver.openInputStream(uri)?.use { input ->
+                val out=java.io.ByteArrayOutputStream()
+                val buffer=ByteArray(8192)
+                var count=input.read(buffer)
+                while(count!=-1){require(out.size()+count<=5*1024*1024){"Foto oltre 5 MB"};out.write(buffer,0,count);count=input.read(buffer)}
+                out.toByteArray()
+            }?:error("Fotografia non disponibile")
+            TravelApi(cfg.getString("url")).obj("/appearance/photo",s,JSONObject().put("image",Base64.encodeToString(raw,Base64.NO_WRAP)))
+        }){personalAppearance=it;appearancePhoto=null;appearancePhotoOwner="";appearanceError=""}
+    }
     private var workFilter by mutableStateOf("all")
     private var allowWorkScreenshots by mutableStateOf(true)
     private var allowPersonalScreenshots by mutableStateOf(true)
@@ -277,6 +312,7 @@ class MainActivity : ComponentActivity() {
         authenticating = false
         pending?.cancel()
         locked = true; busy = false; connection = null; session = ""; trips = emptyList();travelAuthState=TravelAuthState.PIN_REQUIRED
+        personalAppearance=null;appearanceError=""
         workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false
         editor = null; current = null; offlineMeta = null; offline = false; closePdf(); error = ""
         section = "Home"; area=NextDoArea.HOME;workFilter="all";updateCaptureProtection()
@@ -611,6 +647,20 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable private fun App() {
+        LaunchedEffect(locked,area,session,connection){
+            if(!locked&&area==NextDoArea.PERSONAL&&session.isNotBlank()){
+                val cfg=connection
+                val s=session
+                val started=epoch
+                if(cfg!=null){
+                    try {
+                        val pref=withContext(Dispatchers.IO){TravelApi(cfg.getString("url")).obj("/appearance",s)}
+                        if(started==epoch&&!locked&&session==s){personalAppearance=pref;appearanceError=""}
+                    }catch(e:CancellationException){throw e}
+                    catch(_:Exception){if(started==epoch&&!locked){appearanceError="Personalizzazione non disponibile. Verifica il collegamento a NextDo."}}
+                }
+            }
+        }
         LaunchedEffect(locked,area,workConnection){
             if(!locked&&(area==NextDoArea.HOME||area==NextDoArea.WORK)&&workConnection!=null){
                 while(true){refreshWork();kotlinx.coroutines.delay(30000)}
@@ -690,7 +740,10 @@ class MainActivity : ComponentActivity() {
                     }
                     area==NextDoArea.TRIPS -> ConnectionScreen()
                     area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()},{id,rev->ackWork(id,rev)},workFilter)
-                    area==NextDoArea.PERSONAL -> PersonalLanding(!busy){openArea(NextDoArea.TRIPS)}
+                    area==NextDoArea.PERSONAL -> PersonalLanding(
+                        !busy,personalAppearance,session.isNotBlank()&&personalAppearance!=null,appearanceError,
+                        appearancePhoto!=null&&connection?.let{timelineOwner(it)==appearancePhotoOwner}==true,
+                        {savePersonalAppearance(it)},{chooseAppearancePhoto()},{uploadAppearancePhoto()}){openArea(NextDoArea.TRIPS)}
                     area==NextDoArea.SETTINGS -> SettingsLanding()
                     else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy,workError,{filter->openArea(NextDoArea.WORK);workFilter=filter},{id->loadWorkDetail(id)},{refreshWork()}){openArea(it)}
                 }

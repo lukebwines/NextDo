@@ -183,3 +183,28 @@ def test_multiple_booking_documents(tmp_path):
  assert c.put(url,headers=h,json=x).status_code==200
  assert c.get(url+"/documents/new.pdf").content==b"%PDF-new"
  c.close()
+
+def test_personal_appearance_private_and_validated(tmp_path):
+ from PIL import Image
+ c,h=init(tmp_path);p="/api/personal";url=p+"/appearance"
+ assert c.get(url).status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ assert c.get(url).json()=={"theme":"dark","palette":"ocean","background":"gradient","photo":None}
+ pref={"theme":"light","palette":"forest","background":"plain"}
+ assert c.post(url,headers=h,json=pref).json()=={**pref,"photo":None}
+ assert c.post(url,headers=h,json={"palette":"bad"}).status_code==400
+ assert c.post(url,headers=h,json={"background":"photo"}).status_code==400
+ buf=io.BytesIO();Image.new("RGB",(32,20),"teal").save(buf,format="PNG")
+ assert c.post(url+"/photo",headers=h,files={"file":("private.png",buf.getvalue(),"image/png")}).status_code==200
+ assert c.get(url).json()["background"]=="photo"
+ assert c.get(url).json()["photo"]
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.get(url).status_code==423
+ assert c.get("/api/mobile/v1/appearance").status_code==401
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ assert c.post(url,headers=h,json={"clear_photo":True}).json()["photo"] is None
+ assert c.get(url).json()["background"]=="gradient"
+ create_user(c,h,"appearance-colleague");sign_in(c,h,"appearance-colleague")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+ assert c.get(url).json()["theme"]=="dark"
+ c.close()

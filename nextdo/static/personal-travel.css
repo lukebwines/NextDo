@@ -116,3 +116,27 @@
 @media(max-width:550px){.travel-booking-field-row{grid-template-columns:minmax(0,1fr) auto}.travel-booking-field-row input:first-child{grid-column:1/-1}.travel-template-row{gap:8px}}
 
 .travel-booking-field-row textarea{min-height:43px;resize:vertical;line-height:1.45}
+
+/* Appearance belongs only to the private landing; never changes the document theme. */
+.personal-custom-shell{--personal-accent:#69e0d2;--personal-hero-start:#163651;--personal-hero-end:#176e71;--personal-card:#172b3d;--personal-text:#f3f8fc;--personal-muted:#adc1d2;--personal-line:#ffffff26;color:var(--personal-text);padding:0 0 12px}
+.personal-custom-shell[data-palette=forest]{--personal-accent:#9ee0a3;--personal-hero-start:#183f37;--personal-hero-end:#44784b}
+.personal-custom-shell[data-palette=sunset]{--personal-accent:#ffd49a;--personal-hero-start:#663a55;--personal-hero-end:#b26b45}
+.personal-custom-shell[data-palette=lavender]{--personal-accent:#cbbaff;--personal-hero-start:#39376d;--personal-hero-end:#7463a7}
+.personal-custom-shell[data-theme=light]{--personal-card:#ffffff;--personal-text:#172b3d;--personal-muted:#475569;--personal-line:#ced8e2}
+.personal-custom-shell .personal-hero{min-height:210px;display:flex;flex-direction:column;justify-content:flex-end;padding:clamp(24px,5vw,48px);border-radius:26px;color:white;background:linear-gradient(125deg,var(--personal-hero-start),var(--personal-hero-end));background-size:cover;background-position:center;margin:0 0 18px;box-shadow:0 12px 32px #0002}
+.personal-custom-shell[data-background=plain] .personal-hero{background-color:var(--personal-hero-start);background-image:none}
+.personal-hero h2{font-size:clamp(32px,5vw,54px);letter-spacing:-.04em;line-height:1.1;margin:10px 0;color:white}
+.personal-hero p{font-size:15px;color:#f0f6fc;margin:0;max-width:520px}.personal-hero-kicker{color:#efffff;font-size:11px;font-weight:800;letter-spacing:.14em}
+.personal-custom-shell .personal-hub-card,.personal-custom-shell .personal-hub-card.is-available{background:var(--personal-card);color:var(--personal-text);border:1px solid var(--personal-line)}
+.personal-custom-shell .personal-hub-copy h2,.personal-custom-shell .personal-appearance-settings h2{color:var(--personal-text)}
+.personal-custom-shell .personal-hub-copy .sub,.personal-custom-shell .personal-hub-status{color:var(--personal-muted)}
+.personal-custom-shell .personal-hub-icon{color:var(--personal-accent);background:var(--personal-hero-start)}
+.personal-custom-shell .personal-hub-card>.btn.primary,.personal-custom-shell .personal-appearance-settings .btn.primary{background:var(--personal-accent);border-color:var(--personal-accent);color:#10212b}
+.personal-custom-shell .personal-hub-status{background:var(--personal-card);border-color:var(--personal-line)}
+.personal-appearance-details{background:var(--personal-card);color:var(--personal-text);border:1px solid var(--personal-line);border-radius:18px;padding:16px;margin-bottom:18px}
+.personal-appearance-details summary{cursor:pointer;font-weight:700}
+.personal-appearance-settings{padding-top:14px}.personal-appearance-settings h2{font-size:18px;margin:0 0 12px}
+.personal-appearance-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.personal-custom-shell .personal-appearance-settings .field,.personal-custom-shell .personal-appearance-settings select,.personal-custom-shell .personal-appearance-settings .btn.small{color:var(--personal-text);background:var(--personal-card);border-color:var(--personal-line)}
+.personal-custom-shell .personal-appearance-settings label{color:var(--personal-text)}
+@media(max-width:650px){.personal-appearance-options{grid-template-columns:1fr}.personal-custom-shell .personal-hero{min-height:180px}}

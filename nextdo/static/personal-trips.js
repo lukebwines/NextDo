@@ -28,6 +28,9 @@ const NextDoPersonal=(()=>{
   const list=await api(path+'/trips');if(token!==generation||!root.isConnected)return;
   if(section==='trips'){const catalog=await api(path+'/booking-templates');if(token!==generation||!root.isConnected)return;templates=catalog;travelOverview(root,token,list);return}
   root.classList.remove('travel-shell');root.classList.add('personal-hub-shell');
+  let appearance;
+  try{appearance=await api(path+'/appearance')}catch(e){if(token!==generation||!root.isConnected)return;appearance={theme:'dark',palette:'ocean',background:'gradient',photo:null};msg('Preferenze personali non disponibili',true)}
+  if(token!==generation||!root.isConnected)return;
   const openTrips=()=>{section='trips';render(main)};
   const hubCard=(title,subtitle,icon,available=false)=>{const head=el('div',{class:'personal-hub-card-head'},[
    el('span',{class:'personal-hub-icon'},[ico(icon)]),
@@ -39,12 +42,35 @@ const NextDoPersonal=(()=>{
   };
   const grid=el('div',{class:'personal-hub-grid'},[
    hubCard('Viaggi','Itinerari, prenotazioni, PDF, guide e Diario di bordo','plane',true),
-   hubCard('Agenda personale','Da sviluppare','calendar'),
-   hubCard('Promemoria','Da sviluppare','bell'),
-   hubCard('Note personali','Da sviluppare','note')
+   hubCard('Attività','Da sviluppare','note'),
+   hubCard('Scadenze','Da sviluppare','bell'),
+   hubCard('Appuntamenti','Da sviluppare','calendar')
   ]);
   const lockAction=el('div',{class:'personal-hub-toolbar'},[btn('Blocca',async()=>{await lock();render(main)},'small')]);
-  root.replaceChildren(lockAction,grid);
+  const hero=el('section',{class:'personal-hero'},[node('div','personal-hero-kicker','IL TUO SPAZIO'),node('h2','','Area personale'),node('p','','Organizza il tuo tempo, i tuoi impegni e i tuoi viaggi.')]);
+  const panel=el('section',{class:'personal-appearance-settings'});
+  const theme=select('personal-theme',[['dark','Scuro'],['light','Chiaro']],appearance.theme);
+  const palette=select('personal-palette',[['ocean','Oceano'],['forest','Bosco'],['sunset','Tramonto'],['lavender','Lavanda']],appearance.palette);
+  const background=select('personal-background',[['gradient','Sfumatura'],['plain','Tinta unita'],...(appearance.photo?[['photo','Fotografia']]:[])],appearance.background);
+  const file=el('input',{type:'file',accept:'image/jpeg,image/png,image/webp',class:'field'});
+  const shell=el('div',{class:'personal-custom-shell','data-theme':appearance.theme,'data-palette':appearance.palette,'data-background':appearance.background});
+  function paint(){
+   shell.dataset.theme=theme.value;shell.dataset.palette=palette.value;shell.dataset.background=background.value;
+   hero.style.backgroundImage=background.value==='photo'&&appearance.photo&&/^[A-Za-z0-9+/=]+$/.test(appearance.photo)?'linear-gradient(90deg,#071526d9,#07152666),url("data:image/jpeg;base64,'+appearance.photo+'")':'';
+  }
+  for(const control of [theme,palette,background])control.addEventListener('change',paint);
+  let saving=false;
+  async function changeAppearance(endpoint,body){
+   if(saving||token!==generation)return;
+   saving=true;
+   try{await api(path+endpoint,{method:'POST',body});if(token===generation&&root.isConnected){msg('Aspetto personale salvato');await render(main)}}catch(e){if(token===generation)report(e)}finally{saving=false}
+  }
+  const save=btn('Salva aspetto',()=>changeAppearance('/appearance',JSON.stringify({theme:theme.value,palette:palette.value,background:background.value})),'primary');
+  const upload=btn('Carica fotografia',()=>{const f=file.files[0];if(!f)return msg('Seleziona una fotografia',true);if(f.size>5*1024*1024)return msg('Foto oltre 5 MB',true);const body=new FormData();body.append('file',f);changeAppearance('/appearance/photo',body)},'small');
+  const reset=btn('Ripristina aspetto',()=>changeAppearance('/appearance',JSON.stringify({theme:'dark',palette:'ocean',background:'gradient',clear_photo:true})),'small');
+  panel.append(node('h2','','Personalizza'),el('div',{class:'personal-appearance-options'},[field('Tema',theme),field('Colore',palette),field('Sfondo',background)]),toolbar(save,reset),field('Fotografia privata (max 5 MB)',file),toolbar(upload,...(appearance.photo?[btn('Rimuovi foto',()=>changeAppearance('/appearance',JSON.stringify({clear_photo:true})),'small')]:[])));
+  const settings=el('details',{class:'personal-appearance-details'},[node('summary','','Personalizza il tuo spazio'),panel]);
+  shell.append(hero,settings,grid);paint();root.replaceChildren(lockAction,shell);
  }
  function travelOverview(root,token,list){
   root.classList.remove('personal-hub-shell');root.classList.add('travel-shell');

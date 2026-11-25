@@ -60,3 +60,10 @@ Server invariato, impostazioni locali per durata/ripetizione/suono/vibrazione/sc
 
 ## PDF multipli — Web 0.2.7-test / Android 0.2.3-test
 Il PDF storico rimane associato. Altri PDF possono essere caricati nell'archivio e collegati alla stessa prenotazione, con etichette personalizzabili. Gestione Web, consultazione Android online e nelle copie offline aggiornate. Scollegamento senza cancellazione del file; sostituzione esplicita con conferma. Nessuna migrazione distruttiva. Sincronizzazione automatica offline e modifica allegati in Android restano successive. Test e collaudo da verificare.
+
+## Area personale — accordo del 25 novembre 2026
+
+- Dashboard professionale invariata all'apertura; nessun dettaglio di attività private.
+- Dashboard personale semplificata: Attività, Scadenze, Appuntamenti, Viaggi. Conservare tutte le funzioni Viaggi.
+- Aspetto indipendente: tema chiaro/scuro, quattro palette, tinta unita/sfumatura/fotografia, ripristino. Preferenze sul server privato per profilo, accesso protetto anche Android; nessun invio a servizi esterni. Prima fase in sviluppo, collaudo necessario.
+- Fase funzionale ancora da sviluppare: instradamento da mittenti SMTP autorizzati configurabili (nessun indirizzo reale nel repository), separazione effettiva di API, dati, notifiche, esportazioni e permessi; stato Da verificare; riclassificazione controllata dei record storici senza duplicazioni; spostamento esplicito tra aree. Non confondere scope=personal (attività professionale individuale) con area privata. Nessuna migrazione automatica prima del collaudo.

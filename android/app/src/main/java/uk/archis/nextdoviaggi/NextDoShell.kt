@@ -1,6 +1,14 @@
 package uk.archis.nextdoviaggi
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.*
+import android.graphics.BitmapFactory
+import android.util.Base64
+import org.json.JSONObject
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -129,12 +137,69 @@ internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolea
     }
 }
 @Composable
-internal fun PersonalLanding(enabled:Boolean,openTrips:()->Unit) {
-    Text("Area personale",fontSize=27.sp,fontWeight=FontWeight.ExtraBold,color=ShellWhite)
-    ShellCard("Viaggi","Itinerari, prenotazioni, PDF, guide e Diario di bordo",Icons.Default.Flight,PrivateTeal,enabled,openTrips){
-        Button(onClick=openTrips,enabled=enabled,modifier=Modifier.fillMaxWidth()){Text("Apri Viaggi")}
+internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Boolean,problem:String,photoPending:Boolean,save:(JSONObject)->Unit,choosePhoto:()->Unit,uploadPhoto:()->Unit,openTrips:()->Unit) {
+    val theme=appearance?.optString("theme","dark")?:"dark"
+    val palette=appearance?.optString("palette","ocean")?:"ocean"
+    val background=appearance?.optString("background","gradient")?:"gradient"
+    val light=theme=="light"
+    val accent=when(palette){"forest"->Color(0xFF9EE0A3);"sunset"->Color(0xFFFFD49A);"lavender"->Color(0xFFCBBaff);else->PrivateTeal}
+    val start=when(palette){"forest"->Color(0xFF183F37);"sunset"->Color(0xFF663A55);"lavender"->Color(0xFF39376D);else->Color(0xFF163651)}
+    val end=when(palette){"forest"->Color(0xFF44784B);"sunset"->Color(0xFFB26B45);"lavender"->Color(0xFF7463A7);else->Color(0xFF176E71)}
+    val cardColor=if(light)Color.White else ShellPanel
+    val textColor=if(light)Color(0xFF172B3D) else ShellWhite
+    val muted=if(light)Color(0xFF475569) else ShellMuted
+    val jpeg=appearance?.optString("photo","")?.takeIf{it!="null"}.orEmpty()
+    val bitmap=remember(jpeg,background){if(background=="photo"&&jpeg.length<=650000&&jpeg.isNotBlank())runCatching{val bytes=Base64.decode(jpeg,Base64.DEFAULT);BitmapFactory.decodeByteArray(bytes,0,bytes.size)?.asImageBitmap()}.getOrNull()else null}
+    var customize by remember { mutableStateOf(false) }
+    var selectedTheme by remember(theme){mutableStateOf(theme)}
+    var selectedPalette by remember(palette){mutableStateOf(palette)}
+    var selectedBackground by remember(background){mutableStateOf(background)}
+    Box(Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(start,if(background=="plain")start else end)))){
+        bitmap?.let { Image(it,null,Modifier.fillMaxSize(),contentScale=ContentScale.Crop);Box(Modifier.fillMaxSize().background(Color(0x99071526))) }
+        Column(Modifier.align(Alignment.BottomStart).padding(24.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
+            Text("IL TUO SPAZIO",color=Color.White,fontSize=11.sp,fontWeight=FontWeight.Bold)
+            Text("Area personale",color=Color.White,fontSize=30.sp,fontWeight=FontWeight.ExtraBold)
+            Text("Il tuo tempo, i tuoi impegni e i tuoi viaggi.",color=Color.White,fontSize=14.sp)
+        }
     }
-    ShellCard("Agenda personale","Da sviluppare",Icons.Default.CalendarToday,PrivateTeal)
-    ShellCard("Promemoria","Da sviluppare",Icons.Default.Notifications,PrivateTeal)
-    ShellCard("Note personali","Da sviluppare",Icons.Default.EditNote,PrivateTeal)
+    Card(colors=CardDefaults.cardColors(containerColor=cardColor),shape=RoundedCornerShape(18.dp)){
+        Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+            TextButton(onClick={customize=!customize},enabled=enabled){Text(if(customize)"Chiudi personalizzazione" else "Personalizza il tuo spazio",color=if(light)start else accent)}
+            if(problem.isNotBlank())Text(problem,color=muted,fontSize=12.sp)
+            if(customize){
+                if(!connected)Text("Collega e sblocca Viaggi per sincronizzare le preferenze.",color=muted,fontSize=13.sp)
+                Text("Tema",color=textColor,fontWeight=FontWeight.SemiBold)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    for((key,label) in listOf("dark" to "Scuro","light" to "Chiaro"))FilterChip(selectedTheme==key,{selectedTheme=key},{Text(label)},enabled=enabled&&connected)
+                }
+                Text("Colore",color=textColor,fontWeight=FontWeight.SemiBold)
+                for(row in listOf(listOf("ocean" to "Oceano","forest" to "Bosco"),listOf("sunset" to "Tramonto","lavender" to "Lavanda"))){
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){for((key,label) in row)FilterChip(selectedPalette==key,{selectedPalette=key},{Text(label)},enabled=enabled&&connected)}
+                }
+                Text("Sfondo",color=textColor,fontWeight=FontWeight.SemiBold)
+                Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                    for((key,label) in listOf("gradient" to "Sfumatura","plain" to "Tinta unita"))FilterChip(selectedBackground==key,{selectedBackground=key},{Text(label)},enabled=enabled&&connected)
+                }
+                if(jpeg.isNotBlank())FilterChip(selectedBackground=="photo",{selectedBackground="photo"},{Text("Fotografia")},enabled=enabled&&connected)
+                Button(onClick={save(JSONObject().put("theme",selectedTheme).put("palette",selectedPalette).put("background",selectedBackground))},enabled=enabled&&connected,modifier=Modifier.fillMaxWidth(),colors=ButtonDefaults.buttonColors(containerColor=accent,contentColor=Color(0xFF10212B))){Text("Salva aspetto")}
+                OutlinedButton(onClick=choosePhoto,enabled=enabled&&connected,modifier=Modifier.fillMaxWidth()){Text("Scegli fotografia",color=if(light)start else accent)}
+                if(photoPending)Button(onClick=uploadPhoto,enabled=enabled&&connected,modifier=Modifier.fillMaxWidth()){Text("Carica fotografia selezionata")}
+                if(jpeg.isNotBlank())TextButton(onClick={save(JSONObject().put("clear_photo",true))},enabled=enabled&&connected){Text("Rimuovi fotografia",color=if(light)start else accent)}
+                TextButton(onClick={save(JSONObject().put("theme","dark").put("palette","ocean").put("background","gradient").put("clear_photo",true))},enabled=enabled&&connected){Text("Ripristina aspetto",color=if(light)start else accent)}
+            }
+        }
+    }
+    for((title,subtitle,icon) in listOf(
+        Triple("Viaggi","Itinerari, prenotazioni, PDF, guide e Diario di bordo",Icons.Default.Flight),
+        Triple("Attività","Da sviluppare",Icons.Default.Checklist),
+        Triple("Scadenze","Da sviluppare",Icons.Default.Event),
+        Triple("Appuntamenti","Da sviluppare",Icons.Default.CalendarToday))){
+        Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(22.dp),colors=CardDefaults.cardColors(containerColor=cardColor)){
+            Row(Modifier.fillMaxWidth().then(if(title=="Viaggi")Modifier.clickable(enabled=enabled,onClick=openTrips) else Modifier).padding(18.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
+                Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(start),contentAlignment=Alignment.Center){Icon(icon,null,tint=accent)}
+                Column(Modifier.weight(1f)){Text(title,color=textColor,fontWeight=FontWeight.Bold,fontSize=19.sp);Text(subtitle,color=muted,fontSize=12.sp)}
+                if(title=="Viaggi")Icon(Icons.Default.ChevronRight,"Apri Viaggi",tint=if(light)start else accent)
+            }
+        }
+    }
 }

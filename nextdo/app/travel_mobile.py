@@ -126,6 +126,22 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   device=auth(req)
   with db() as c:c.execute("DELETE FROM mobile_sessions WHERE device_id=?",(device["id"],))
   return {"ok":True}
+ @app.get("/api/mobile/v1/appearance")
+ def get_appearance(req:Request):
+  from . import personal_appearance
+  owner=auth(req)["owner"]
+  with db() as c:return personal_appearance.get(c,owner)
+ @app.post("/api/mobile/v1/appearance")
+ def save_appearance(req:Request,b:dict):
+  from . import personal_appearance
+  owner=auth(req)["owner"]
+  with db() as c:return personal_appearance.save(c,owner,b)
+ @app.post("/api/mobile/v1/appearance/photo")
+ def appearance_photo(req:Request,b:dict):
+  from . import personal_appearance
+  owner=auth(req)["owner"]
+  raw=personal_appearance.decode_mobile_photo(b)
+  with db() as c:return personal_appearance.save_photo(c,owner,raw)
  @app.get("/api/mobile/v1/trips")
  def trips(req:Request):
   owner=auth(req)["owner"]
