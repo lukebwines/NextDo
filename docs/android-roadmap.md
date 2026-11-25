@@ -57,3 +57,6 @@ Per questa sola versione, la pipeline firmata può partire anche da un merge esp
 
 ## 0.1.11-test — Allarmi professionali potenziati (priorità utente)
 Server invariato, impostazioni locali per durata/ripetizione/suono/vibrazione/schermo/notifica. Full-screen e promemoria esatti solo se Android autorizza, servizio audio temporaneo con fallback notifica. Presa visione sincronizzata; silenziamento distinto. Test CI e collaudo Samsung obbligatori. La roadmap personale è rinviata a una release successiva.
+
+## PDF multipli — Web 0.2.7-test / Android 0.2.3-test
+Il PDF storico rimane associato. Altri PDF possono essere caricati nell'archivio e collegati alla stessa prenotazione, con etichette personalizzabili. Gestione Web, consultazione Android online e nelle copie offline aggiornate. Scollegamento senza cancellazione del file; sostituzione esplicita con conferma. Nessuna migrazione distruttiva. Sincronizzazione automatica offline e modifica allegati in Android restano successive. Test e collaudo da verificare.

@@ -90,6 +90,17 @@ def validate_manifest(m,available):
  bookings=rows("bookings",160);bids=ids(bookings)
  for b in bookings:
   doc(b.get("doc"));pairs(b.get("lines",[]))
+  attached=b.get("attachments",[])
+  if not isinstance(attached,list) or len(attached)>30:fail("Allegati non validi")
+  label=b.get("doc_label")
+  if label is not None and (not isinstance(label,str) or not label.strip() or len(label)>120 or any(ord(ch)<32 for ch in label)):fail("Etichetta PDF non valida")
+  seen_docs={b.get("doc")} if isinstance(b.get("doc"),str) else set()
+  for a in attached:
+   if not isinstance(a,dict) or set(a)!={"file","label"}:fail("Allegato non valido")
+   name,label=a["file"],a["label"]
+   if not isinstance(name,str) or not NAME.fullmatch(name) or name in seen_docs:fail("Allegato non valido o duplicato")
+   if not isinstance(label,str) or not label.strip() or len(label)>120 or any(ord(ch)<32 for ch in label):fail("Etichetta PDF non valida")
+   doc(name);seen_docs.add(name)
   locations(b.get("locations",[]));pairs(b.get("fields",[]))
   for key in ("source","map","extraLink"):link(b.get(key))
  guides=rows("guides",50);gids=ids(guides)
@@ -526,17 +537,19 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
    if name not in files:fail("Documento non trovato",404)
    if new_name!=name and new_name in files:fail("Esiste già un altro PDF con questo nome. Rinominare il nuovo file.",409)
    refs=[(section,item) for section in ("bookings","guides","expenses") for item in m.get(section,[]) if item.get("doc")==name]
-   if len(refs)>1 and not confirm_shared:fail("Il documento è condiviso da più elementi. Confermare la sostituzione per tutti.",409)
+   extras=[a for b in m.get("bookings",[]) for a in b.get("attachments",[]) if a["file"]==name]
+   if len(refs)+len(extras)>1 and not confirm_shared:fail("Il documento è condiviso da più elementi. Confermare la sostituzione per tutti.",409)
    for section,item in refs:
     item["doc"]=new_name
     if section=="bookings" and original:item["original"]=True
+   for a in extras:a["file"]=new_name
    for item in m.get("documents",[]):
     if item.get("file")==name:
      item["file"]=new_name
      if item.get("title")==name:item["title"]=new_name
    if new_name!=name:del files[name]
    files[new_name]=raw
-   return {"revision":save(c,owner,m,state,files,revision),"file":new_name,"linked":len(refs)}
+   return {"revision":save(c,owner,m,state,files,revision),"file":new_name,"linked":len(refs)+len(extras)}
  @app.get("/api/personal/trips/{tid}/documents/{name}")
  def download_doc(tid:str,name:str,req:Request):
   owner=allowed(req)

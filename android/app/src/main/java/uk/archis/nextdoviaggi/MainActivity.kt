@@ -1067,8 +1067,18 @@ class MainActivity : ComponentActivity() {
             TextButton(onClick={navigate(b)}){Text("Naviga")}
         }
     }
+    private fun bookingDocuments(b:JSONObject):List<Pair<String,String>> {
+        val docs=linkedMapOf<String,String>()
+        val primary=b.str("doc")
+        if(primary.isNotBlank())docs[primary]=b.str("doc_label").ifBlank{if(b.optBoolean("original"))"Documento originale" else "Documento già presente"}
+        b.arr("attachments").forEach{a->
+            val name=a.str("file")
+            if(name.isNotBlank())docs.putIfAbsent(name,a.str("label").ifBlank{name})
+        }
+        return docs.entries.map{it.key to it.value}
+    }
     @Composable private fun BookingActions(b:JSONObject) {
-        if(b.str("doc").isNotBlank())Action("Apri voucher PDF"){viewPdf(b.str("doc"))}
+        bookingDocuments(b).forEach{(name,label)->Action(label){viewPdf(name)}}
         if(b.arr("locations").isNotEmpty())b.arr("locations").forEach{Location(it)}
         else if(b.str("place").isNotBlank()||b.str("map").isNotBlank())TextButton(onClick={navigate(b)}){Icon(Icons.Default.Place,null);Spacer(Modifier.width(5.dp));Text("Apri mappa")}
     }
@@ -1090,9 +1100,10 @@ class MainActivity : ComponentActivity() {
     }
     private fun documentMap(t:TripPackage):Map<String,String> {
         val docs=linkedMapOf<String,String>()
-        (t.bookings+t.guides).forEach{if(it.str("doc").isNotBlank())docs[it.str("doc")]=it.str("title")}
+        t.guides.forEach{if(it.str("doc").isNotBlank())docs[it.str("doc")]=it.str("title")}
         t.manifest.arr("documents").forEach{if(it.str("file").isNotBlank())docs[it.str("file")]=it.str("title")}
         t.manifest.arr("expenses").forEach{if(it.str("doc").isNotBlank())docs[it.str("doc")]=it.str("title")}
+        t.bookings.forEach{b->bookingDocuments(b).forEach{(name,label)->docs[name]=b.str("title")+" · "+label}}
         t.docs.keys.forEach{docs.putIfAbsent(it,it)}
         return docs
     }

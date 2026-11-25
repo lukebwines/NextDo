@@ -147,3 +147,39 @@ def test_replace_pdf_keeps_links_and_refreshes_mobile(tmp_path):
  assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
  assert c.post(url+"/documents/original.pdf/replace",params={"revision":rev+2},headers=h,files={"file":("original.pdf",b"%PDF-other-account","application/pdf")}).status_code==404
  c.close()
+
+def test_multiple_booking_documents(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ raw,m=sample()
+ assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
+ tid=m["trip"]["id"];url=p+"/trips/"+tid
+ assert c.post(url+"/documents",headers=h,files={"file":("voucher.pdf",b"%PDF-voucher","application/pdf")}).status_code==200
+ b=c.get(url).json()
+ booking=b["manifest"]["bookings"][0]
+ booking["doc_label"]="Riepilogo integrativo"
+ booking["attachments"]=[{"file":"voucher.pdf","label":"Conferma originale"}]
+ assert c.put(url,headers=h,json=b).status_code==200
+ assert c.get(url).json()["manifest"]["bookings"][0]["doc"]=="test.pdf"
+ assert c.get(url+"/documents/test.pdf").content==b"%PDF-synthetic"
+ latest=c.get(url).json()
+ latest["manifest"]["bookings"][0]["attachments"].append({"file":"test.pdf","label":"Duplicato"})
+ assert c.put(url,headers=h,json=latest).status_code==400
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ dev={"Authorization":"Bearer "+d["device_token"]}
+ session={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers=dev,json={"pin":"123456"}).json()["session_token"]}
+ mu=mobile+"/trips/"+tid
+ assert c.get(mu,headers=session).json()["manifest"]["bookings"][0]["attachments"]==[{"file":"voucher.pdf","label":"Conferma originale"}]
+ assert c.get(mu+"/documents/voucher.pdf",headers=session).content==b"%PDF-voucher"
+ with zipfile.ZipFile(io.BytesIO(c.get(mu+"/offline",headers=session).content)) as z:
+  assert z.read("documenti/test.pdf")==b"%PDF-synthetic"
+  assert z.read("documenti/voucher.pdf")==b"%PDF-voucher"
+ rev=c.get(url).json()["revision"]
+ r=c.post(url+"/documents/voucher.pdf/replace",params={"revision":rev},headers=h,files={"file":("new.pdf",b"%PDF-new","application/pdf")})
+ assert r.status_code==200,r.text
+ assert c.get(mu,headers=session).json()["manifest"]["bookings"][0]["attachments"]==[{"file":"new.pdf","label":"Conferma originale"}]
+ x=c.get(url).json();x["manifest"]["bookings"][0]["attachments"]=[]
+ assert c.put(url,headers=h,json=x).status_code==200
+ assert c.get(url+"/documents/new.pdf").content==b"%PDF-new"
+ c.close()
