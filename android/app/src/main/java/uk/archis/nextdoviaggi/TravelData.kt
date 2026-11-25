@@ -43,6 +43,13 @@ fun readLimited(input: InputStream, limit: Int): ByteArray {
     return output.toByteArray()
 }
 
+internal class TravelHttpException(val status:Int,val detail:String?):IllegalStateException("HTTP "+status+if(!detail.isNullOrBlank())" · "+detail else "")
+internal enum class TravelAuthState { PIN_REQUIRED, RETRY, REPAIR_REQUIRED, CONNECTED }
+internal fun resumeFailure(status:Int,detail:String?):TravelAuthState = when {
+    status==401 && detail=="Verifica PIN NextDo necessaria" -> TravelAuthState.PIN_REQUIRED
+    status==401 && detail in setOf("Sessione scaduta o dispositivo revocato","Account non disponibile","Credenziale non valida") -> TravelAuthState.REPAIR_REQUIRED
+    else -> TravelAuthState.RETRY
+}
 class TravelApi(base: String) {
     private val root: String
     init {
@@ -79,7 +86,7 @@ class TravelApi(base: String) {
                 val detail = try {
                     c.errorStream?.use { JSONObject(String(readLimited(it, 4096), Charsets.UTF_8)).optString("detail") }
                 } catch (_: Exception) { null }
-                error("HTTP " + status + if (!detail.isNullOrBlank()) " · " + detail else "")
+                throw TravelHttpException(status,detail)
             }
             return c.inputStream.use { readLimited(it, limit) }
         } finally { c.disconnect() }

@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.1-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.2-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.1-test"
-            RELEASE_NOTES="Lettore PDF dedicato a schermo intero, scorrimento verticale tra pagine, zoom con due dita e pulsanti, rotazione, salvataggio in Download/NextDo, apertura esterna e condivisione su conferma. Supporto online e offline, protezione dell’area personale invariata. Collaudo fisico necessario."
+            test "$ANDROID_VERSION" = "0.2.2-test"
+            RELEASE_NOTES="Lettore PDF dedicato a schermo intero, scorrimento verticale tra pagine, zoom con due dita e pulsanti, rotazione, salvataggio in Download/NextDo, apertura esterna e condivisione su conferma. Supporto online e offline. Accesso Android con autorizzazione già memorizzata: PIN richiesto solo alla prima autorizzazione o se il server la richiede. Distinzione tra problemi di rete e revoca/scadenza. Collaudo fisico necessario."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then

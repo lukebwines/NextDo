@@ -146,6 +146,7 @@ class MainActivity : ComponentActivity() {
     private var error by mutableStateOf("")
     private var connection by mutableStateOf<JSONObject?>(null)
     private var session by mutableStateOf("")
+    private var travelAuthState by mutableStateOf(TravelAuthState.PIN_REQUIRED)
     private var trips by mutableStateOf<List<JSONObject>>(emptyList())
     private var current by mutableStateOf<TripPackage?>(null)
     private var pendingZip by mutableStateOf<Uri?>(null)
@@ -178,22 +179,31 @@ class MainActivity : ComponentActivity() {
     private val authHandler = Handler(Looper.getMainLooper())
     private val autoLock = Runnable { lockLocal() }
     private val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-    private data class ResumeResult(val token:String="",val trips:List<JSONObject> = emptyList(),val error:String="")
+    private data class ResumeResult(val token:String="",val trips:List<JSONObject> = emptyList(),val error:String="",val authState:TravelAuthState=TravelAuthState.PIN_REQUIRED)
     private fun resumeServer(cfg:JSONObject):ResumeResult {
         val remembered=cfg.optString("remember_token")
         if(remembered.isBlank()) return ResumeResult()
         return try {
             val api=TravelApi(cfg.getString("url"))
-            val response=api.obj("/resume",cfg.getString("token"),JSONObject().put("remember_token",remembered))
+            val response=try {
+                api.obj("/resume",cfg.getString("token"),JSONObject().put("remember_token",remembered))
+            } catch(e:TravelHttpException) {
+                val state=resumeFailure(e.status,e.detail)
+                return ResumeResult(error=when(state){
+                    TravelAuthState.PIN_REQUIRED -> "L’autorizzazione del telefono deve essere confermata di nuovo."
+                    TravelAuthState.REPAIR_REQUIRED -> "Dispositivo scaduto o non più autorizzato. Associalo nuovamente dal Web."
+                    else -> "Connessione automatica non riuscita. Riprova senza reinserire il PIN."
+                },authState=state)
+            }
             val s=response.getString("session_token")
-            ResumeResult(s,api.trips(s))
+            ResumeResult(s,api.trips(s),authState=TravelAuthState.CONNECTED)
         } catch(e:Exception) {
-            ResumeResult(error="Connessione automatica non riuscita. "+(e.message?.take(150) ?: "Riprova oppure inserisci il PIN."))
+            ResumeResult(error="Connessione automatica non riuscita. Verifica la rete e riprova.",authState=TravelAuthState.RETRY)
         }
     }
     private fun retryServer() {
         val cfg=connection ?: return
-        task({resumeServer(cfg)}) { r -> session=r.token;trips=r.trips;error=r.error }
+        task({resumeServer(cfg)}) { r -> session=r.token;trips=r.trips;error=r.error;travelAuthState=r.authState }
     }
     private data class DeviceUnlockData(val cfg:JSONObject?,val meta:JSONObject?,val resumed:ResumeResult,val work:JSONObject?)
     private fun finishDeviceUnlock() {
@@ -204,7 +214,7 @@ class MainActivity : ComponentActivity() {
             DeviceUnlockData(cfg,meta,if(cfg!=null)resumeServer(cfg) else ResumeResult(),work)
         }) { (cfg, meta, resumed, work) ->
             workConnection=work
-            connection = cfg; offlineMeta = meta; locked = false; session=resumed.token; trips=resumed.trips; error=resumed.error
+            connection = cfg; offlineMeta = meta; locked = false; session=resumed.token; trips=resumed.trips; error=resumed.error;travelAuthState=resumed.authState
             updateCaptureProtection()
             authHandler.removeCallbacks(autoLock)
             authHandler.postDelayed(autoLock, 300_000L)
@@ -266,7 +276,7 @@ class MainActivity : ComponentActivity() {
         authCancel = null
         authenticating = false
         pending?.cancel()
-        locked = true; busy = false; connection = null; session = ""; trips = emptyList()
+        locked = true; busy = false; connection = null; session = ""; trips = emptyList();travelAuthState=TravelAuthState.PIN_REQUIRED
         workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false
         editor = null; current = null; offlineMeta = null; offline = false; closePdf(); error = ""
         section = "Home"; area=NextDoArea.HOME;workFilter="all";updateCaptureProtection()
@@ -338,14 +348,15 @@ class MainActivity : ComponentActivity() {
             } finally { if (started == epoch) busy = false }
         }
     }
-    private fun connect(base: String, code: String) {
+    private fun connect(base: String, code: String, replacing:Boolean=false) {
         task({
             val a = TravelApi(base)
             val r = a.obj("/pair", data = JSONObject().put("code", code.trim()).put("label", "Android " + android.os.Build.MODEL.take(60)))
             val cfg = JSONObject().put("url", base.trim()).put("token", r.getString("device_token"))
+            if(replacing){vault.remove("offline");vault.remove("offline_meta")}
             vault.write("connection", cfg.toString().toByteArray())
             cfg
-        }) { connection = it }
+        }) { connection = it;travelAuthState=TravelAuthState.PIN_REQUIRED;if(replacing){offlineMeta=null;pendingZip=null;zipScope="";timelineFile=null;timelineScope="";timelineTrip=""} }
     }
     private fun unlockServer(pin: String) {
         val cfg = connection ?: return
@@ -360,7 +371,7 @@ class MainActivity : ComponentActivity() {
                 vault.write("connection",updated.toString().toByteArray())
             }
             Triple(s, api.trips(s),updated)
-        }) { (s, list, updated) -> connection=updated;session = s; trips = list; offline = false }
+        }) { (s, list, updated) -> connection=updated;session = s; trips = list; offline = false;travelAuthState=TravelAuthState.CONNECTED }
     }
     private fun canEdit() = !locked && !offline && session.isNotBlank() && current?.revision?.let { it >= 0 } == true
     private fun importZip() {
@@ -889,6 +900,8 @@ class MainActivity : ComponentActivity() {
         var code by remember { mutableStateOf("") }
         var pin by remember { mutableStateOf("") }
         var erase by remember { mutableStateOf(false) }
+        var repairConfirm by remember { mutableStateOf(false) }
+        var repairCode by remember { mutableStateOf("") }
         val cfg = connection
         Text("Viaggi",fontSize=26.sp,fontWeight=FontWeight.ExtraBold,color=White)
         if(cfg==null) {
@@ -898,10 +911,27 @@ class MainActivity : ComponentActivity() {
                 Action("Associa dispositivo",!busy&&url.isNotBlank()&&code.isNotBlank()) { val c=code;code="";connect(url,c) }
             }
         } else if(session.isBlank()) {
-            TravelCard("Viaggi sincronizzati","Inserisci il PIN NextDo per autorizzare questo telefono. In seguito sarà sufficiente lo sblocco Android, fino alla scadenza o revoca.") {
-                if(cfg.optString("remember_token").isNotBlank()) Action("Riprova connessione automatica") { retryServer() }
-                OutlinedTextField(pin,{pin=it.filter(Char::isDigit).take(6)},label={Text("PIN NextDo")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),singleLine=true)
-                Action("Connetti",!busy&&pin.length==6) { val p=pin;pin="";unlockServer(p) }
+            when(travelAuthState) {
+                TravelAuthState.PIN_REQUIRED -> TravelCard("Autorizza il telefono","Il PIN serve solo per la prima autorizzazione o se quella precedente non è più valida. Dopo basta lo sblocco Android.") {
+                    OutlinedTextField(pin,{pin=it.filter(Char::isDigit).take(6)},label={Text("PIN NextDo")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),singleLine=true)
+                    Action("Autorizza",!busy&&pin.length==6) { val p=pin;pin="";unlockServer(p) }
+                }
+                TravelAuthState.REPAIR_REQUIRED -> TravelCard("Associazione non più valida","Genera un nuovo codice di associazione dal Web. La copia offline già presente resta consultabile finché non la cancelli.") {
+                    OutlinedTextField(code,{code=it},label={Text("Nuovo codice associazione")},singleLine=true,visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
+                    Action("Associa nuovamente",!busy&&code.isNotBlank()) {
+                        val c=code;code=""
+                        // A replacement association may belong to a different account.
+                        // Clear the prior offline copy only after an explicit confirmation.
+                        repairCode=c
+                        repairConfirm=true
+                    }
+                    if(repairConfirm)AlertDialog(onDismissRequest={repairConfirm=false;repairCode=""},title={Text("Rinnova associazione?")},text={Text("La copia offline precedente sarà rimossa dopo la nuova associazione riuscita, per non mescolare account. I viaggi sul server restano invariati.")},
+                        confirmButton={TextButton(onClick={val c=repairCode;repairConfirm=false;repairCode="";connect(cfg.str("url"),c,true)}){Text("Conferma")}},dismissButton={TextButton(onClick={repairConfirm=false;repairCode=""}){Text("Annulla")}})
+                }
+                else -> TravelCard("Connessione automatica","Il telefono è già autorizzato. Non è necessario inserire nuovamente il PIN.") {
+                    Action("Riprova connessione",!busy){retryServer()}
+                    Text("Se sei senza rete, apri la copia offline qui sotto.",color=Muted,fontSize=12.sp)
+                }
             }
         } else {
             Text("I tuoi viaggi",fontSize=26.sp,fontWeight=FontWeight.ExtraBold,color=White)
