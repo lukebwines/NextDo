@@ -71,6 +71,7 @@ def register(app,conn,web_owner,mobile_owner,data_path):
   def delete(item_id:int,req:Request):
    identity=authorize(req,True)
    with conn() as c:return remove(c,owner_id(c,identity),item_id)
+  if prefix!="/api/personal":return
   @app.get(prefix+"/transfers")
   def preview(req:Request):
    identity=authorize(req,False)

@@ -302,3 +302,29 @@ def test_private_sender_configuration_is_validated(tmp_path):
  assert r.status_code==400
  assert c.get("/api/cloudflare-mail/config").json()["private_sender"]==""
  c.close()
+
+def test_confirmed_historical_email_move_preserves_dedup(tmp_path,monkeypatch):
+ c,h=init(tmp_path);secret=setup(c,h)
+ from app import email_intake
+ monkeypatch.setattr(email_intake,"analyze",lambda cfg,src:{"proposals":[{"title":"Synthetic historical deadline","due_date":"2026-12-10","evidence":"Test"}]})
+ raw=sample()
+ assert deliver(c,secret,raw).status_code==202
+ assert c.post("/api/cloudflare-mail/process",headers=h).json()["created"]==1
+ assert len(c.get("/api/tasks").json())==1
+ cfg={"recipient":RECIPIENT,"allowed_sender":SENDER,"private_sender":SENDER,"enabled":True}
+ assert c.post("/api/cloudflare-mail/config",headers=h,json=cfg).status_code==200
+ p="/api/personal"
+ assert c.get(p+"/transfers").status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ rows=c.get(p+"/transfers").json()["mail"]
+ assert len(rows)==1 and rows[0]["reason"] is None
+ r=c.post(p+"/transfers",headers=h,json={"action":"mail","digest":rows[0]["digest"],"confirm":True})
+ assert r.status_code==200,r.text
+ assert r.json()["moved"]==1
+ assert c.get("/api/tasks").json()==[]
+ assert c.get("/api/cloudflare-mail/history").json()==[]
+ assert c.get(p+"/items").json()["items"][0]["title"]=="Synthetic historical deadline"
+ assert deliver(c,secret,raw).json()["duplicate"] is True
+ assert c.post("/api/cloudflare-mail/process",headers=h).json()["created"]==0
+ assert len(c.get(p+"/items").json()["items"])==1
+ c.close()

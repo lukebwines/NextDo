@@ -806,7 +806,7 @@ class MainActivity : ComponentActivity() {
                             !busy,personalAppearance,session.isNotBlank()&&personalAppearance!=null,appearanceError,
                             appearancePhoto!=null&&connection?.let{timelineOwner(it)==appearancePhotoOwner}==true,
                             {savePersonalAppearance(it)},{chooseAppearancePhoto()},{uploadAppearancePhoto()},
-                            privateAgenda,{privateSection=it},privateAlertsEnabled,{togglePrivateAlerts()}){openArea(NextDoArea.TRIPS)}
+                            privateAgenda,{privateSection=it},privateAlertsEnabled,{togglePrivateAlerts()}, {connection?.str("url")?.takeIf{it.isNotBlank()}?.let{launchExternal(it)}}){openArea(NextDoArea.TRIPS)}
                         else PrivateAgendaScreen(privateSection,privateAgenda,personalAppearance,session.isNotBlank()&&!busy,privateProblem,{privateSection=""},{refreshPrivateAgenda()},{id,body->savePrivateItem(id,body)},{id->deletePrivateItem(id)})
                     }
                     area==NextDoArea.SETTINGS -> SettingsLanding()

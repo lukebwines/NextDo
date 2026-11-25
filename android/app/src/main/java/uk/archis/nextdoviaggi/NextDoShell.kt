@@ -138,7 +138,7 @@ internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolea
     }
 }
 @Composable
-internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Boolean,problem:String,photoPending:Boolean,save:(JSONObject)->Unit,choosePhoto:()->Unit,uploadPhoto:()->Unit,items:List<JSONObject>?,openItems:(String)->Unit,alertsEnabled:Boolean,toggleAlerts:()->Unit,openTrips:()->Unit) {
+internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Boolean,problem:String,photoPending:Boolean,save:(JSONObject)->Unit,choosePhoto:()->Unit,uploadPhoto:()->Unit,items:List<JSONObject>?,openItems:(String)->Unit,alertsEnabled:Boolean,toggleAlerts:()->Unit,openTransfers:()->Unit,openTrips:()->Unit) {
     val theme=appearance?.optString("theme","dark")?:"dark"
     val palette=appearance?.optString("palette","ocean")?:"ocean"
     val background=appearance?.optString("background","gradient")?:"gradient"
@@ -199,6 +199,7 @@ internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Bo
             Text("Avvisi riservati anche in background. Controllo indicativo ogni 15 minuti.",color=muted,fontSize=12.sp)
         }
     }
+    TextButton(onClick=openTransfers,enabled=enabled&&connected){Text("Sposta / riclassifica impegni sul web",color=PrivateTeal)}
     for((key,title,icon) in listOf(
         Triple("task","Attività",Icons.Default.Checklist),
         Triple("deadline","Scadenze",Icons.Default.Event),
