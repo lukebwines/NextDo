@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 from argon2.exceptions import VerificationError
 from . import personal_travel_tools as tools
-from . import travel_mobile, travel_timeline
+from . import travel_mobile, travel_timeline, personal_appearance
 
 LIMIT=32*1024*1024
 MAX_EXPANDED=120*1024*1024
@@ -357,6 +357,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   CREATE TABLE IF NOT EXISTS trips(owner TEXT NOT NULL,id TEXT NOT NULL,archive BLOB NOT NULL,title TEXT NOT NULL,start TEXT NOT NULL,end TEXT NOT NULL,revision INTEGER DEFAULT 0,PRIMARY KEY(owner,id));""")
  with db() as c:c.execute("CREATE TABLE IF NOT EXISTS travel_services(owner TEXT NOT NULL,name TEXT NOT NULL,secret TEXT NOT NULL,PRIMARY KEY(owner,name))")
  with db() as c:c.execute("CREATE TABLE IF NOT EXISTS booking_templates(owner TEXT NOT NULL,id TEXT NOT NULL,definition TEXT NOT NULL,PRIMARY KEY(owner,id))")
+ with db() as c:personal_appearance.ensure(c)
  os.chmod(database,0o600)
  # Stable account binding; deleting an account cascades its identity, so reused IDs cannot read old trips.
  with conn() as c:
@@ -379,6 +380,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
    if (owner,session) not in grants:fail("Area personale bloccata",423)
    grants[(owner,session)]=now+300
   return owner
+ app.state.personal_backup_authorize=allowed
  def grant(owner,session):
   with mutex:grants[(owner,session)]=time.monotonic()+300
  def load(c,owner,tid):
@@ -406,7 +408,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   if timeline is None:return r["archive"]
   m,state,files=read_archive(r["archive"])
   return make_archive(m,state,files,timeline)
- travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive,save=save,new_manifest=new_manifest,limit=LIMIT,import_bundle=import_bundle,export_bundle=export_bundle,map_tile=lambda owner,z,x,y:tools.diary_tile(z,x,y,service(owner,"geoapify")))
+ travel_mobile.register(app,db=db,mutex=mutex,conn=conn,allowed=allowed,ph=ph,load=load,read_archive=read_archive,save=save,new_manifest=new_manifest,limit=LIMIT,import_bundle=import_bundle,export_bundle=export_bundle,map_tile=lambda owner,z,x,y:tools.diary_tile(z,x,y,service(owner,"geoapify")),data_path=data_path)
  @app.middleware("http")
  async def private_cache(req:Request,call_next):
   res=await call_next(req)
@@ -454,6 +456,19 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   for row in c.execute("SELECT id,definition FROM booking_templates WHERE owner=? ORDER BY id",(owner,)):
    catalog[row["id"]]=json.loads(row["definition"])
   return list(catalog.values())
+ @app.get("/api/personal/appearance")
+ def get_appearance(req:Request):
+  owner=allowed(req)
+  with db() as c:return personal_appearance.get(c,owner)
+ @app.post("/api/personal/appearance")
+ def save_appearance(req:Request,b:dict):
+  owner=allowed(req,True)
+  with db() as c:return personal_appearance.save(c,owner,b)
+ @app.post("/api/personal/appearance/photo")
+ async def appearance_photo(req:Request,file:UploadFile=File(...)):
+  owner=allowed(req,True)
+  raw=await file.read(5*1024*1024+1)
+  with db() as c:return personal_appearance.save_photo(c,owner,raw)
  @app.get("/api/personal/booking-templates")
  def get_booking_templates(req:Request):
   owner=allowed(req)

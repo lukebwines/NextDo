@@ -13,12 +13,13 @@ def raw_token(value):
  if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}",value):fail(401,"Credenziale non valida")
  return digest(value)
 
-def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit,import_bundle,export_bundle,map_tile):
+def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit,import_bundle,export_bundle,map_tile,data_path):
  with db() as c:
   c.executescript("""CREATE TABLE IF NOT EXISTS mobile_pairings(code_hash TEXT PRIMARY KEY,owner TEXT NOT NULL,expires REAL NOT NULL);
   CREATE TABLE IF NOT EXISTS mobile_devices(id TEXT PRIMARY KEY,owner TEXT NOT NULL,label TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,expires REAL NOT NULL,created REAL NOT NULL,revoked INTEGER DEFAULT 0);
   CREATE TABLE IF NOT EXISTS mobile_sessions(token_hash TEXT PRIMARY KEY,device_id TEXT NOT NULL,expires REAL NOT NULL);
   CREATE TABLE IF NOT EXISTS mobile_trust(device_id TEXT PRIMARY KEY,token_hash TEXT NOT NULL,expires REAL NOT NULL);
+  CREATE TABLE IF NOT EXISTS private_alert_tokens(device_id TEXT PRIMARY KEY,token_hash TEXT UNIQUE NOT NULL);
   """)
  def active(owner):
   with conn() as c:
@@ -40,6 +41,11 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   if not row:fail(401,"Sessione scaduta o dispositivo revocato")
   active(row["owner"])
   return row
+ from . import private_items
+ with conn() as c:private_items.ensure(c)
+ private_items.register(app,conn,allowed,lambda req,write:auth(req)["owner"],data_path)
+ from . import private_alerts
+ private_alerts.register(app,db,conn,auth,active,token,digest,raw_token)
  travel_timeline.register(app,db=db,allowed=allowed,auth=auth,load=load,map_tile=map_tile)
  @app.get('/api/mobile/v1/assistant-link')
  def assistant_pref(req:Request):
@@ -68,6 +74,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
    if not r.rowcount:fail(404,"Dispositivo non trovato")
    c.execute("DELETE FROM mobile_sessions WHERE device_id=?",(device_id,))
    c.execute("DELETE FROM mobile_trust WHERE device_id=?",(device_id,))
+   c.execute("DELETE FROM private_alert_tokens WHERE device_id=?",(device_id,))
   return {"ok":True}
  @app.post("/api/mobile/v1/pair")
  def pair(b:dict):
@@ -126,6 +133,22 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   device=auth(req)
   with db() as c:c.execute("DELETE FROM mobile_sessions WHERE device_id=?",(device["id"],))
   return {"ok":True}
+ @app.get("/api/mobile/v1/appearance")
+ def get_appearance(req:Request):
+  from . import personal_appearance
+  owner=auth(req)["owner"]
+  with db() as c:return personal_appearance.get(c,owner)
+ @app.post("/api/mobile/v1/appearance")
+ def save_appearance(req:Request,b:dict):
+  from . import personal_appearance
+  owner=auth(req)["owner"]
+  with db() as c:return personal_appearance.save(c,owner,b)
+ @app.post("/api/mobile/v1/appearance/photo")
+ def appearance_photo(req:Request,b:dict):
+  from . import personal_appearance
+  owner=auth(req)["owner"]
+  raw=personal_appearance.decode_mobile_photo(b)
+  with db() as c:return personal_appearance.save_photo(c,owner,raw)
  @app.get("/api/mobile/v1/trips")
  def trips(req:Request):
   owner=auth(req)["owner"]

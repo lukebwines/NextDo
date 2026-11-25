@@ -68,6 +68,86 @@ class MainActivity : ComponentActivity() {
     private lateinit var vault: Vault
     private var locked by mutableStateOf(true)
     private var area by mutableStateOf(NextDoArea.HOME)
+    private var personalAppearance by mutableStateOf<JSONObject?>(null)
+    private var appearanceError by mutableStateOf("")
+    private var privateAgenda by mutableStateOf<List<JSONObject>?>(null)
+    private var privateSection by mutableStateOf("")
+    private var privateProblem by mutableStateOf("")
+    private var privateAlertsEnabled by mutableStateOf(false)
+    private fun togglePrivateAlerts(){
+        val cfg=connection
+        val s=session
+        if(privateAlertsEnabled){
+            PrivateAlerts.disable(this);privateAlertsEnabled=false
+            if(cfg!=null&&s.isNotBlank())task({TravelApi(cfg.str("url")).obj("/private-alerts/disable",s,JSONObject())}){}
+        }else{
+            if(!WorkAlerts.permission(this)){if(android.os.Build.VERSION.SDK_INT>=33)notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS);return}
+            if(cfg==null||s.isBlank())return
+            task({
+                val r=TravelApi(cfg.str("url")).obj("/private-alerts/enable",s,JSONObject())
+                PrivateAlerts.enable(this,cfg.str("url"),r.str("token"),r.optDouble("expires").toLong())
+            }){privateAlertsEnabled=PrivateAlerts.enabled(this)}
+        }
+    }
+    private fun refreshPrivateAgenda(){
+        val cfg=connection?:return
+        val s=session
+        if(locked||s.isBlank())return
+        task({TravelApi(cfg.getString("url")).obj("/items",s).arr("items")}){privateAgenda=it;privateProblem=""}
+    }
+    private fun savePrivateItem(id:String,body:JSONObject){
+        val cfg=connection?:return
+        val s=session
+        if(locked||s.isBlank())return
+        task({
+            val api=TravelApi(cfg.getString("url"))
+            api.obj("/items"+if(id.isBlank())"" else "/"+segment(id),s,body)
+            api.obj("/items",s).arr("items")
+        }){privateAgenda=it;privateProblem=""}
+    }
+    private fun deletePrivateItem(id:String){
+        val cfg=connection?:return
+        val s=session
+        if(locked||s.isBlank()||id.isBlank())return
+        task({
+            val api=TravelApi(cfg.getString("url"))
+            api.obj("/items/"+segment(id)+"/delete",s,JSONObject())
+            api.obj("/items",s).arr("items")
+        }){privateAgenda=it;privateProblem=""}
+    }
+    private var appearancePhoto by mutableStateOf<Uri?>(null)
+    private var appearancePhotoOwner=""
+    private val appearancePicker=registerForActivityResult(ActivityResultContracts.GetContent()){uri->
+        appearancePhoto=uri
+    }
+    private fun chooseAppearancePhoto(){
+        val cfg=connection?:return
+        if(locked||session.isBlank()||busy)return
+        appearancePhotoOwner=timelineOwner(cfg);appearancePhoto=null
+        appearancePicker.launch("image/*")
+    }
+    private fun savePersonalAppearance(body:JSONObject){
+        val cfg=connection?:return
+        val s=session
+        if(locked||s.isBlank())return
+        task({TravelApi(cfg.getString("url")).obj("/appearance",s,body)}){personalAppearance=it;appearanceError=""}
+    }
+    private fun uploadAppearancePhoto(){
+        val cfg=connection?:return
+        val uri=appearancePhoto?:return
+        val s=session
+        if(locked||s.isBlank()||appearancePhotoOwner!=timelineOwner(cfg))return
+        task({
+            val raw=contentResolver.openInputStream(uri)?.use { input ->
+                val out=java.io.ByteArrayOutputStream()
+                val buffer=ByteArray(8192)
+                var count=input.read(buffer)
+                while(count!=-1){require(out.size()+count<=5*1024*1024){"Foto oltre 5 MB"};out.write(buffer,0,count);count=input.read(buffer)}
+                out.toByteArray()
+            }?:error("Fotografia non disponibile")
+            TravelApi(cfg.getString("url")).obj("/appearance/photo",s,JSONObject().put("image",Base64.encodeToString(raw,Base64.NO_WRAP)))
+        }){personalAppearance=it;appearancePhoto=null;appearancePhotoOwner="";appearanceError=""}
+    }
     private var workFilter by mutableStateOf("all")
     private var allowWorkScreenshots by mutableStateOf(true)
     private var allowPersonalScreenshots by mutableStateOf(true)
@@ -251,6 +331,8 @@ class MainActivity : ComponentActivity() {
         foreground=true;updateCaptureProtection()
         refreshAlertStatus()
         if(alertsEnabled)WorkAlerts.kick(this)
+        privateAlertsEnabled=PrivateAlerts.enabled(this)
+        if(privateAlertsEnabled)PrivateAlerts.kick(this)
     }
     private fun refreshAlertStatus(){
         alertPermission=WorkAlerts.permission(this)
@@ -277,6 +359,7 @@ class MainActivity : ComponentActivity() {
         authenticating = false
         pending?.cancel()
         locked = true; busy = false; connection = null; session = ""; trips = emptyList();travelAuthState=TravelAuthState.PIN_REQUIRED
+        personalAppearance=null;appearanceError="";privateAgenda=null;privateSection="";privateProblem=""
         workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false
         editor = null; current = null; offlineMeta = null; offline = false; closePdf(); error = ""
         section = "Home"; area=NextDoArea.HOME;workFilter="all";updateCaptureProtection()
@@ -353,7 +436,7 @@ class MainActivity : ComponentActivity() {
             val a = TravelApi(base)
             val r = a.obj("/pair", data = JSONObject().put("code", code.trim()).put("label", "Android " + android.os.Build.MODEL.take(60)))
             val cfg = JSONObject().put("url", base.trim()).put("token", r.getString("device_token"))
-            if(replacing){vault.remove("offline");vault.remove("offline_meta")}
+            if(replacing){PrivateAlerts.disable(this);vault.remove("offline");vault.remove("offline_meta")}
             vault.write("connection", cfg.toString().toByteArray())
             cfg
         }) { connection = it;travelAuthState=TravelAuthState.PIN_REQUIRED;if(replacing){offlineMeta=null;pendingZip=null;zipScope="";timelineFile=null;timelineScope="";timelineTrip=""} }
@@ -445,6 +528,7 @@ class MainActivity : ComponentActivity() {
         task({ TripPackage.parse(vault.read("offline")) }) { openTrip(it, true) }
     }
     private fun forget() {
+        PrivateAlerts.disable(this);privateAlertsEnabled=false
         timelineFile=null;timelineTrip="";timelineScope=""
         pendingZip=null;zipScope=""
         task({ vault.clear() }) { lockLocal() }
@@ -598,6 +682,7 @@ class MainActivity : ComponentActivity() {
         if(locked || busy) return
         closePdf(); current=null; editor=null; offline=false; section="Home"; error=""
         area=next
+        if(next!=NextDoArea.PERSONAL)privateSection=""
         if(next==NextDoArea.WORK)workFilter="all"
         workDetail=null;updateCaptureProtection()
     }
@@ -607,10 +692,36 @@ class MainActivity : ComponentActivity() {
             pdf!=null -> closePdf()
             current!=null -> openArea(NextDoArea.TRIPS)
             area==NextDoArea.TRIPS -> openArea(NextDoArea.PERSONAL)
+            area==NextDoArea.PERSONAL&&privateSection.isNotBlank() -> {privateSection=""}
             area!=NextDoArea.HOME -> openArea(NextDoArea.HOME)
         }
     }
     @Composable private fun App() {
+        LaunchedEffect(locked,area,session){
+            if(!locked&&area==NextDoArea.PERSONAL&&session.isNotBlank()){
+                val cfg=connection
+                val s=session
+                val started=epoch
+                if(cfg!=null)try{
+                    val values=withContext(Dispatchers.IO){TravelApi(cfg.getString("url")).obj("/items",s).arr("items")}
+                    if(started==epoch&&!locked&&session==s){privateAgenda=values;privateProblem=""}
+                }catch(e:CancellationException){throw e}catch(_:Exception){if(started==epoch&&!locked){privateAgenda=null;privateProblem="Agenda personale non disponibile"}}
+            }
+        }
+        LaunchedEffect(locked,area,session,connection){
+            if(!locked&&area==NextDoArea.PERSONAL&&session.isNotBlank()){
+                val cfg=connection
+                val s=session
+                val started=epoch
+                if(cfg!=null){
+                    try {
+                        val pref=withContext(Dispatchers.IO){TravelApi(cfg.getString("url")).obj("/appearance",s)}
+                        if(started==epoch&&!locked&&session==s){personalAppearance=pref;appearanceError=""}
+                    }catch(e:CancellationException){throw e}
+                    catch(_:Exception){if(started==epoch&&!locked){appearanceError="Personalizzazione non disponibile. Verifica il collegamento a NextDo."}}
+                }
+            }
+        }
         LaunchedEffect(locked,area,workConnection){
             if(!locked&&(area==NextDoArea.HOME||area==NextDoArea.WORK)&&workConnection!=null){
                 while(true){refreshWork();kotlinx.coroutines.delay(30000)}
@@ -690,7 +801,14 @@ class MainActivity : ComponentActivity() {
                     }
                     area==NextDoArea.TRIPS -> ConnectionScreen()
                     area==NextDoArea.WORK -> WorkScreen(workConnection!=null,workAgenda,workBusy,workError,connection?.str("url").orEmpty(),{url,code->pairWork(url,code)},{refreshWork()},{id->loadWorkDetail(id)},{disconnectWork()},{id,rev->ackWork(id,rev)},workFilter)
-                    area==NextDoArea.PERSONAL -> PersonalLanding(!busy){openArea(NextDoArea.TRIPS)}
+                    area==NextDoArea.PERSONAL -> {
+                        if(privateSection.isBlank())PersonalLanding(
+                            !busy,personalAppearance,session.isNotBlank()&&personalAppearance!=null,appearanceError,
+                            appearancePhoto!=null&&connection?.let{timelineOwner(it)==appearancePhotoOwner}==true,
+                            {savePersonalAppearance(it)},{chooseAppearancePhoto()},{uploadAppearancePhoto()},
+                            privateAgenda,{privateSection=it},privateAlertsEnabled,{togglePrivateAlerts()}, {connection?.str("url")?.takeIf{it.isNotBlank()}?.let{launchExternal(it)}}){openArea(NextDoArea.TRIPS)}
+                        else PrivateAgendaScreen(privateSection,privateAgenda,personalAppearance,session.isNotBlank()&&!busy,privateProblem,{privateSection=""},{refreshPrivateAgenda()},{id,body->savePrivateItem(id,body)},{id->deletePrivateItem(id)})
+                    }
                     area==NextDoArea.SETTINGS -> SettingsLanding()
                     else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy,workError,{filter->openArea(NextDoArea.WORK);workFilter=filter},{id->loadWorkDetail(id)},{refreshWork()}){openArea(it)}
                 }

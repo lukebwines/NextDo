@@ -50,3 +50,22 @@ def test_import_is_admin_only(tmp_path):
  assert c.post('/api/login',headers=h,json={'username':'second','password':'passphrase at least 12'}).status_code==200
  assert upload(c,h,b'not zip').status_code==403
  c.close()
+
+def test_private_agenda_backup_requires_unlock_and_preserves_identity(tmp_path):
+ c,h,creds=client(tmp_path)
+ old=c.get('/api/backup').content
+ p='/api/personal'
+ assert c.post(p+'/unlock',headers=h,json={'pin':'123456','confirm':'123456'}).status_code==200
+ assert c.post(p+'/items',headers=h,json={'title':'Private backup item'}).status_code==200
+ saved=c.get('/api/backup')
+ assert saved.status_code==200,saved.text[:200]
+ assert upload(c,h,old).status_code==409
+ assert c.post(p+'/lock',headers=h).status_code==200
+ assert c.get('/api/backup').status_code==423
+ assert upload(c,h,saved.content).status_code==423
+ assert c.post(p+'/unlock',headers=h,json={'pin':'123456'}).status_code==200
+ assert upload(c,h,saved.content).status_code==200
+ assert c.post('/api/login',headers=h,json=creds).status_code==200
+ assert c.post(p+'/unlock',headers=h,json={'pin':'123456'}).status_code==200
+ assert c.get(p+'/items').json()['items'][0]['title']=='Private backup item'
+ c.close()

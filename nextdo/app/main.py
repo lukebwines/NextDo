@@ -178,7 +178,7 @@ def home():
 @app.get('/api/build')
 def build_details(req:Request):
  user(req)
- return {'version':'0.2.9-test','assets':asset_versions()}
+ return {'version':'0.2.10-test','assets':asset_versions()}
 @app.get('/api/setup')
 def setup():
  with conn() as c:count=c.execute('SELECT COUNT(*) FROM users').fetchone()[0]
@@ -711,6 +711,8 @@ def backup(req:Request):
  with tempfile.TemporaryDirectory() as tmp:
   safe=Path(tmp)/'database.sqlite3'
   with conn() as c:
+   from . import private_backup
+   private_backup.authorize(c,app,req,u['id'])
    dest=sqlite3.connect(safe)
    try:c.backup(dest)
    finally:dest.close()

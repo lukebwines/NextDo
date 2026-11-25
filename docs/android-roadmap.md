@@ -60,3 +60,27 @@ Server invariato, impostazioni locali per durata/ripetizione/suono/vibrazione/sc
 
 ## PDF multipli — Web 0.2.7-test / Android 0.2.3-test
 Il PDF storico rimane associato. Altri PDF possono essere caricati nell'archivio e collegati alla stessa prenotazione, con etichette personalizzabili. Gestione Web, consultazione Android online e nelle copie offline aggiornate. Scollegamento senza cancellazione del file; sostituzione esplicita con conferma. Nessuna migrazione distruttiva. Sincronizzazione automatica offline e modifica allegati in Android restano successive. Test e collaudo da verificare.
+
+## Area personale — accordo del 25 novembre 2026
+
+- Dashboard professionale invariata all'apertura; nessun dettaglio di attività private.
+- Dashboard personale semplificata: Attività, Scadenze, Appuntamenti, Viaggi. Conservare tutte le funzioni Viaggi.
+- Aspetto indipendente: tema chiaro/scuro, quattro palette, tinta unita/sfumatura/fotografia, ripristino. Preferenze sul server privato per profilo, accesso protetto anche Android; nessun invio a servizi esterni. Prima fase in sviluppo, collaudo necessario.
+- Fase funzionale ancora da sviluppare: instradamento da mittenti SMTP autorizzati configurabili (nessun indirizzo reale nel repository), separazione effettiva di API, dati, notifiche, esportazioni e permessi; stato Da verificare; riclassificazione controllata dei record storici senza duplicazioni; spostamento esplicito tra aree. Non confondere scope=personal (attività professionale individuale) con area privata. Nessuna migrazione automatica prima del collaudo.
+
+### Avanzamento ramo di sviluppo `personal-appearance`
+- Agenda privata su tabella distinta, accesso Web dopo sblocco e API Android con sessione personale; creazione, modifica, eliminazione e completamento su entrambe le interfacce. Tre categorie (attività, scadenza, appuntamento); data e ora non inventate.
+- Configurazione Cloudflare: selezione dei mittenti personali fra quelli già autorizzati; destinazione fissata al momento dell'acquisizione, legata all'identità personale stabile; impronte separate dal Professionale. Nessun indirizzo reale nel codice. Gli altri mittenti autorizzati restano professionali. Le email personali non compaiono nel registro professionale; il testo dei casi non classificati è disponibile nella descrizione dell'impegno privato. Le proposte ricevute restano Da verificare.
+- Non ancora completati: spostamento tra aree e migrazione guidata dello storico, notifiche personali/ICS separate, verifica backup/ripristino e cancellazione account, collaudo completo Web e Samsung. Gli impegni storici non vengono modificati automaticamente. Non rilasciare finché i controlli e i requisiti di isolamento non siano verificati.
+
+### Trasferimento controllato (bozza)
+Trasferimenti individuali semplici e riclassificazione per gruppo di email già ricevute, con conferma e transazione unica. Blocchi espliciti per collegamenti, metadati non compatibili, duplicati, invii ICS in corso, mittenti misti o attività mancanti. Non ritira invii/copie già esportati. Web: anteprima nell'area protetta Personale; Android: collegamento al web; gli endpoint di trasferimento richiedono la sessione web protetta, senza estendere il token Viaggi ai dati professionali. Gli impegni privati importati da email non sono ancora trasferibili in Professionale per preservarne la provenienza.
+
+### Backup gestionale privato (bozza)
+Il backup ZIP del gestionale include l'agenda privata: esportazione e ripristino richiedono lo sblocco personale se sono presenti dati privati e sono consentiti solo all'amministratore che ne è l'unico proprietario. Il ripristino rifiuta archivi che perdono identità personali esistenti. Non comprende il database Viaggi, le preferenze grafiche o le chiavi locali: per il backup completo usare Home Assistant. Nessun ripristino reale eseguito.
+
+### Avvisi personali (bozza)
+Android: opt-in, canale e token separati, controllo WorkManager ogni 15 minuti indicativi e all'apertura, contenuto generico e impronte opache. Avvisi review/urgenti e finestre 24h, 1h/15min per appuntamenti con ora, scadenza. Non è un allarme esatto e non usa FCM. Web: riepilogo promemoria in area privata. Nessun ICS personale automatico. Collaudo fisico e CI necessari.
+
+## Rilascio di prova — Web 0.2.10-test / Android 0.2.5-test (versionCode 20)
+Aggiornare prima l'add-on, poi l'APK firmata senza disinstallarla. Prima dell'aggiornamento effettuare un backup completo di NextDo in Home Assistant (database, archivio Viaggi, allegati, chiavi e configurazioni). Riferimento sorgente precedente: ramo rollback-before-personal-0.2.10; APK precedente android-v0.2.4-test. Il downgrade Android non è normalmente consentito senza disinstallazione: preferire una build correttiva firmata con versionCode superiore; per il ripristino server usare il backup completo precedente, tenendo conto dei dati creati dopo. Nessuna migrazione storica automatica. Configurare i mittenti personali tra quelli autorizzati in impostazioni email, poi testare un inoltro da ciascuna area. Verificare sul telefono tema, foto, agenda, notifiche e Viaggi; gli avvisi personali non sono esatti e non inviano ICS automaticamente. Trasferimenti sul web per elementi compatibili; provenienza delle email private verso Professionale non ancora supportata.
