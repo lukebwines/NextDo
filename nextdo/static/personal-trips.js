@@ -1,6 +1,6 @@
 /* Private, native NextDo view. No localStorage, no work task integration. */
 const NextDoPersonal=(()=>{
- let generation=0,timer=null,main=null,trip=null,selected='',tab='panoramica',busy=false,section='home';
+ let generation=0,timer=null,main=null,trip=null,selected='',tab='panoramica',busy=false,section='home',templates=[];
  const path='/personal';
  const clone=x=>JSON.parse(JSON.stringify(x));
  const uid=()=>crypto.getRandomValues(new Uint32Array(2)).join('-');
@@ -12,7 +12,7 @@ const NextDoPersonal=(()=>{
  const lines=a=>el('div',{},(a||[]).map(([k,v])=>el('p',{},[node('strong','',k+': '),String(v)])));
  const report=e=>{msg(e.message,true);if(e.message.includes('bloccata')){trip=null;render(main)}};
  function resetTimer(){clearTimeout(timer);timer=setTimeout(()=>{lock();if(S.view==='personal'&&main?.isConnected)render(main)},300000)}
- async function lock(){geoKey='';generation++;clearTimeout(timer);trip=null;selected='';section='home';busy=false;document.querySelectorAll('[data-personal-modal]').forEach(x=>x.remove());if(main?.isConnected)main.querySelector('#personal-content')?.replaceChildren();try{await api(path+'/lock',{method:'POST'})}catch{}}
+ async function lock(){geoKey='';generation++;clearTimeout(timer);trip=null;selected='';section='home';templates=[];busy=false;document.querySelectorAll('[data-personal-modal]').forEach(x=>x.remove());if(main?.isConnected)main.querySelector('#personal-content')?.replaceChildren();try{await api(path+'/lock',{method:'POST'})}catch{}}
  async function render(m){
   main=m;const token=++generation;let root=main.querySelector('#personal-content');if(!root){root=el('div',{id:'personal-content'});main.append(root)}root.replaceChildren(paragraph('Caricamento…'));
   try{
@@ -26,7 +26,7 @@ const NextDoPersonal=(()=>{
  }
  async function overview(root,token){
   const list=await api(path+'/trips');if(token!==generation||!root.isConnected)return;
-  if(section==='trips'){travelOverview(root,token,list);return}
+  if(section==='trips'){const catalog=await api(path+'/booking-templates');if(token!==generation||!root.isConnected)return;templates=catalog;travelOverview(root,token,list);return}
   root.classList.remove('travel-shell');root.classList.add('personal-hub-shell');
   const openTrips=()=>{section='trips';render(main)};
   const hubCard=(title,subtitle,icon,available=false)=>{const head=el('div',{class:'personal-hub-card-head'},[
@@ -60,7 +60,7 @@ const NextDoPersonal=(()=>{
   const lockNow=async()=>{await lock();render(main)};
   const top=el('div',{class:'travel-library-top'},[
    el('div',{class:'travel-breadcrumb'},[btn('← Area personale',home,'small'),...(trip?[btn('Tutti i viaggi',back,'small')]:[])]),
-   el('div',{class:'travel-library-tools'},[btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',lockNow,'small')])
+   el('div',{class:'travel-library-tools'},[btn('Tipologie',templateManager,'small'),btn('Servizi Viaggi',servicesEditor,'small'),btn('App Android',mobileEditor,'small'),btn('Blocca',lockNow,'small')])
   ]);
   const file=el('input',{type:'file',accept:'.zip',class:'field'});
   const importBtn=btn('Importa ZIP',async()=>{if(!file.files[0])return msg('Seleziona un archivio ZIP',true);importBtn.disabled=true;const data=new FormData();data.append('file',file.files[0]);try{const r=await api(path+'/trips/import',{method:'POST',body:data});if(token!==generation)return;await load(r.id);msg('Importato: '+r.bookings+' prenotazioni, '+r.days+' giornate, '+r.pdfs+' PDF')}catch(e){report(e)}finally{importBtn.disabled=false}},'primary');
@@ -115,12 +115,22 @@ const NextDoPersonal=(()=>{
  const fieldlist=(obj,spec)=>spec.map(([k,l,t])=>[k,l,obj[k]||'',t]);
  const pairsText=a=>(a||[]).map(x=>x.join(' | ')).join('\n');
  const readPairs=s=>s.split('\n').filter(x=>x.trim()).map(x=>{const n=x.indexOf('|');return n<0?[x.trim(),'']:[x.slice(0,n).trim(),x.slice(n+1).trim()]});
- const bookingTypes=[['flight','Volo'],['hotel','Hotel'],['car','Auto a noleggio'],['train','Treno'],['attraction','Attrazione'],['restaurant','Ristorante'],['other','Altro']];
- const fieldTemplates={flight:['Compagnia','Numero volo','Terminal','Check-in'],hotel:['Check-in','Check-out','Camera'],car:['Società','Ritiro','Riconsegna','Categoria'],train:['Numero treno','Carrozza','Posto'],attraction:['Orario','Biglietto'],restaurant:['Orario','Persone'],other:[]};
- const roleTemplates={flight:['Partenza','Scalo','Arrivo'],hotel:['Alloggio'],car:['Ritiro','Riconsegna'],train:['Partenza','Fermata','Arrivo'],attraction:['Attrazione'],restaurant:['Ristorante'],other:['Tappa']};
+ const builtInIds=new Set(["flight","hotel","car","train","attraction","restaurant","insurance","parking","esim","other"]);
+ const iconChoices=[['plane','Aereo'],['hotel','Hotel'],['car','Auto'],['train','Treno'],['ticket','Biglietto'],['restaurant','Ristorante'],['shield','Protezione'],['parking','Parcheggio'],['phone','Telefono'],['folder','Cartella'],['calendar','Calendario'],['note','Nota'],['bell','Promemoria']];
+ const customIcons={hotel:['M3 18v-9M21 18v-6a3 3 0 0 0-3-3H8v9M3 15h18M5 9h3v6'],car:['M5 17H3V12l3-5h12l3 5v5h-2M5 12h14M5 17h14M5 17v2M19 17v2'],train:['M7 4h10a2 2 0 0 1 2 2v11H5V6a2 2 0 0 1 2-2ZM5 11h14M9 20l-2 2M15 20l2 2'],ticket:['M3 7h18v4a2 2 0 0 0 0 4v2H3v-2a2 2 0 0 0 0-4ZM15 7v2M15 11v2M15 15v2'],restaurant:['M5 3v7a3 3 0 0 0 6 0V3M8 3v18M19 3c-4 3-4 10 0 10v8M19 3v10'],shield:['M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6ZM8 12l3 3 5-6'],parking:['M4 3h16v18H4ZM9 17V7h4a3 3 0 0 1 0 6H9'],phone:['M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2ZM10 18h4']};
+ function bookingIcon(name){
+  if(!customIcons[name])return ico(iconChoices.some(([k])=>k===name)?name:'folder');
+  const s=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  for(const [k,v] of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.8','stroke-linecap':'round','stroke-linejoin':'round',class:'ico','aria-hidden':'true'}))s.setAttribute(k,v);
+  for(const d of customIcons[name]){const p=document.createElementNS(s.namespaceURI,'path');p.setAttribute('d',d);s.append(p)}return s;
+ }
  function bookingKind(b){
-  if(bookingTypes.some(([k])=>k===b.kind))return b.kind;
+  if(b.kind&&b.kind!=='other')return b.kind;
   const v=String(b.type||'').toLowerCase();
+  const match=templates.find(t=>t.id!=='other'&&t.label.toLowerCase()===v.trim());if(match)return match.id;
+  if(/assicurazion|polizza|insurance/.test(v))return 'insurance';
+  if(/parcheggio|parking/.test(v))return 'parking';
+  if(/esim|e-sim|connettivit/.test(v))return 'esim';
   if(/vol[io]|flight|aere/.test(v))return 'flight';
   if(/hotel|alloggio|accommodation|albergo/.test(v))return 'hotel';
   if(/auto|car rental|noleggio/.test(v))return 'car';
@@ -129,17 +139,71 @@ const NextDoPersonal=(()=>{
   if(/ristorant|restaurant/.test(v))return 'restaurant';
   return 'other';
  }
+ function bookingTemplate(b){
+  const id=bookingKind(b),found=templates.find(t=>t.id===id);
+  if(found)return found;
+  return {id,label:b.template_label||b.type||id,icon:b.template_icon||'folder',fields:[],roles:['Tappa']};
+ }
+ function templateManager(){
+  const {box,back}=modal('Tipologie di prenotazione');back.setAttribute('data-personal-modal','');
+  const token=generation,list=el('div',{class:'travel-template-list'});
+  function redraw(){
+   list.replaceChildren(...templates.map(t=>el('div',{class:'travel-template-row'},[
+    el('span',{class:'travel-booking-icon'},[bookingIcon(t.icon)]),
+    el('div',{class:'travel-template-copy'},[node('strong','',t.label),paragraph(t.fields.length+' campi specifici'+(builtInIds.has(t.id)?' · Predefinita':''))]),
+    btn('Modifica',()=>editTemplate(t),'small'),btn(builtInIds.has(t.id)?'Ripristina':'Rimuovi',async()=>{
+     if(!confirm(builtInIds.has(t.id)?'Ripristinare il modello predefinito?':'Rimuovere il modello dal catalogo? Le prenotazioni salvate rimangono inalterate.'))return;
+     try{const result=await api(path+'/booking-templates/'+encodeURIComponent(t.id),{method:'DELETE'});if(token!==generation||!back.isConnected)return;templates=result;redraw();msg('Catalogo aggiornato')}catch(e){report(e)}
+    },'small')
+   ])));
+  }
+  function editTemplate(t={}){
+   const {box:editorBox,back:editorBack}=modal(t.id?'Modifica tipologia':'Nuova tipologia');editorBack.setAttribute('data-personal-modal','');
+   const label=input('label','Es. Trasferimento privato',t.label||'');
+   const icon=select('icon',iconChoices,t.icon||'folder');
+   const fields=el('textarea',{class:'field',rows:'6',value:(t.fields||[]).join('\n')});
+   const roles=el('textarea',{class:'field',rows:'3',value:(t.roles||[]).join('\n')});
+   const parse=v=>v.split('\n').map(x=>x.trim()).filter(Boolean);
+   const submit=btn('Salva tipologia',async()=>{
+    if(submit.disabled)return;submit.disabled=true;
+    try{const result=await api(path+'/booking-templates',{method:'POST',body:JSON.stringify({id:t.id||'',label:label.value,icon:icon.value,fields:parse(fields.value),roles:parse(roles.value)})});if(token!==generation||!editorBack.isConnected)return;templates=result;editorBack.remove();redraw();msg('Tipologia salvata')}catch(e){report(e)}finally{submit.disabled=false}
+   },'primary');
+   editorBox.append(paragraph('Il modello vale per tutti i tuoi viaggi. I campi già salvati nelle prenotazioni non vengono modificati.'),field('Nome tipologia',label),field('Icona',icon),field('Campi specifici · uno per riga',fields),field('Ruoli dei luoghi (facoltativi) · uno per riga',roles),toolbar(btn('Annulla',()=>editorBack.remove(),'small'),submit));
+  }
+  box.append(paragraph('Crea, modifica e riutilizza le tipologie in tutti i tuoi viaggi. Nessuna nuova sezione e nessuna modifica al codice.'),btn('+ Nuova tipologia',()=>editTemplate(),'primary'),list,btn('Chiudi',()=>{back.remove();render(main)},'small'));redraw();
+ }
  function bookingEdit(b,index){
   const {box,back}=modal('Prenotazione');back.setAttribute('data-personal-modal','');
-  const kind=select('kind',bookingTypes,bookingKind(b));
-  const spec=[['type','Categoria originale / personalizzata'],['title','Titolo'],['ref','Riferimento'],['date','Data / periodo'],['status','Stato'],['place','Luogo originale (testo)'],['price','Prezzo'],['map','Link mappa originale HTTPS'],['source','Link fonte HTTPS'],['extraLink','Link aggiuntivo HTTPS'],['extraLabel','Etichetta link'],['doc','Nome PDF già caricato']];
+  const initial=bookingTemplate(b),choices=templates.map(t=>[t.id,t.label]);
+  if(!choices.some(([id])=>id===initial.id))choices.push([initial.id,initial.label+' (modello non presente)']);
+  const kind=select('kind',choices,initial.id);
+  const model=()=>templates.find(t=>t.id===kind.value)||initial;
+  const spec=[['type','Categoria originale / personalizzata'],['title','Titolo'],['ref','Riferimento'],['date','Data / periodo'],['status','Stato'],['place','Luogo originale (testo)'],['price','Prezzo'],['map','Link mappa originale HTTPS'],['source','Link fonte HTTPS'],['extraLink','Link aggiuntivo HTTPS'],['extraLabel','Etichetta link']];
   const form=el('form',{class:'formgrid'},[field('Tipologia',kind)]),controls={};
   for(const [k,label] of spec){const c=input(k,'',b[k]||'');controls[k]=c;form.append(field(label,c))}
+  const docs=allDocs(trip.manifest);
+  controls.doc=select('doc',[['','Nessun PDF'],...[...docs].map(([name,title])=>[name,title+' · '+name])],b.doc||'');
+  form.append(field('PDF già caricato in Documenti',controls.doc));
   const details=el('textarea',{class:'field',rows:'4',value:pairsText(b.lines)});
-  const extra=el('textarea',{class:'field',rows:'5',value:pairsText(b.fields)});
-  const insert=btn('Inserisci campi del modello',()=>{const pairs=readPairs(extra.value),known=new Set(pairs.map(x=>x[0]));for(const k of fieldTemplates[kind.value])if(!known.has(k))pairs.push([k,'']);extra.value=pairsText(pairs)},'small');
-  form.append(field('Dettagli originali (etichetta | valore)',details),field('Campi specifici e personalizzati',extra),insert,el('div',{class:'actions full'},[btn('Annulla',()=>back.remove()),el('button',{type:'submit',class:'btn primary',text:'Salva'})]));
-  form.addEventListener('submit',async e=>{e.preventDefault();if(busy)return;busy=true;try{const v=Object.fromEntries(Object.entries(controls).map(([k,c])=>[k,c.value]));if(!v.title.trim())throw Error('Inserire un titolo');const n={...b,...v,kind:kind.value,type:v.type||bookingTypes.find(x=>x[0]===kind.value)[1],id:b.id||'booking-'+uid(),lines:readPairs(details.value),fields:readPairs(extra.value)};await save(t=>{if(index<0)t.manifest.bookings.push(n);else t.manifest.bookings[index]=n});back.remove()}catch(e){report(e)}finally{busy=false}});
+  const specific=el('div',{class:'full travel-booking-fields'}),rows=el('div',{class:'travel-booking-field-grid'}),entries=[];
+  function addRow(label='',value=''){
+   const name=input('label','Nome campo',label),val=input('value','Valore',value),item=el('div',{class:'travel-booking-field-row'},[name,val]);
+   name.setAttribute('aria-label','Nome campo specifico');val.setAttribute('aria-label','Valore '+(label||'campo specifico'));
+   const entry={name,val,item};entries.push(entry);
+   item.append(btn('×',()=>{entries.splice(entries.indexOf(entry),1);item.remove()},'small'));rows.append(item);
+  }
+  function insertFields(){const known=new Set(entries.map(x=>x.name.value.trim().toLowerCase()));for(const k of model().fields||[])if(!known.has(k.toLowerCase())){addRow(k);known.add(k.toLowerCase())}}
+  for(const [k,v] of b.fields||[])addRow(k,v);
+  kind.addEventListener('change',insertFields);insertFields();
+  specific.append(node('h3','','Campi specifici e personalizzati'),paragraph('I campi del modello sono suggeriti; puoi aggiungerne o rimuoverne senza alterare il catalogo.'),rows,toolbar(btn('+ Campo libero',()=>addRow(),'small'),btn('Ripristina campi del modello',insertFields,'small')));
+  form.append(field('Dettagli originali (etichetta | valore)',details),specific,el('div',{class:'actions full'},[btn('Annulla',()=>back.remove()),el('button',{type:'submit',class:'btn primary',text:'Salva'})]));
+  form.addEventListener('submit',async e=>{e.preventDefault();if(busy)return;busy=true;try{
+   const v=Object.fromEntries(Object.entries(controls).map(([k,c])=>[k,c.value]));if(!v.title.trim())throw Error('Inserire un titolo');
+   const fields=entries.filter(x=>x.name.value.trim()||x.val.value.trim()).map(x=>[x.name.value.trim(),x.val.value]);
+   if(fields.some(([k])=>!k))throw Error('Inserire il nome di tutti i campi');
+   const t=model(),n={...b,...v,kind:kind.value,type:v.type||t.label,template_label:t.label,template_icon:t.icon,id:b.id||'booking-'+uid(),lines:readPairs(details.value),fields};
+   await save(t=>{if(index<0)t.manifest.bookings.push(n);else t.manifest.bookings[index]=n});back.remove()
+  }catch(e){report(e)}finally{busy=false}});
   box.append(form);
  }
  function guideEdit(g,index){
@@ -214,7 +278,7 @@ const NextDoPersonal=(()=>{
  }
  function geoEditor(b,index){
   const {box,back}=modal('Luoghi della prenotazione');back.setAttribute('data-personal-modal','');
-  const roles=roleTemplates[bookingKind(b)],draft=clone(b.locations||[]);
+  const roles=bookingTemplate(b).roles.length?bookingTemplate(b).roles:['Tappa'],draft=clone(b.locations||[]);
   const list=el('div');const repaint=()=>{list.replaceChildren();for(const [i,p] of draft.entries())list.append(card(p.role+' · '+p.label,locationLine(p),toolbar(btn('Modifica',()=>placeEditor(p,roles,async v=>{draft[i]=v;repaint()}),'small'),btn('↑',()=>{if(i>0){[draft[i-1],draft[i]]=[draft[i],draft[i-1]];repaint()}},'small'),btn('↓',()=>{if(i<draft.length-1){[draft[i+1],draft[i]]=[draft[i],draft[i+1]];repaint()}},'small'),btn('Rimuovi',()=>{draft.splice(i,1);repaint()},'small'))));};
   box.append(paragraph('Dati precedenti conservati: '+(b.place||'nessun luogo originale')),paragraph('Aggiungi partenza, scali, arrivo, ritiro e riconsegna o qualsiasi altro luogo. Salva l’elenco solo dopo averlo controllato.'),list,toolbar(...roles.map(r=>btn('+ '+r,()=>placeEditor({role:r},roles,async v=>{draft.push(v);repaint()}),'small')),btn('+ Luogo libero',()=>placeEditor({},roles,async v=>{draft.push(v);repaint()}),'small')));
   if(b.place&&(!draft.length))box.append(btn('Riprendi luogo originale',()=>placeEditor({role:roles[0],label:b.place,address:b.place,...(typeof b.latitude==='number'&&typeof b.longitude==='number'?{lat:b.latitude,lon:b.longitude,map:b.map,source:b.geo_source}:{})},roles,async v=>{draft.push(v);repaint()}),'small'));
@@ -308,6 +372,8 @@ const NextDoPersonal=(()=>{
   const header=el('nav',{class:'travel-tabs'},[...[['panoramica','Panoramica'],['giornata','Itinerario'],['prenotazioni','Prenotazioni'],['guide','Guide e GPS'],['mappa','Mappa'],['timeline','Diario di bordo'],['spese','Spese'],['documenti','Documenti']].map(([k,l])=>btn(l,()=>switchTab(k),tab===k?'primary':'small')),el('a',{class:'btn small',href:'api/personal/trips/'+encodeURIComponent(tr.id)+'/export',download:'',text:'Esporta ZIP'})]);
   root.append(header);
   if(tab==='panoramica'){
+   const policies=m.bookings.filter(b=>bookingKind(b)==='insurance');
+   if(policies.length)root.append(el('section',{class:'travel-insurance-quick'},[el('span',{class:'travel-booking-icon'},[bookingIcon('shield')]),el('div',{class:'travel-template-copy'},[node('strong','','Assicurazione viaggio'),paragraph('Polizze e contatti di assistenza a portata di mano')]),...policies.map(b=>toolbar(doc(b.doc,'Apri polizza PDF'),btn('Apri '+b.title,()=>switchTab('prenotazioni'),'small')))]));
    const all=m.days.flatMap(d=>d.checks),checked=Object.values(st.checks).reduce((a,x)=>a+x.length,0),next=m.days.find(d=>d.date>=today)||m.days[0];
    root.append(el('div',{class:'travel-metrics'},[[m.days.length,'Giornate','giornata'],[m.bookings.length,'Prenotazioni','prenotazioni'],[allDocs(m).size,'Documenti','documenti'],[checked+'/'+all.length,'Checklist','giornata']].map(([n,l,k])=>el('button',{class:'travel-metric',onclick:()=>switchTab(k)},[node('strong','',String(n)),node('span','',l)]))));
    root.append(el('div',{class:'travel-grid'},[card('Prossima tappa',paragraph(next?dayFmt(next.date)+' · '+[next.place,next.headline].filter(Boolean).join(' — '):'Da pianificare'),paragraph(next?.description),btn('Apri programma',()=>{selected=next?.date;switchTab('giornata')},'primary')),card('Organizza in pochi passaggi',paragraph('Parti da una conferma di prenotazione, da un PDF o da un testo.'),toolbar(btn('Acquisisci con AI',aiEditor,'primary'),btn('+ Prenotazione',()=>bookingEdit({},-1),'small')),btn('Aggiungi spesa',()=>expenseEditor(),'small')),card('Guide per il viaggio',...m.guides.slice(0,4).map(g=>el('div',{class:'travel-mini'},[node('strong','',g.title),doc(g.doc,'PDF')])),btn('Tutte le guide',()=>switchTab('guide'),'small')),card('Prenotazioni',...m.bookings.slice(0,4).map(b=>el('div',{class:'travel-mini'},[node('strong','',b.title),navLink(b)])),btn('Tutte le prenotazioni',()=>switchTab('prenotazioni'),'small'))]));
@@ -322,8 +388,8 @@ const NextDoPersonal=(()=>{
    root.append(card('Spese registrate',paragraph(Object.entries(totals).map(([k,v])=>k+' '+(v/100).toFixed(2)).join(' · ')||'Nessuna spesa registrata'),btn('+ Ricevuta / spesa',()=>expenseEditor(),'primary')));
    for(const [i,e] of expenses.entries())root.append(card(e.title,paragraph([e.date,e.category,e.currency+' '+e.amount,e.notes].filter(Boolean).join(' · ')),toolbar(doc(e.doc),btn('Modifica',()=>expenseEditor(e,i),'small'))));
   }else if(tab==='prenotazioni'){
-   root.append(toolbar(btn('+ Prenotazione',()=>bookingEdit({},-1),'primary'),btn('Acquisisci con AI',aiEditor,'primary')));
-   for(const [i,b] of m.bookings.entries())root.append(card(b.title,spotPhoto(m.travel_photos?.['booking:'+b.id]),paragraph([b.type,b.date,b.status,b.ref,b.place,b.price].filter(Boolean).join(' · ')),lines(b.lines),lines(b.fields),...(b.locations||[]).map(locationLine),toolbar(doc(b.doc,b.original?'Documento originale':'Apri PDF'),navLink(b),safeLink(b.source,'Fonte'),safeLink(b.extraLink,b.extraLabel||'Link'),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'),btn('Foto della tappa',()=>coverEditor('booking:'+b.id,b.place||b.title),'small'),btn('Modifica',()=>bookingEdit(b,i),'small'))));
+   root.append(toolbar(btn('+ Prenotazione',()=>bookingEdit({},-1),'primary'),btn('Acquisisci con AI',aiEditor,'primary'),btn('Gestisci tipologie',templateManager,'small')));
+   for(const [i,b] of m.bookings.entries()){const tpl=bookingTemplate(b);const item=card(b.title,el('div',{class:'travel-booking-type'},[el('span',{class:'travel-booking-icon'},[bookingIcon(tpl.icon)]),node('strong','',tpl.label)]),spotPhoto(m.travel_photos?.['booking:'+b.id]),paragraph([b.type,b.date,b.status,b.ref,b.place,b.price].filter(Boolean).join(' · ')),lines(b.lines),lines(b.fields),...(b.locations||[]).map(locationLine),toolbar(doc(b.doc,b.original?'Documento originale':'Apri PDF'),navLink(b),safeLink(b.source,'Fonte'),safeLink(b.extraLink,b.extraLabel||'Link'),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'),btn('Foto della tappa',()=>coverEditor('booking:'+b.id,b.place||b.title),'small'),btn('Modifica',()=>bookingEdit(b,i),'small')));root.append(item)}
   }else if(tab==='guide'){
    root.append(toolbar(btn('+ Guida',()=>guideEdit({},-1),'primary')));
    for(const [i,g] of m.guides.entries())root.append(card(g.title,paragraph([g.category,g.severity,g.summary].filter(Boolean).join(' · ')),lines(g.items),toolbar(doc(g.doc),...(g.links||[]).map(l=>safeLink(l.url,l.label)),btn('Modifica',()=>guideEdit(g,i),'small'))));

@@ -68,3 +68,30 @@ def test_private_cover_image(tmp_path):
  assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
  assert c.get(url+"/cover-image").status_code==404
  c.close()
+
+def test_booking_templates_private_reusable(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";url=p+"/booking-templates"
+ assert c.get(url).status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ catalog=c.get(url).json()
+ assert {"insurance","parking","esim"}<={t["id"] for t in catalog}
+ data={"label":"Synthetic transfer","icon":"car","fields":["Booking number","Pickup"],"roles":["Pickup"]}
+ r=c.post(url,headers=h,json=data);assert r.status_code==200,r.text
+ t=next(x for x in r.json() if x["label"]==data["label"]);tid=t["id"]
+ assert c.post(url,headers=h,json={**t,"fields":["Code","code"]}).status_code==400
+ assert c.post(url,headers=h,json={**t,"fields":["Code"]}).status_code==200
+ trip=c.post(p+"/trips",headers=h,json={"title":"Synthetic trip","start":"2027-01-01","end":"2027-01-02"}).json()["id"]
+ trip_url=p+"/trips/"+trip;b=c.get(trip_url).json()
+ b["manifest"]["bookings"].append({"id":"booking-example","title":"Synthetic booking","kind":tid,"type":t["label"],"template_label":t["label"],"template_icon":t["icon"],"fields":[["Code","123"]],"lines":[]})
+ assert c.put(trip_url,headers=h,json=b).status_code==200
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.get(url).status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456"}).status_code==200
+ assert any(x["id"]==tid for x in c.get(url).json())
+ assert c.delete(url+"/"+tid,headers=h).status_code==200
+ assert c.get(trip_url).json()["manifest"]["bookings"][0]["fields"]==[["Code","123"]]
+ c.post(url,headers=h,json=data)
+ create_user(c,h,"colleague");sign_in(c,h,"colleague")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+ assert all(x["label"]!=data["label"] for x in c.get(url).json())
+ c.close()

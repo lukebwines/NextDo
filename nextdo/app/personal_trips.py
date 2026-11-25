@@ -170,6 +170,163 @@ def new_manifest(b):
  m={"format_version":1,"trip":{"id":tid,"title":b.get("title"),"subtitle":b.get("subtitle",""),"start":start.isoformat(),"end":end.isoformat()},"bookings":[],"documents":[],"guides":[],"days":[{"date":(start+timedelta(days=i)).isoformat(),"place":"","headline":"","description":"","events":[],"checks":[]} for i in range((end-start).days+1)]}
  return m
 
+BOOKING_TEMPLATES=[
+ {
+  "id": "flight",
+  "label": "Volo",
+  "icon": "plane",
+  "fields": [
+   "Compagnia",
+   "Numero volo",
+   "Terminal",
+   "Check-in"
+  ],
+  "roles": [
+   "Partenza",
+   "Scalo",
+   "Arrivo"
+  ]
+ },
+ {
+  "id": "hotel",
+  "label": "Hotel",
+  "icon": "hotel",
+  "fields": [
+   "Check-in",
+   "Check-out",
+   "Camera"
+  ],
+  "roles": [
+   "Alloggio"
+  ]
+ },
+ {
+  "id": "car",
+  "label": "Auto a noleggio",
+  "icon": "car",
+  "fields": [
+   "Società",
+   "Ritiro",
+   "Riconsegna",
+   "Categoria",
+   "Deposito"
+  ],
+  "roles": [
+   "Ritiro",
+   "Riconsegna"
+  ]
+ },
+ {
+  "id": "train",
+  "label": "Treno",
+  "icon": "train",
+  "fields": [
+   "Numero treno",
+   "Carrozza",
+   "Posto"
+  ],
+  "roles": [
+   "Partenza",
+   "Fermata",
+   "Arrivo"
+  ]
+ },
+ {
+  "id": "attraction",
+  "label": "Attrazione",
+  "icon": "ticket",
+  "fields": [
+   "Orario",
+   "Biglietto",
+   "Ingresso"
+  ],
+  "roles": [
+   "Attrazione"
+  ]
+ },
+ {
+  "id": "restaurant",
+  "label": "Ristorante",
+  "icon": "restaurant",
+  "fields": [
+   "Orario",
+   "Persone"
+  ],
+  "roles": [
+   "Ristorante"
+  ]
+ },
+ {
+  "id": "insurance",
+  "label": "Assicurazione viaggio",
+  "icon": "shield",
+  "fields": [
+   "Compagnia",
+   "Numero polizza",
+   "Validità",
+   "Assicurati",
+   "Massimale sanitario",
+   "Franchigia",
+   "Centrale operativa 24h",
+   "Procedura di assistenza"
+  ],
+  "roles": []
+ },
+ {
+  "id": "parking",
+  "label": "Parcheggio",
+  "icon": "parking",
+  "fields": [
+   "Gestore",
+   "Ingresso",
+   "Uscita",
+   "Codice accesso",
+   "Navetta"
+  ],
+  "roles": [
+   "Parcheggio"
+  ]
+ },
+ {
+  "id": "esim",
+  "label": "eSIM / connettività",
+  "icon": "phone",
+  "fields": [
+   "Operatore",
+   "Validità",
+   "Traffico dati",
+   "Attivazione",
+   "Assistenza"
+  ],
+  "roles": []
+ },
+ {
+  "id": "other",
+  "label": "Altro",
+  "icon": "folder",
+  "fields": [],
+  "roles": [
+   "Tappa"
+  ]
+ }
+]
+BOOKING_ICONS={"plane","hotel","car","train","ticket","restaurant","shield","parking","phone","folder","calendar","note","bell"}
+def validate_booking_template(b):
+ if not isinstance(b,dict):fail("Modello non valido")
+ def text(v,n):
+  if not isinstance(v,str) or not v.strip() or len(v.strip())>n or any(ord(c)<32 for c in v):fail("Etichetta non valida")
+  return v.strip()
+ def labels(v,n):
+  if not isinstance(v,list) or len(v)>n:fail("Troppi campi del modello")
+  result=[text(x,80) for x in v]
+  if len({x.casefold() for x in result})!=len(result):fail("Etichette duplicate")
+  return result
+ ident=b.get("id","")
+ if not isinstance(ident,str) or (ident not in {x["id"] for x in BOOKING_TEMPLATES} and not re.fullmatch(r"custom-[a-f0-9]{16}",ident)):fail("Identificativo modello non valido")
+ icon=b.get("icon")
+ if not isinstance(icon,str) or icon not in BOOKING_ICONS:fail("Icona non valida")
+ return {"id":ident,"label":text(b.get("label"),80),"icon":icon,"fields":labels(b.get("fields",[]),40),"roles":labels(b.get("roles",[]),12)}
+
 def register_routes(app,*,user,csrf,conn,data_path,ph):
  root=Path(data_path)/"personal";root.mkdir(mode=0o700,exist_ok=True)
  database=root/"trips.sqlite3"
@@ -188,6 +345,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   c.executescript("""CREATE TABLE IF NOT EXISTS pins(owner TEXT PRIMARY KEY,pin TEXT NOT NULL,attempts INTEGER DEFAULT 0,blocked_until REAL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS trips(owner TEXT NOT NULL,id TEXT NOT NULL,archive BLOB NOT NULL,title TEXT NOT NULL,start TEXT NOT NULL,end TEXT NOT NULL,revision INTEGER DEFAULT 0,PRIMARY KEY(owner,id));""")
  with db() as c:c.execute("CREATE TABLE IF NOT EXISTS travel_services(owner TEXT NOT NULL,name TEXT NOT NULL,secret TEXT NOT NULL,PRIMARY KEY(owner,name))")
+ with db() as c:c.execute("CREATE TABLE IF NOT EXISTS booking_templates(owner TEXT NOT NULL,id TEXT NOT NULL,definition TEXT NOT NULL,PRIMARY KEY(owner,id))")
  os.chmod(database,0o600)
  # Stable account binding; deleting an account cascades its identity, so reused IDs cannot read old trips.
  with conn() as c:
@@ -280,6 +438,32 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   owner,session=identity(req);csrf(req)
   with mutex:grants.pop((owner,session),None)
   return {"ok":True}
+ def template_catalog(c,owner):
+  catalog={t["id"]:dict(t) for t in BOOKING_TEMPLATES}
+  for row in c.execute("SELECT id,definition FROM booking_templates WHERE owner=? ORDER BY id",(owner,)):
+   catalog[row["id"]]=json.loads(row["definition"])
+  return list(catalog.values())
+ @app.get("/api/personal/booking-templates")
+ def get_booking_templates(req:Request):
+  owner=allowed(req)
+  with db() as c:return template_catalog(c,owner)
+ @app.post("/api/personal/booking-templates")
+ def save_booking_template(req:Request,b:dict):
+  owner=allowed(req,True)
+  if not b.get("id"):b={**b,"id":"custom-"+secrets.token_hex(8)}
+  t=validate_booking_template(b)
+  with db() as c:
+   catalog=template_catalog(c,owner)
+   if any(x["id"]!=t["id"] and x["label"].casefold()==t["label"].casefold() for x in catalog):fail("Nome tipologia già presente")
+   if len(catalog)>=60 and not any(x["id"]==t["id"] for x in catalog):fail("Limite tipologie raggiunto")
+   c.execute("INSERT OR REPLACE INTO booking_templates(owner,id,definition) VALUES(?,?,?)",(owner,t["id"],dump(t)))
+   return template_catalog(c,owner)
+ @app.delete("/api/personal/booking-templates/{tid}")
+ def remove_booking_template(tid:str,req:Request):
+  owner=allowed(req,True)
+  with db() as c:
+   c.execute("DELETE FROM booking_templates WHERE owner=? AND id=?",(owner,tid))
+   return template_catalog(c,owner)
  @app.get("/api/personal/trips")
  def list_trips(req:Request):
   owner=allowed(req)

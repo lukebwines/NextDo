@@ -103,3 +103,14 @@
 @media(max-width:800px){.travel-library-hero{grid-template-columns:1fr}.travel-library-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.travel-library-hero-side{padding:15px}.travel-library-hero-side .travel-library-plane{display:none}}
 @media(max-width:500px){.travel-library-top{align-items:flex-start}.travel-library-stat{padding:11px;gap:9px}.travel-detail-actions{flex-wrap:wrap}.travel-detail-actions .field{flex-basis:100%}}
 @media(prefers-reduced-motion:reduce){.travel-library-card{transition:none}.travel-library-card:hover{transform:none}}
+
+/* Booking templates: reusable, private catalog. */
+.travel-template-list{display:grid;gap:8px;margin:16px 0}
+.travel-template-row,.travel-insurance-quick{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px;border:1px solid var(--stroke);border-radius:14px;background:var(--panel)}
+.travel-template-copy{flex:1;min-width:150px;overflow-wrap:anywhere}.travel-template-copy .sub{margin:3px 0}
+.travel-booking-icon{width:40px;height:40px;flex:none;display:grid;place-items:center;background:#69e0d21a;color:#55cfc0;border-radius:12px}.travel-booking-icon .ico{width:23px;height:23px}
+.travel-booking-type{display:flex;align-items:center;gap:9px;margin-bottom:14px;color:var(--muted)}
+.travel-booking-fields{border:1px solid var(--stroke);border-radius:15px;padding:14px;background:var(--panel)}.travel-booking-fields h3{margin:0;font-size:16px}
+.travel-booking-field-grid{display:grid;gap:8px;margin-bottom:12px}.travel-booking-field-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:7px;align-items:center}
+.travel-insurance-quick{margin:0 0 16px;border-color:#69e0d266}.travel-insurance-quick .toolbar{margin:0}
+@media(max-width:550px){.travel-booking-field-row{grid-template-columns:minmax(0,1fr) auto}.travel-booking-field-row input:first-child{grid-column:1/-1}.travel-template-row{gap:8px}}
