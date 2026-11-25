@@ -170,7 +170,7 @@ class MainActivity : ComponentActivity() {
     private var selectedDay by mutableStateOf("")
     private var pdf by mutableStateOf<ByteArray?>(null)
     private var pdfName by mutableStateOf("")
-    private var page by mutableStateOf(0)
+    private var pdfMessage by mutableStateOf("")
     private var pageCount by mutableStateOf(0)
     private var pageBitmap by mutableStateOf<Bitmap?>(null)
     private var epoch = 0
@@ -228,6 +228,7 @@ class MainActivity : ComponentActivity() {
         refreshAlertStatus()
         // Any leftovers from an interrupted PDF render are local and deleted on startup.
         cacheDir.listFiles()?.filter { it.name.startsWith("travel-pdf-") }?.forEach { it.delete() }
+        PdfExport.cleanup(this)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Teal, onPrimary = Navy, background = Navy, surface = Panel,
                 onSurface = White, onBackground = White, secondary = Sand, onSurfaceVariant = Muted)) {
@@ -267,7 +268,7 @@ class MainActivity : ComponentActivity() {
         pending?.cancel()
         locked = true; busy = false; connection = null; session = ""; trips = emptyList()
         workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false
-        editor = null; current = null; offlineMeta = null; offline = false; pdf = null; pageBitmap = null; pdfName = ""; error = ""
+        editor = null; current = null; offlineMeta = null; offline = false; closePdf(); error = ""
         section = "Home"; area=NextDoArea.HOME;workFilter="all";updateCaptureProtection()
     }
     private fun deviceUnlock() {
@@ -449,7 +450,7 @@ class MainActivity : ComponentActivity() {
             }
             val image = renderPage(bytes, 0)
             Triple(bytes, image.first, image.second)
-        }) { (bytes, count, bmp) -> pdf = bytes; pdfName = name; page = 0; pageCount = count; pageBitmap = bmp }
+        }) { (bytes, count, bmp) -> pdf = bytes; pdfName = name; pdfMessage = ""; pageCount = count; pageBitmap = bmp }
     }
     private fun renderPage(bytes: ByteArray, index: Int): Pair<Int,Bitmap> {
         val tmp = File.createTempFile("travel-pdf-", ".pdf", cacheDir)
@@ -460,7 +461,7 @@ class MainActivity : ComponentActivity() {
             PdfRenderer(fd).use { renderer ->
                 require(index in 0 until renderer.pageCount)
                 renderer.openPage(index).use { p ->
-                    val scale = minOf(1400f / p.width, 2000f / p.height, 2.0f)
+                    val scale = minOf(2200f / p.width, 3000f / p.height, 4.0f)
                     val bmp = Bitmap.createBitmap(maxOf(1,(p.width*scale).toInt()), maxOf(1,(p.height*scale).toInt()), Bitmap.Config.ARGB_8888)
                     bmp.eraseColor(android.graphics.Color.WHITE)
                     p.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -469,9 +470,24 @@ class MainActivity : ComponentActivity() {
             }
         } finally { tmp.delete() }
     }
-    private fun pdfPage(index: Int) {
+    private fun exportPdf(action: String) {
         val bytes = pdf ?: return
-        task({ renderPage(bytes, index) }) { (count, bmp) -> pageCount = count; page = index; pageBitmap = bmp }
+        val name = pdfName
+        if (locked || busy) return
+        pdfMessage = ""
+        if (action == "download") {
+            task({ PdfExport.download(this, name, bytes) }) { pdfMessage = "PDF salvato in Download/NextDo." }
+        } else {
+            task({ PdfExport.externalCopy(this, name, bytes) }) { uri ->
+                try {
+                    val intent = if (action == "share") Intent(Intent.ACTION_SEND).setType("application/pdf").putExtra(Intent.EXTRA_STREAM, uri)
+                    else Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
+                    intent.clipData = android.content.ClipData.newRawUri("PDF", uri)
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    startActivity(Intent.createChooser(intent, if (action == "share") "Condividi PDF" else "Apri PDF con"))
+                } catch (_: Exception) { error = "Nessuna applicazione compatibile disponibile." }
+            }
+        }
     }
     private fun navigate(b: JSONObject) {
         val lat = b.optDouble("lat"); val lon = b.optDouble("lon")
@@ -488,7 +504,7 @@ class MainActivity : ComponentActivity() {
         }
         try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) { error = "Navigazione non disponibile" }
     }
-    private fun closePdf() { pdf = null; pdfName = ""; pageBitmap = null; page = 0; pageCount = 0 }
+    private fun closePdf() { pdf = null; pdfName = ""; pageBitmap = null; pageCount = 0; pdfMessage = "" }
 
     private fun <T> workTask(run:()->T,done:(T)->Unit){
         if(locked||workBusy)return
@@ -561,6 +577,10 @@ class MainActivity : ComponentActivity() {
         val t = current
         BackHandler(enabled=!locked&&(t!=null||area!=NextDoArea.HOME||pdf!=null)){backArea()}
         if(!locked && (area==NextDoArea.WORK||area==NextDoArea.HOME)) workDetail?.let { detail -> WorkDetailDialog(detail){workDetail=null} }
+        if(!locked && pdf != null) {
+            PdfScreen()
+            return
+        }
         if(!locked) editor?.let { e -> TravelEditDialog(e,busy,error,{editor=null;error=""},{submitEditor(e,it)}) }
         Scaffold(containerColor = Navy,
             topBar = {
@@ -607,7 +627,6 @@ class MainActivity : ComponentActivity() {
                 }
                 when {
                     locked -> LockedScreen()
-                    pdf != null -> PdfScreen()
                     t != null -> {
                         if (offline) Pill("OFFLINE · copia scaricata",Sand)
                         when(section) {
@@ -1064,13 +1083,11 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable private fun PdfScreen() {
-        TextButton(onClick={closePdf()}){Text("← Torna al viaggio")}
-        Text(pdfName,fontSize=17.sp,fontWeight=FontWeight.Bold)
-        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
-            IconButton(onClick={pdfPage(page-1)},enabled=!busy&&page>0){Icon(Icons.Default.ArrowBack,"Pagina precedente")}
-            Text("Pagina "+(page+1)+" / "+pageCount,Modifier.weight(1f),color=Teal)
-            IconButton(onClick={pdfPage(page+1)},enabled=!busy&&page+1<pageCount){Icon(Icons.Default.ArrowForward,"Pagina successiva")}
+        val bytes = pdf ?: return
+        key(bytes) {
+            NextDoPdfViewer(window=window, name=pdfName, count=pageCount, firstPage=pageBitmap,
+                render={index -> renderPage(bytes,index).second}, busy=busy, message=pdfMessage, error=error,
+                onClose={if(!busy)closePdf()}, onExport={exportPdf(it)}, onDismissMessage={pdfMessage="";error=""})
         }
-        pageBitmap?.let{Image(it.asImageBitmap(),pdfName,Modifier.fillMaxWidth(),contentScale=ContentScale.FillWidth)}
     }
 }
