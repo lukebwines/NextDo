@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.1.13-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.0-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -43,7 +43,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - run: gradle -p android :app:assembleRelease :app:lintRelease --no-daemon
+      - run: gradle -p android :app:testReleaseUnitTest :app:assembleRelease :app:lintRelease --no-daemon
       - name: Firma APK
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.1.13-test"
-            RELEASE_NOTES="NextDo Android: dashboard professionale navigabile, tutte le attività aperte incluse senza data, filtri e dettagli diretti, screenshot Home/Lavoro configurabili. Protezione Viaggi e blocco mantenuti. Collaudo fisico necessario."
+            test "$ANDROID_VERSION" = "0.2.0-test"
+            RELEASE_NOTES="NextDo Android: screenshot configurabili anche in Personale e Viaggi (Viaggi su richiesta), barra di navigazione edge-to-edge, dashboard professionale e aggiornamenti firmati. Schermata bloccata e app recenti protette. Collaudo fisico necessario."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then

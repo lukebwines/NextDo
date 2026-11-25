@@ -17,6 +17,8 @@ import android.os.ParcelFileDescriptor
 import android.util.Base64
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -68,9 +70,16 @@ class MainActivity : ComponentActivity() {
     private var area by mutableStateOf(NextDoArea.HOME)
     private var workFilter by mutableStateOf("all")
     private var allowWorkScreenshots by mutableStateOf(true)
+    private var allowPersonalScreenshots by mutableStateOf(true)
+    private var allowTravelScreenshots by mutableStateOf(false)
     private var foreground = false
     private fun updateCaptureProtection(){
-        val allowed=foreground&&!locked&&allowWorkScreenshots&&android.os.Build.VERSION.SDK_INT>=33&&(area==NextDoArea.HOME||area==NextDoArea.WORK)
+        val allowed=foreground&&!locked&&android.os.Build.VERSION.SDK_INT>=33&&when(area){
+            NextDoArea.HOME,NextDoArea.WORK -> allowWorkScreenshots
+            NextDoArea.PERSONAL -> allowPersonalScreenshots
+            NextDoArea.TRIPS -> allowTravelScreenshots
+            NextDoArea.SETTINGS -> false
+        }
         if(allowed)window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
     private var workConnection by mutableStateOf<JSONObject?>(null)
@@ -203,9 +212,16 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
+        window.isNavigationBarContrastEnforced = false
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         if(android.os.Build.VERSION.SDK_INT>=33)setRecentsScreenshotEnabled(false)
         allowWorkScreenshots=getPreferences(MODE_PRIVATE).getBoolean("allow_work_screenshots",true)
+        allowPersonalScreenshots=getPreferences(MODE_PRIVATE).getBoolean("allow_personal_screenshots",true)
+        allowTravelScreenshots=getPreferences(MODE_PRIVATE).getBoolean("allow_travel_screenshots",false)
         vault = Vault(this)
         checkUpdates()
         WorkAlerts.channels(this)
@@ -643,10 +659,25 @@ class MainActivity : ComponentActivity() {
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
                     Column(Modifier.weight(1f)){
                         Text("Consenti screenshot in Home e Lavoro")
-                        Text("Le catture possono contenere dati riservati. Viaggi, schermata bloccata e app recenti restano protetti.",color=Muted,fontSize=12.sp)
+                        Text("Le catture possono contenere dati riservati.",color=Muted,fontSize=12.sp)
                     }
                     Switch(checked=allowWorkScreenshots,onCheckedChange={allowWorkScreenshots=it;getPreferences(MODE_PRIVATE).edit().putBoolean("allow_work_screenshots",it).apply();updateCaptureProtection()})
                 }
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text("Consenti screenshot in Personale")
+                        Text("Consente le catture nella pagina personale.",color=Muted,fontSize=12.sp)
+                    }
+                    Switch(checked=allowPersonalScreenshots,onCheckedChange={allowPersonalScreenshots=it;getPreferences(MODE_PRIVATE).edit().putBoolean("allow_personal_screenshots",it).apply();updateCaptureProtection()})
+                }
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                    Column(Modifier.weight(1f)){
+                        Text("Consenti screenshot in Viaggi")
+                        Text("Attiva solo se necessario: le catture possono contenere prenotazioni e documenti riservati.",color=Muted,fontSize=12.sp)
+                    }
+                    Switch(checked=allowTravelScreenshots,onCheckedChange={allowTravelScreenshots=it;getPreferences(MODE_PRIVATE).edit().putBoolean("allow_travel_screenshots",it).apply();updateCaptureProtection()})
+                }
+                Text("Schermata bloccata, impostazioni e anteprime delle app recenti restano protette.",color=Muted,fontSize=12.sp)
             } else Text("Screenshot protetti su Android 12 e precedenti per tutelare le anteprime delle app recenti.",color=Muted,fontSize=12.sp)
         }
         TravelCard("Associazioni","Il collegamento Viaggi rimane distinto dall’autorizzazione professionale.") {
