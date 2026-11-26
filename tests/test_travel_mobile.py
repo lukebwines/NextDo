@@ -111,7 +111,7 @@ def test_mobile_pin_accepts_custom_four_digit_pin(tmp_path):
  paired=c.post(mobile+"/pair",json={"code":code,"label":"Four digit test"})
  assert paired.status_code==200,paired.text
  device={"Authorization":"Bearer "+paired.json()["device_token"]}
- assert c.post(mobile+"/unlock",headers=device,json={"pin":"123456"}).status_code==400
+ assert c.post(mobile+"/unlock",headers=device,json={"pin":"123456"}).status_code==403
  unlocked=c.post(mobile+"/unlock",headers=device,json={"pin":"4321"})
  assert unlocked.status_code==200,unlocked.text
  c.close()
