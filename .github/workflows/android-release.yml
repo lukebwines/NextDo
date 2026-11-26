@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.6-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.7-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.6-test"
-            RELEASE_NOTES="Date italiane GG/MM/AAAA e orari a 24 ore HH:mm; calendari nativi in italiano con lunedì come primo giorno e selettori orari nelle schermate modificabili. Uniformate agenda professionale, dashboard, agenda personale, viaggi, prenotazioni e diario. Valori facoltativi rimovibili; fusi e dati originali preservati. Nessuna modifica ad API, database, backend o avvisi. Compatibile con Web 0.2.10-test. Aggiornare senza disinstallare. Collaudo sul dispositivo necessario."
+            test "$ANDROID_VERSION" = "0.2.7-test"
+            RELEASE_NOTES="PIN personale configurabile da 4 a 12 cifre, modificabile in Sicurezza e accesso. L’app Android accetta PIN da 4 a 12 cifre per la nuova autorizzazione. Compatibile con NextDo Web 0.2.12-test. Nessuna modifica ai dati offline o ai viaggi. Aggiornare senza disinstallare."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then

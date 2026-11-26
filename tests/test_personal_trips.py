@@ -272,3 +272,24 @@ def test_private_keepalive_requires_existing_unlock_and_respects_lock(tmp_path):
  assert c.post(p+"/unlock",headers=h,json={"pin":"123456"}).status_code==200
  assert c.post(p+"/keepalive",headers=h).status_code==200
  c.close()
+
+def test_personal_pin_accepts_four_to_twelve_digits_and_can_be_changed(tmp_path):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123","confirm":"123"}).status_code==400
+ assert c.get(p+"/status").json()["configured"] is False
+ assert c.post(p+"/unlock",headers=h,json={"pin":"1234","confirm":"123"}).status_code==400
+ assert c.post(p+"/unlock",headers=h,json={"pin":"1234","confirm":"1234"}).status_code==200
+ assert c.post(p+"/change-pin",headers=h,json={"current_pin":"0000","new_pin":"123456789012","confirm":"123456789012"}).status_code==403
+ assert c.post(p+"/change-pin",headers=h,json={"current_pin":"1234","new_pin":"1234567890123","confirm":"1234567890123"}).status_code==400
+ assert c.post(p+"/change-pin",headers=h,json={"current_pin":"1234","new_pin":"123456789012","confirm":"12345678901"}).status_code==400
+ assert c.post(p+"/change-pin",headers=h,json={"current_pin":"1234","new_pin":"1234","confirm":"1234"}).status_code==400
+ changed=c.post(p+"/change-pin",headers=h,json={"current_pin":"1234","new_pin":"123456789012","confirm":"123456789012"})
+ assert changed.status_code==200,changed.text
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.post(p+"/unlock",headers=h,json={"pin":"1234"}).status_code==403
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456789012"}).status_code==200
+ changed=c.post(p+"/change-pin",headers=h,json={"current_pin":"123456789012","new_pin":"5678","confirm":"5678"})
+ assert changed.status_code==200,changed.text
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.post(p+"/unlock",headers=h,json={"pin":"5678"}).status_code==200
+ c.close()

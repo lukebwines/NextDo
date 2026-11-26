@@ -1072,8 +1072,8 @@ class MainActivity : ComponentActivity() {
         } else if(session.isBlank()) {
             when(travelAuthState) {
                 TravelAuthState.PIN_REQUIRED -> TravelCard("Autorizza il telefono","Il PIN serve solo per la prima autorizzazione o se quella precedente non è più valida. Dopo basta lo sblocco Android.") {
-                    OutlinedTextField(pin,{pin=it.filter(Char::isDigit).take(6)},label={Text("PIN NextDo")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),singleLine=true)
-                    Action("Autorizza",!busy&&pin.length==6) { val p=pin;pin="";unlockServer(p) }
+                    OutlinedTextField(pin,{pin=it.filter(Char::isDigit).take(12)},label={Text("PIN NextDo (4–12 cifre)")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),singleLine=true)
+                    Action("Autorizza",!busy&&pin.length in 4..12) { val p=pin;pin="";unlockServer(p) }
                 }
                 TravelAuthState.REPAIR_REQUIRED -> TravelCard("Associazione non più valida","Genera un nuovo codice di associazione dal Web. La copia offline già presente resta consultabile finché non la cancelli.") {
                     OutlinedTextField(code,{code=it},label={Text("Nuovo codice associazione")},singleLine=true,visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())

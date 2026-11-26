@@ -92,7 +92,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
  @app.post("/api/mobile/v1/unlock")
  def unlock(req:Request,b:dict):
   device=auth(req,False);owner=device["owner"];pin=b.get("pin")
-  if not isinstance(pin,str) or not re.fullmatch(r"[0-9]{6}",pin):fail(400,"PIN di 6 cifre richiesto")
+  if not isinstance(pin,str) or not re.fullmatch(r"[0-9]{4,12}",pin):fail(400,"PIN da 4 a 12 cifre richiesto")
   error=None;raw=token();remember=token() if b.get("remember") is True else None
   with db() as c:
    r=c.execute("SELECT * FROM pins WHERE owner=?",(owner,)).fetchone()

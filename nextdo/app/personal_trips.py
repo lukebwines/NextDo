@@ -427,7 +427,7 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  def unlock(req:Request,b:dict):
   owner,session=identity(req);csrf(req)
   pin=b.get("pin")
-  if not isinstance(pin,str) or not re.fullmatch(r"[0-9]{6}",pin):fail("Inserire un PIN di 6 cifre")
+  if not isinstance(pin,str) or not re.fullmatch(r"[0-9]{4,12}",pin):fail("Il PIN deve contenere da 4 a 12 cifre")
   error=None
   with db() as c:
    r=c.execute("SELECT * FROM pins WHERE owner=?",(owner,)).fetchone()
@@ -446,6 +446,33 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   if error:fail(*error)
   grant(owner,session)
   return {"unlocked":True}
+ @app.post("/api/personal/change-pin")
+ def change_pin(req:Request,b:dict):
+  owner=allowed(req,True);_,session=identity(req)
+  current=b.get("current_pin");new=b.get("new_pin")
+  if not isinstance(current,str) or not re.fullmatch(r"[0-9]{4,12}",current):fail("Inserire il PIN attuale")
+  if not isinstance(new,str) or not re.fullmatch(r"[0-9]{4,12}",new):fail("Il nuovo PIN deve contenere da 4 a 12 cifre")
+  if b.get("confirm")!=new:fail("La conferma del nuovo PIN non corrisponde")
+  error=None
+  with db() as c:
+   r=c.execute("SELECT * FROM pins WHERE owner=?",(owner,)).fetchone()
+   if r is None:fail("PIN non configurato",409)
+   elif r["blocked_until"]>time.time():error=("Troppi tentativi. Riprovare tra 5 minuti",429)
+   else:
+    try:ok=ph.verify(r["pin"],current)
+    except VerificationError:ok=False
+    if not ok:
+     n=r["attempts"]+1
+     c.execute("UPDATE pins SET attempts=?,blocked_until=? WHERE owner=?",(0 if n>=5 else n,time.time()+300 if n>=5 else 0,owner))
+     error=("PIN attuale non corretto",403)
+    elif new==current:error=("Il nuovo PIN deve essere diverso da quello attuale",400)
+    else:c.execute("UPDATE pins SET pin=?,attempts=0,blocked_until=0 WHERE owner=?",(ph.hash(new),owner))
+  if error:fail(*error)
+  with mutex:
+   for key in list(grants):
+    if key[0]==owner and key[1]!=session:grants.pop(key,None)
+   grants[(owner,session)]=time.monotonic()+300
+  return {"ok":True}
  @app.post("/api/personal/keepalive")
  def keepalive(req:Request):
   owner,session=identity(req);csrf(req)
