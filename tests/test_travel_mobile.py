@@ -190,15 +190,17 @@ def test_mobile_dynamic_templates_and_offline_catalog(tmp_path):
  saved=r.json()["manifest"]["bookings"][0]
  assert saved["kind"]==ident and saved["template_icon"]=="car" and saved["template_label"]==model["label"]
  assert saved["doc"]=="test.pdf" and saved["lines"]==m["bookings"][0]["lines"] and saved["fields"]==payload["specific_fields"]
+ create_user(c,h,"catalog_other");sign_in(c,h,"catalog_other")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+ _,other=pair("654321")
+ assert ident not in [t["id"] for t in c.get(mobile+"/booking-templates",headers=other).json()["templates"]]
+ assert c.get(url+"/offline?include_catalog=true",headers=other).status_code==404
+ sign_in(c,h,"admin")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456"}).status_code==200
  assert c.delete(p+"/booking-templates/"+ident,headers=h).status_code==200
  assert c.post(url+"/edit",headers=s,json={**payload,"revision":1}).status_code==409
  r=c.post(url+"/edit",headers=s,json={"revision":1,"kind":"booking","id":"hotel-test","fields":{"title":"Historical booking"},"specific_fields":saved["fields"]});assert r.status_code==200,r.text
  historical=r.json()["manifest"]["bookings"][0]
  assert historical["kind"]==ident and historical["template_label"]==saved["template_label"] and historical["fields"]==saved["fields"]
  assert c.post(url+"/edit",headers=s,json={"revision":2,"kind":"booking","id":"hotel-test","fields":{"title":"Bad"},"specific_fields":[["","new"]]}).status_code==400
- create_user(c,h,"catalog_other");sign_in(c,h,"catalog_other")
- assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
- _,other=pair("654321")
- assert ident not in [t["id"] for t in c.get(mobile+"/booking-templates",headers=other).json()["templates"]]
- assert c.get(url+"/offline?include_catalog=true",headers=other).status_code==404
  c.close()

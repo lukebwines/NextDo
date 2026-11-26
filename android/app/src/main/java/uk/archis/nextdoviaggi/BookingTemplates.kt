@@ -62,7 +62,8 @@ internal fun missingTemplateFields(existing:List<String>,suggested:List<String>)
     val known=existing.map{it.trim().lowercase(Locale.ROOT)}.toMutableSet()
     return suggested.filter{known.add(it.trim().lowercase(Locale.ROOT))}
 }
-internal data class BookingField(val label:String,val value:String,val original:Boolean=true)
+internal data class BookingField(val label:String,val value:String,val original:Boolean=true,val suggested:Boolean=false)
+internal fun retainedBookingFields(rows:List<BookingField>):List<BookingField> = rows.filter{it.original||it.value.isNotBlank()||(!it.suggested&&it.label.isNotBlank())}
 internal fun bookingFields(b:JSONObject):List<BookingField>{
     val rows=b.optJSONArray("fields")?:return emptyList()
     return (0 until rows.length()).mapNotNull{rows.optJSONArray(it)?.let{a->BookingField(a.optString(0),a.optString(1))}}

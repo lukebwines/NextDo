@@ -25,7 +25,7 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
     val specific=remember(editor){mutableStateListOf<BookingField>().apply{addAll(bookingFields(editor.initial))}}
     val models=editor.templates.let{if(it.any{t->t.id==initial.id})it else it+initial}
     val model=models.firstOrNull{it.id==selected}?:initial
-    fun suggest(t:BookingTemplate){missingTemplateFields(specific.map{it.label},t.fields).forEach{specific.add(BookingField(it,"",false))}}
+    fun suggest(t:BookingTemplate){missingTemplateFields(specific.map{it.label},t.fields).take((200-specific.size).coerceAtLeast(0)).forEach{specific.add(BookingField(it,"",false,true))}}
     LaunchedEffect(editor){if(dynamic&&!existing)suggest(model)}
     val labels=when(editor.kind) {
         "new" -> listOf("title" to "Titolo", "subtitle" to "Sottotitolo", "start" to "Inizio", "end" to "Fine")
@@ -49,7 +49,7 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
                 }
                 if(picking)AlertDialog(onDismissRequest={picking=false},title={Text("Tipologia di prenotazione")},text={
                     Column(Modifier.heightIn(max=360.dp).verticalScroll(rememberScrollState())){
-                        for(t in models)TextButton(onClick={selected=t.id;picking=false;if(!existing)suggest(t)},modifier=Modifier.fillMaxWidth()){
+                        for(t in models)TextButton(onClick={selected=t.id;picking=false;if(!existing){specific.removeAll{it.suggested&&it.value.isBlank()};suggest(t)}},modifier=Modifier.fillMaxWidth()){
                             Icon(bookingIcon(t.icon),null);Spacer(Modifier.width(8.dp));Text(t.label,Modifier.weight(1f))
                         }
                     }
@@ -88,11 +88,12 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
         val b=JSONObject();labels.forEach{(k,_)->b.put(k,values[k].orEmpty())}
         if(dynamic){
             if(!existing||selected!=initial.id){b.put("_template_id",selected);if(b.str("type").isBlank())b.put("type",model.label)}
-            val kept=specific.filter{it.original||it.value.isNotBlank()||it.label.isNotBlank()&&!model.fields.contains(it.label)}
-            b.put("_specific_fields",JSONArray().apply{kept.forEach{put(JSONArray().put(it.label).put(it.value))}})
+            val kept=retainedBookingFields(specific)
+            if(!existing||editor.initial.has("fields")||kept.isNotEmpty())b.put("_specific_fields",JSONArray().apply{kept.forEach{put(JSONArray().put(it.label).put(it.value))}})
+            if(existing&&selected==initial.id&&!editor.initial.has("type")&&b.str("type").isBlank())b.remove("type")
         }
         onSave(b)
-    },enabled=!busy&&datesOk&&titleOk&&(!dynamic||specific.size<=200&&specific.all{it.original||it.label.isNotBlank()||it.value.isBlank()})){Text("Salva")}},
+    },enabled=!busy&&datesOk&&titleOk&&(!dynamic||specific.size<=200&&retainedBookingFields(specific).all{row->row.label.isNotBlank()||bookingFields(editor.initial).any{it.label==row.label&&it.value==row.value}})){Text("Salva")}},
       dismissButton={TextButton(onClick=onCancel,enabled=!busy){Text("Annulla")}})
 }
 

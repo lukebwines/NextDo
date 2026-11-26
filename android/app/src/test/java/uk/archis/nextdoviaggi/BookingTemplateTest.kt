@@ -16,4 +16,11 @@ class BookingTemplateTest {
     @Test fun suggestionsKeepExistingAndAvoidDuplicates(){
         assertEquals(listOf("Terminal"),missingTemplateFields(listOf(" Codice ","Campo storico"),listOf("codice","Terminal","terminal")))
     }
+    @Test fun unusedSuggestionsAreNotPersisted(){
+        val original=BookingField("Legacy","")
+        val entered=BookingField("Terminal","A",false,true)
+        val unused=BookingField("Deposito","",false,true)
+        val custom=BookingField("Campo libero","",false,false)
+        assertEquals(listOf(original,entered,custom),retainedBookingFields(listOf(original,entered,unused,custom)))
+    }
 }

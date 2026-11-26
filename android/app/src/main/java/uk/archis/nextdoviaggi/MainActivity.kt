@@ -1258,7 +1258,8 @@ class MainActivity : ComponentActivity() {
     @Composable private fun Home(t: TripPackage) {
         Hero(t)
         val policies=t.bookings.filter{b->bookingModel(b,t.templates).id=="insurance"||((b.str("kind").isBlank()||b.str("kind")=="other")&&inferBookingKind("",b.str("type"),emptyList())=="insurance")}
-        if(policies.isNotEmpty())TravelCard("Assicurazione ed emergenze",if(offline)"Dati e documenti della copia offline" else "Polizze e recapiti salvati nel viaggio"){
+        val emergencyGuides=t.guides.filter{g->Regex("emergenz|emergency|consolat|consulat|ambasciat|embassy",RegexOption.IGNORE_CASE).containsMatchIn(g.str("category")+" "+g.str("title"))}
+        if(policies.isNotEmpty()||emergencyGuides.isNotEmpty())TravelCard("Assicurazione ed emergenze",if(offline)"Dati e documenti della copia offline" else "Polizze e recapiti salvati nel viaggio"){
             for(b in policies){
                 Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){Icon(Icons.Default.Shield,null,tint=Teal);Text(b.str("title"),fontWeight=FontWeight.Bold)}
                 if(b.str("ref").isNotBlank())Text("Riferimento: "+b.str("ref"),color=Sand)
@@ -1269,7 +1270,14 @@ class MainActivity : ComponentActivity() {
                 }
                 bookingDocuments(b).forEach{(name,label)->Action(label,!busy){viewPdf(name)}}
             }
-            Text("Verifica i recapiti e la procedura nella polizza. NextDo mostra solo le informazioni salvate.",color=Muted,fontSize=12.sp)
+            for(g in emergencyGuides){
+                Text(g.str("title"),fontWeight=FontWeight.Bold)
+                if(g.str("summary").isNotBlank())Text(g.str("summary"),color=Muted,fontSize=13.sp)
+                val items=g.optJSONArray("items")
+                if(items!=null)for(i in 0 until items.length())items.optJSONArray(i)?.let{Text(it.optString(0)+": "+it.optString(1),fontSize=13.sp)}
+                if(g.str("doc").isNotBlank())Action("Apri guida PDF",!busy){viewPdf(g.str("doc"))}
+            }
+            Text("Verifica i recapiti e le procedure nelle fonti originali. NextDo mostra solo le informazioni salvate.",color=Muted,fontSize=12.sp)
             Action("Tutte le prenotazioni"){section="Prenota"}
         }
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
