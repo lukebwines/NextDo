@@ -259,3 +259,16 @@ def test_private_alert_token_is_metadata_only(tmp_path):
  assert c.post(mobile+"/private-alerts/disable",headers=session).status_code==200
  assert c.get(mobile+"/private-alerts",headers=alert).status_code==401
  c.close()
+
+def test_private_keepalive_requires_existing_unlock_and_respects_lock(tmp_path):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/keepalive",headers=h).status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ assert c.post(p+"/keepalive",headers=h).json()=={"unlocked":True}
+ assert c.get(p+"/trips").status_code==200
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.post(p+"/keepalive",headers=h).status_code==423
+ assert c.get(p+"/trips").status_code==423
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456"}).status_code==200
+ assert c.post(p+"/keepalive",headers=h).status_code==200
+ c.close()
