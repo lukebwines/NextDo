@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.10-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.11-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.10-test"
-            RELEASE_NOTES="Tipologie dinamiche delle prenotazioni dal catalogo Web, campi specifici Android e consultazione offline. Scheda rapida assicurazione ed emergenze con informazioni e PDF realmente salvati. Richiede NextDo Web 0.2.15-test per le nuove azioni. Nessuna modifica alle prenotazioni storiche senza salvataggio esplicito. Aggiornare senza disinstallare; collaudo Samsung necessario."
+            test "$ANDROID_VERSION" = "0.2.11-test"
+            RELEASE_NOTES="Budget Viaggi, spese multivaluta, conversioni indicative BCE, ricevute PDF e foto, inserimento rapido, coda cifrata per nuove spese offline e sincronizzazione antiduplicazione. Richiede NextDo Web 0.2.16-test per le nuove azioni. Aggiornare il server prima dell’APK e non disinstallare. Collaudo Samsung necessario; modifiche e ricevute offline non supportate."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then
