@@ -32,8 +32,16 @@ const NextDoPersonal=(()=>{
  }
  function noteActivity(){if(S.view==='personal'&&unlocked)resetTimer()}
  for(const event of ['pointerdown','keydown','input','change','wheel'])document.addEventListener(event,noteActivity,{passive:true});
- document.addEventListener('visibilitychange',()=>{if(!document.hidden)noteActivity()});
- async function suspend(){
+ document.addEventListener('visibilitychange',async()=>{
+  if(document.hidden||S.view!=='personal'||!unlocked)return;
+  if(Date.now()-lastActivity>=IDLE_MS){await lock();if(S.view==='personal'&&main?.isConnected)render(main);return}
+  try{
+   const status=await api(path+'/status');
+   if(!status.unlocked){unlocked=false;clearTimeout(timer);clearTimeout(keepAliveTimer);if(S.view==='personal'&&main?.isConnected)render(main);return}
+   noteActivity();
+  }catch{}
+ });
+ function suspend(){
   geoKey='';generation++;trip=null;selected='';section='home';templates=[];focusBooking='';busy=false;
   document.querySelectorAll('[data-personal-modal]').forEach(x=>x.remove());
   if(main?.isConnected)main.querySelector('#personal-content')?.replaceChildren();
