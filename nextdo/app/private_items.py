@@ -9,6 +9,8 @@ from fastapi import HTTPException,Request
 def fail(msg,code=400):raise HTTPException(code,msg)
 
 def ensure(c):
+ from . import private_indicator
+ private_indicator.ensure(c)
  c.execute("""CREATE TABLE IF NOT EXISTS private_items(
  id INTEGER PRIMARY KEY,owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  title TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',kind TEXT NOT NULL,
@@ -101,6 +103,8 @@ def remove(c,uid,i):
  return {"ok":True}
 
 def register(app,conn,web_owner,mobile_owner,data_path):
+ from . import private_indicator
+ private_indicator.register(app,conn,web_owner)
  from . import private_transfer as transfer
  def attach(prefix,authorize):
   @app.get(prefix+"/items")

@@ -327,3 +327,21 @@ def test_private_recurring_and_snooze(tmp_path):
  assert row["due_at"]=="2090-02-28" and row["status"]=="todo" and row["snoozed_until"] is None
  assert c.post(url,headers=h,json={"status":"done","expected_due":"2090-01-31"}).status_code==409
  c.close()
+
+def test_home_assistant_indicator(tmp_path):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ settings=p+"/ha-indicator/settings";url=p+"/ha-indicator"
+ assert c.get(url).status_code==401
+ r=c.post(settings,headers=h,json={"action":"generate"});assert r.status_code==200,r.text
+ credential={"Authorization":"Bearer "+r.json()["credential"]}
+ assert c.get(url,headers=credential).json()=={"active":False}
+ assert c.post(p+"/items",headers=h,json={"title":"Synthetic item","status":"review"}).status_code==200
+ assert c.get(url,headers=credential).json()=={"active":True}
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.get(p+"/items",headers=credential).status_code==423
+ assert c.get(url,headers=credential).json()=={"active":True}
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ assert c.post(settings,headers=h,json={"action":"revoke"}).status_code==200
+ assert c.get(url,headers=credential).status_code==401
+ c.close()

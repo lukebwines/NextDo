@@ -134,7 +134,14 @@ const NextDoPersonal=(()=>{
     msg('PIN aggiornato correttamente');
    }catch(e){report(e)}
   });
-  securityPanel.append(node('h2','','Sicurezza e accesso'),pinForm);
+  securityPanel.append(node('h2','','Sicurezza e accesso'),pinForm,btn('Campanella Home Assistant',async()=>{
+   const {box,back}=modal('Campanella Home Assistant');back.setAttribute('data-personal-modal','');
+   const state=el('div'),credential=el('textarea',{class:'field',rows:'3',readonly:true});credential.hidden=true;
+   box.append(paragraph('Condivide solo la presenza di un avviso, senza dati personali. La credenziale è revocabile.'),state,credential);
+   try{const x=await api(path+'/ha-indicator/settings');if(!back.isConnected)return;state.textContent=x.enabled?'Indicatore attivo':'Indicatore disattivato'}catch(e){report(e)}
+   async function configure(action){if(busy||token!==generation||!confirm(action==='generate'?'Generare una nuova credenziale? La precedente verrà revocata.':'Disattivare la campanella?'))return;busy=true;try{const x=await api(path+'/ha-indicator/settings',{method:'POST',body:JSON.stringify({action})});if(!back.isConnected)return;state.textContent=x.enabled?'Indicatore attivo':'Indicatore disattivato';credential.value=x.credential?'Bearer '+x.credential:'';credential.hidden=!x.credential;if(x.credential)credential.select()}catch(e){report(e)}finally{busy=false}}
+   box.append(toolbar(btn('Genera credenziale',()=>configure('generate'),'primary'),btn('Disattiva',()=>configure('revoke'),'small')),paragraph('Conserva la credenziale in secrets.yaml di Home Assistant; non inserirla nella card.'));
+  },'small'));
   const securitySettings=el('details',{class:'personal-appearance-details'},[node('summary','','Sicurezza e accesso'),securityPanel]);
   const agenda=el('section',{class:'personal-agenda'});
   function editItem(kind,item={}){

@@ -1,28 +1,49 @@
-# NextDo — card Home Assistant
+# Campanella NextDo per Home Assistant
 
-La card apre NextDo nell'area Attività e promemoria, dopo login e PIN. Nessun titolo, data, token o dato personale viene trasferito a Home Assistant. La visibilità di una dashboard non è un controllo di accesso.
+La campanella è opzionale. Condivide un solo valore booleano: avviso presente/assente. Non invia titolo, descrizione, data o numero di impegni. Si attiva per attività urgenti, da verificare, scadute o previste entro 24 ore; esclude quelle completate o ancora rinviate.
 
-Nella dashboard Home Assistant, aggiungere una scheda Manuale e incollare:
+In NextDo Web, Personale > Sicurezza e accesso > Campanella Home Assistant, genera una credenziale dedicata, revocabile. Copiala in secrets.yaml. L'indicatore richiede un URL HTTPS di NextDo raggiungibile da Home Assistant; un semplice URL ingress con autenticazione HA non è sufficiente.
 
 ```yaml
-type: vertical-stack
-cards:
-  - type: markdown
-    content: |
-      ## NextDo
-      Attività e promemoria personali
-  - type: button
-    name: Apri promemoria
-    icon: mdi:bell-check-outline
-    color: teal
-    icon_height: 48px
-    tap_action:
-      action: url
-      url_path: "https://SOSTITUIRE-URL-NEXTDO/?nextdo=reminders"
+nextdo_indicator_url: "https://SOSTITUIRE-URL-NEXTDO/api/personal/ha-indicator"
+nextdo_indicator_auth: "Bearer SOSTITUIRE-CREDENZIALE"
 ```
 
-Sostituire l'URL con l'indirizzo HTTPS effettivo di NextDo. Per installazioni disponibili esclusivamente tramite ingress, usare il percorso reale del pannello Home Assistant per aprire NextDo; il parametro di deep link potrebbe non essere inoltrato dal wrapper. Nessun token nei link. La card è statica, non mostra contatori reali.
+Integrare nella configurazione HA senza duplicare chiavi esistenti:
 
-## Prima fase promemoria
+```yaml
+binary_sensor:
+  - platform: rest
+    name: NextDo avviso personale
+    unique_id: nextdo_private_indicator
+    resource: !secret nextdo_indicator_url
+    headers:
+      Authorization: !secret nextdo_indicator_auth
+    value_template: "{{ value_json.active }}"
+    scan_interval: 30
+```
 
-Ricorrenze delle attività con data, con ancora mensile/annuale e salto delle occorrenze passate; completare una ricorrenza programma quella successiva. Rinvio Web a 10/30/60/1440 minuti senza modificare la data dell'attività; notifiche online periodiche esistenti, non precise al minuto. APK: ricorrenze e consultazione del rinvio. Ancora da fare: rinvio APK, gestione/cancellazione rinvio, notifiche locali offline e azioni dalla notifica con autenticazione, test fisico, card dinamica opzionale con accesso per utente. Non esporre dati personali nelle entità HA condivise o nel recorder.
+Scheda manuale, visibile solo quando c'è un avviso:
+
+```yaml
+type: conditional
+conditions:
+  - condition: state
+    entity: binary_sensor.nextdo_avviso_personale
+    state: "on"
+card:
+  type: button
+  entity: binary_sensor.nextdo_avviso_personale
+  name: NextDo · Avviso personale
+  icon: mdi:bell-ring
+  show_state: false
+  state_color: true
+  icon_height: 42px
+  tap_action:
+    action: url
+    url_path: "https://SOSTITUIRE-URL-NEXTDO/?nextdo=reminders"
+```
+
+Verificare l'entity_id effettivo e la configurazione prima del riavvio HA. Il link non contiene credenziali e NextDo richiede login e PIN. Una dashboard privata non impedisce necessariamente ad altri utenti HA di accedere allo stato dell'entità: evitare l'esposizione se anche la mera presenza di un avviso è riservata; valutare l'esclusione dal recorder. Se l'endpoint non è raggiungibile, lo stato non disponibile non equivale a nessun impegno. Nessuna modifica automatica alla dashboard reale.
+
+Ricorrenze e rinvio Web/APK; notifiche offline e azioni rapide richiedono ancora collaudo.
