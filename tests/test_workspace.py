@@ -113,7 +113,7 @@ def test_workspace_assets_and_sqlite_migration_are_idempotent(tmp_path):
  assert 'assets/workspace-ui.css?v=' in html
  assert html.index('workspace-ui.js')<html.index('assets/app.js')
  assert 'Assegna colleghi' in c.get('/assets/workspace-ui.js').text
- assert 'Il mio spazio' in c.get('/assets/app.js').text
+ assert 'I miei impegni di lavoro' in c.get('/assets/app.js').text
  assert (tmp_path/'nextdo-before-workspaces-migration.sqlite3').exists()
  importlib.import_module('app.workspace').upgrade(tmp_path/'nextdo.sqlite3',tmp_path)
  assert c.get('/api/my-courses').status_code==200
