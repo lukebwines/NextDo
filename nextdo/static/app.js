@@ -125,14 +125,25 @@ function render(){
  main.append(header);
  if(S.view==='dashboard')dashboard(main);else if(S.view==='archive')NextDoArchive.render(main);else if(['tasks','appointments','notes','mine','agenda'].includes(S.view))taskList(main,S.view);else if(S.view==='projects')NextDoWorkspace.projectView(main);else if(S.view==='project-progress'){main.append(btn('← Torna ai progetti',()=>changeView('projects'),'small'));const progress=el('div',{class:'project-progress-page'});NextDoProgress.dashboard(progress);if(!progress.children.length)progress.append(node('div','empty','Nessun progetto in evidenza o attività assegnata'));main.append(progress)}else if(S.view==='calendar')calendar(main);else if(S.view==='courses')coursesView(main);else if(S.view==='groups')groupsView(main);else if(S.view==='personal')NextDoPersonal.render(main);else settings(main);
 }
-function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:t.status==='review'?'Verificare la scadenza prima di completarla':'Completa attività'});if(t.can_complete===false||t.status==='review')cb.disabled=true;cb.addEventListener('change',async()=>{try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[el('button',{type:'button',class:'tasktitle task-open',onclick:()=>taskForm(t)},[t.title]),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),...(t.kind==='appointment'?[tag('Appuntamento')]:t.kind==='task'?[tag('Scadenza')]:[]),...(t.status==='review'?[tag('Da verificare','high')]:[]),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit,...(['task','appointment'].includes(t.kind)?[workAckButton(t)]:[]));return row}
+function reviewChoice(t){
+ const {box,back}=modal('Verifica impegno');
+ box.append(node('p','',t.title),node('p','sub','Conferma la voce se corretta oppure confermala e chiudila se già risolta. La presa visione resta un’azione separata.'));
+ let saving=false;
+ async function apply(action){
+  if(saving)return;saving=true;
+  try{await api('/work-mobile/review/'+t.id,{method:'POST',body:JSON.stringify({action,revision:t.work_revision})});back.remove();await refresh();render();msg(action==='complete'?'Confermato e completato':'Confermato')}
+  catch(e){msg(e.message,true)}finally{saving=false}
+ }
+ box.append(el('div',{class:'actions'},[...(t.can_confirm_review?[btn('Conferma',()=>apply('confirm'),'primary')]:[]),...(t.can_complete_review?[btn('Conferma e completa',()=>apply('complete'),'primary')]:[]),btn('Annulla',()=>back.remove(),'small')]));
+}
+function taskrow(t){const row=el('div',{class:'rowtask'});const cb=el('input',{type:'checkbox',checked:t.status==='done',title:t.status==='review'?'Conferma o completa':'Completa attività'});cb.disabled=t.status==='review'?!t.can_confirm_review:t.can_complete===false;cb.addEventListener('change',async()=>{if(t.status==='review'){cb.checked=false;reviewChoice(t);return}try{if(t.completion_mode==='per_course'&&t.courses.length){taskForm(t);cb.checked=t.status==='done';return}await api(`/tasks/${t.id}/toggle`,{method:'POST'});await refresh();render()}catch(e){msg(e.message,true)}});const main=el('div',{class:'taskmain'},[el('button',{type:'button',class:'tasktitle task-open',onclick:()=>taskForm(t)},[t.title]),el('div',{},[node('span','muted',fmt(t.due_at)+' · '),...(t.kind==='appointment'?[tag('Appuntamento')]:t.kind==='task'?[tag('Scadenza')]:[]),...(t.status==='review'?[tag('Da verificare','high')]:[]),tag(priority[t.priority],t.priority),...t.courses.slice(0,3).map(c=>tag(c.code)),...(t.labels||[]).slice(0,2).map(x=>tag(x))])]);const edit=btn('Apri',()=>taskForm(t),'small');row.append(cb,main,edit,...(['task','appointment'].includes(t.kind)?[workAckButton(t)]:[]));return row}
 function dashboardRow(t){
  const d=dueDay(t),past=!!d&&d<today(),appointment=t.kind==='appointment';
  const cls=past?'overdue':t.status==='review'?'review':appointment?'appointment':'deadline';
  const row=el('div',{class:'dash-task-row '+cls+(t.priority==='critical'?' critical':'')});
- const cb=el('input',{type:'checkbox','aria-label':'Completa '+t.title,title:t.status==='review'?'Verificare prima di completare':'Completa attività'});
- cb.disabled=t.status==='review'||t.can_complete===false;
- cb.addEventListener('change',async()=>{if(t.completion_mode==='per_course'&&t.courses?.length){taskForm(t);cb.checked=false;return}cb.disabled=true;try{await api('/tasks/'+t.id+'/toggle',{method:'POST'});await refresh();render()}catch(e){cb.checked=false;cb.disabled=false;msg(e.message,true)}});
+ const cb=el('input',{type:'checkbox','aria-label':'Completa '+t.title,title:t.status==='review'?'Conferma o completa':'Completa attività'});
+ cb.disabled=t.status==='review'?!t.can_confirm_review:t.can_complete===false;
+ cb.addEventListener('change',async()=>{if(t.status==='review'){cb.checked=false;reviewChoice(t);return}if(t.completion_mode==='per_course'&&t.courses?.length){taskForm(t);cb.checked=false;return}cb.disabled=true;try{await api('/tasks/'+t.id+'/toggle',{method:'POST'});await refresh();render()}catch(e){cb.checked=false;cb.disabled=false;msg(e.message,true)}});
  const date=d?new Date(d+'T12:00:00'):null;
  const tile=el('span',{class:'date-tile'},date?[node('span','tile-weekday',date.toLocaleDateString('it-IT',{weekday:'short'})),node('strong','tile-day',String(date.getDate())),node('span','tile-month',date.toLocaleDateString('it-IT',{month:'short'}))]:[ico('calendar'),node('span','tile-month','Senza data')]);
  const when=!d?'Senza data':past?'Trascorsa · '+fmt(t.due_at):d===today()?'Oggi · '+fmt(t.due_at):d===dayOffset(1)?'Domani · '+fmt(t.due_at):fmt(t.due_at);
@@ -310,7 +321,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
  const address=input('address','Indirizzo completo, città e paese',t?.address||'');address.maxLength=500;
  const type=select('kind',[['task','Scadenza / attività'],['appointment','Appuntamento'],['note','Nota libera']],t?.kind||kind);
  const pr=select('priority',Object.entries(priority),t?.priority||suggestion?.priority||'normal');
- const st=select('status',Object.entries(statuses),t?.status||'todo');
+ const st=select('status',Object.entries(statuses).filter(([k])=>t?.status!=='review'||k!=='done'||t.can_complete_review).map(([k,l])=>[k,t?.status==='review'&&k==='todo'?'Conferma · Da fare':t?.status==='review'&&k==='done'?'Conferma e completa':l]),t?.status||'todo');
  const rawDue=t?.due_at||suggestion?.due_at||'';
  const dateOnly=type.value==='appointment'&&/^\d{4}-\d{2}-\d{2}$/.test(rawDue);
  const due=input('due_at','',dateOnly?rawDue:dtLocal(rawDue),dateOnly?'date':'datetime-local');
@@ -388,7 +399,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
   if(!confirm('Eliminare definitivamente questa attività?'))return;
   try{await api('/tasks/'+t.id,{method:'DELETE'});back.remove();await refresh();render()}catch(e){msg(e.message,true)}
  },'danger'));
- if(t?.status==='review')form.append(node('p','sub','Scadenza da verificare: controlla la fonte, il termine e gli eventuali CdS. Per confermarla imposta lo stato Da fare, quindi salva.'));
+ if(t?.status==='review')form.append(node('p','sub','Voce da verificare: controlla la fonte e gli eventuali dati. Se è già risolta seleziona Conferma e completa e salva; per i completamenti per CdS restano i controlli previsti.'));
  const save=el('button',{class:'btn primary',type:'submit',text:editing?'Salva modifiche':'Crea attività'});
  if(t&&t.can_edit===false)save.hidden=true;
  actions.append(save);form.append(actions);
@@ -409,7 +420,7 @@ function taskForm(t=null,kind='task',suggestion=null,preferences={}){
    course_ids:scope.value==='cds'?courses.selected():[],reminders:mins
   };
   try{
-   if(currentId){await api('/tasks/'+currentId,{method:'PUT',body:JSON.stringify(data)})}
+   if(currentId){if(t?.status==='review'&&data.status==='done'){if(!confirm('Confermare e completare questa voce?'))return;data.confirm_review=true;data.review_revision=t.work_revision}await api('/tasks/'+currentId,{method:'PUT',body:JSON.stringify(data)})}
    else{
     const created=await api('/tasks',{method:'POST',body:JSON.stringify(data)});
     currentId=created.id;

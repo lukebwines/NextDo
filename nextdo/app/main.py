@@ -158,7 +158,7 @@ def can_edit(c,u,t):
  return workspace.can_write(c,u,t)
 
 def taskdetail(c,t,u=None):
- d=dict(t);d['work_revision']=work_mobile.revision(t);d['work_acknowledged']=work_mobile.seen(c,u,t) is not None if u and t['kind'] in ('task','appointment') else False;d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['external_progress']=[dict(r) for r in c.execute('SELECT course_id,status,updated_at,source FROM external_course_progress WHERE task_id=?',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];d['can_edit']=workspace.can_write(c,u,t) if u else False;d['can_move']=workspace.can_move(c,u,t) if u else False;d['can_complete']=(t['status']!='review' and (workspace.can_finish(c,u,t) or (t['completion_mode']=='per_course' and bool(c.execute('SELECT 1 FROM task_courses tc JOIN course_assignees ca ON ca.course_id=tc.course_id WHERE tc.task_id=? AND ca.user_id=? LIMIT 1',(t['id'],u['id'])).fetchone())))) if u else False;return d
+ d=dict(t);d['work_revision']=work_mobile.revision(t);d['work_acknowledged']=work_mobile.seen(c,u,t) is not None if u and t['kind'] in ('task','appointment') else False;d['labels']=json.loads(d['labels'] or '[]');d['courses']=[dict(r) for r in c.execute('SELECT c.id,c.code,c.name,tc.done FROM task_courses tc JOIN courses c ON c.id=tc.course_id WHERE tc.task_id=? ORDER BY c.code',(t['id'],))];d['external_progress']=[dict(r) for r in c.execute('SELECT course_id,status,updated_at,source FROM external_course_progress WHERE task_id=?',(t['id'],))];d['reminders']=[r['minutes_before'] for r in c.execute('SELECT minutes_before FROM reminders WHERE task_id=?',(t['id'],))];d['attachments']=[dict(r) for r in c.execute('SELECT id,filename,mime,size FROM attachments WHERE task_id=?',(t['id'],))];d['can_edit']=workspace.can_write(c,u,t) if u else False;d['can_move']=workspace.can_move(c,u,t) if u else False;d['can_complete']=(t['status']!='review' and (workspace.can_finish(c,u,t) or (t['completion_mode']=='per_course' and bool(c.execute('SELECT 1 FROM task_courses tc JOIN course_assignees ca ON ca.course_id=tc.course_id WHERE tc.task_id=? AND ca.user_id=? LIMIT 1',(t['id'],u['id'])).fetchone())))) if u else False;d.update(work_mobile.review_options(c,u,t)) if u else None;return d
 
 def check_course_code(code):
  # Historical INCA rule: M followed by 2-3 alphanumerics, including MM? and M??R.
@@ -178,7 +178,7 @@ def home():
 @app.get('/api/build')
 def build_details(req:Request):
  user(req)
- return {'version':'0.2.11-test','assets':asset_versions()}
+ return {'version':'0.2.13-test','assets':asset_versions()}
 @app.get('/api/setup')
 def setup():
  with conn() as c:count=c.execute('SELECT COUNT(*) FROM users').fetchone()[0]
@@ -347,6 +347,7 @@ class TaskIn(BaseModel):
  completion_mode:str='global';display_enabled:bool=False;recurrence:str='none'
  scope:str='personal';project_id:Optional[int]=None
  labels:list[str]=Field(default_factory=list);course_ids:list[int]=Field(default_factory=list);reminders:list[int]=Field(default_factory=list)
+ confirm_review:bool=False;review_revision:Optional[str]=None
 def validate_task(c,u,b):
  if b.priority not in ('low','normal','high','critical') or b.status not in ('review','todo','doing','waiting','done') or b.kind not in ('task','note','appointment') or b.completion_mode not in ('global','per_course'):err(400,'Valore non valido')
  if b.recurrence not in ('none','daily','weekly','monthly','yearly'):err(400,'Ricorrenza non valida')
@@ -477,7 +478,10 @@ def task_update(tid:int,b:TaskIn,req:Request):
    if b.scope!=t['scope'] or b.project_id!=t['project_id'] or b.assigned_to!=t['assigned_to'] or (t['scope']=='cds' and set(b.course_ids)!=original):
     err(403,'Solo il proprietario o l’amministratore può cambiare ambito, CdS e responsabili')
   validate_task(c,u,b)
-  if t['status']=='review' and b.status=='done':err(400,'Confermare la scadenza in stato Da fare prima di completarla')
+  if t['status']=='review' and b.status=='done':
+   if not b.confirm_review:err(400,'Usare Conferma e completa per chiudere una scadenza da verificare')
+   if b.review_revision!=work_mobile.revision(t):err(409,'Voce modificata: riaprire la scheda')
+   if not work_mobile.review_options(c,u,t)['can_complete_review'] or b.completion_mode!='global':err(403,'Completamento non autorizzato o previsto per singolo CdS')
   if t['status']=='review' and b.status!='review':
    b.labels=[x for x in b.labels if x!='Da verificare']
    b.description=b.description.replace('DA VERIFICARE - scadenza proposta automaticamente da email, non convalidata.',
@@ -499,7 +503,7 @@ def task_update(tid:int,b:TaskIn,req:Request):
   else:ids=[r[0] for r in c.execute('SELECT id FROM courses WHERE active=1')] if b.scope=='common' and b.completion_mode=='per_course' else b.course_ids
   put_task_courses(c,tid,ids);put_reminders(c,tid,b.reminders)
   if t['status']!=b.status:
-   c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],b.status,''))
+   c.execute('INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)',(tid,u['id'],t['status'],b.status,'Conferma e completamento manuale' if t['status']=='review' and b.status=='done' else ''))
   record(c,u['id'],'update','task',tid)
  return {'ok':True}
 @app.delete('/api/tasks/{tid}')
@@ -742,7 +746,7 @@ calendar_import.register_routes(app,conn=conn,user=user,csrf=csrf,record=record)
 from . import personal_trips
 personal_trips.register_routes(app,user=user,csrf=csrf,conn=conn,data_path=DATA,ph=PH)
 from . import work_mobile
-work_mobile.register(app,conn=conn,user=user,csrf=csrf,accessible=accessible,tz=TZ,record=record,data_path=DATA)
+work_mobile.register(app,conn=conn,user=user,csrf=csrf,accessible=accessible,tz=TZ,record=record,data_path=DATA,iso=iso)
 from . import email_intake
 email_intake.register_routes(app,user=user,csrf=csrf,data_path=DATA)
 from . import gmail_auto
