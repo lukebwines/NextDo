@@ -293,3 +293,17 @@ def test_personal_pin_accepts_four_to_twelve_digits_and_can_be_changed(tmp_path)
  assert c.post(p+"/lock",headers=h).status_code==200
  assert c.post(p+"/unlock",headers=h,json={"pin":"5678"}).status_code==200
  c.close()
+
+def test_private_review_can_be_closed_without_inventing_date(tmp_path):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ url=p+"/items"
+ item=c.post(url,headers=h,json={"title":"Resolved email","kind":"appointment","status":"review"})
+ assert item.status_code==200,item.text
+ target=url+"/"+str(item.json()["id"])
+ assert c.post(target,headers=h,json={"status":"todo"}).status_code==400
+ assert c.post(target,headers=h,json={"status":"done"}).status_code==200
+ row=c.get(url).json()["items"][0]
+ assert row["status"]=="done" and row["due_at"] is None
+ assert c.post(url,headers=h,json={"title":"New","kind":"deadline","status":"done"}).status_code==400
+ c.close()

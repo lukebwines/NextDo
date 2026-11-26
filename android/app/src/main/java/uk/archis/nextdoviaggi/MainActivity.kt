@@ -665,6 +665,16 @@ class MainActivity : ComponentActivity() {
             api.agenda(cfg.getString("token"))
         }){workAgenda=it}
     }
+    private fun reviewWork(detail:JSONObject,action:String){
+        val cfg=workConnection?:return
+        if(workBusy)return
+        workTask({
+            val api=WorkApi(cfg.getString("url"))
+            api.review(cfg.getString("token"),detail.getLong("id"),detail.str("revision"),action)
+            WorkAlerts.kick(this)
+            api.agenda(cfg.getString("token"))
+        }){workAgenda=it;workDetail=null}
+    }
     private fun loadWorkDetail(id:Long){
         val cfg=workConnection?:return
         workTask({WorkApi(cfg.getString("url")).detail(cfg.getString("token"),id)}){if(area==NextDoArea.WORK||area==NextDoArea.HOME)workDetail=it}
@@ -729,7 +739,7 @@ class MainActivity : ComponentActivity() {
         }
         val t = current
         BackHandler(enabled=!locked&&(t!=null||area!=NextDoArea.HOME||pdf!=null)){backArea()}
-        if(!locked && (area==NextDoArea.WORK||area==NextDoArea.HOME)) workDetail?.let { detail -> WorkDetailDialog(detail,{d->navigate(detail,d)}){workDetail=null} }
+        if(!locked && (area==NextDoArea.WORK||area==NextDoArea.HOME)) workDetail?.let { detail -> WorkDetailDialog(detail,workBusy,{d->navigate(detail,d)},{action->reviewWork(detail,action)}){workDetail=null} }
         if(!locked && pdf != null) {
             PdfScreen()
             return

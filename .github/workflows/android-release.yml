@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.7-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.8-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.7-test"
-            RELEASE_NOTES="PIN personale configurabile da 4 a 12 cifre, modificabile in Sicurezza e accesso. L’app Android accetta PIN da 4 a 12 cifre per la nuova autorizzazione. Compatibile con NextDo Web 0.2.12-test. Nessuna modifica ai dati offline o ai viaggi. Aggiornare senza disinstallare."
+            test "$ANDROID_VERSION" = "0.2.8-test"
+            RELEASE_NOTES="Conferma o conferma e completa le voci da verificare. Azioni professionali nel dettaglio Android con permessi server e verifica della revisione; presa visione indipendente. Area personale: chiusura di impegni già risolti senza inventare date. Richiede NextDo Web 0.2.13-test per le nuove azioni. Aggiornare senza disinstallare. Collaudo fisico necessario."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then

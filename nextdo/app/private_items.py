@@ -20,7 +20,7 @@ def owner_id(c,identity):
 def list_items(c,uid):
  return [dict(r) for r in c.execute("SELECT id,title,description,kind,due_at,status,priority FROM private_items WHERE owner_id=? ORDER BY status='done',due_at IS NULL,due_at,id DESC",(uid,))]
 
-def checked(b):
+def checked(b,allow_undated_done=False):
  title=b.get("title");description=b.get("description","");kind=b.get("kind","task")
  due=b.get("due_at") or None;status=b.get("status","todo");priority=b.get("priority","normal")
  if not isinstance(title,str) or not title.strip() or len(title)>250 or not isinstance(description,str) or len(description)>20000:fail("Titolo o descrizione non validi")
@@ -33,7 +33,7 @@ def checked(b):
     d=datetime.fromisoformat(due)
     if "T" not in due or d.tzinfo is not None:raise ValueError()
   except ValueError:fail("Data non valida")
- if kind in ("appointment","deadline") and not due and status!="review":fail("Inserire una data")
+ if kind in ("appointment","deadline") and not due and status!="review" and not (status=="done" and allow_undated_done):fail("Inserire una data")
  return title.strip(),description,kind,due,status,priority
 
 def create(c,uid,b):
@@ -43,7 +43,7 @@ def create(c,uid,b):
 def update(c,uid,i,b):
  old=c.execute("SELECT * FROM private_items WHERE owner_id=? AND id=?",(uid,i)).fetchone()
  if not old:fail("Elemento non trovato",404)
- vals=checked({**dict(old),**b})
+ vals=checked({**dict(old),**b},allow_undated_done=old['status'] in ('review','done') and old['due_at'] is None)
  c.execute("UPDATE private_items SET title=?,description=?,kind=?,due_at=?,status=?,priority=?,updated_at=CURRENT_TIMESTAMP WHERE owner_id=? AND id=?",(*vals,uid,i))
  return {"id":i}
 

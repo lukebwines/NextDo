@@ -261,24 +261,25 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
         var time by remember(item){mutableStateOf(item.str("due_at").takeIf{it.length>=16}.orEmpty().drop(11).take(5))}
         var status by remember(item){mutableStateOf(item.str("status").ifBlank{"todo"})}
         var priority by remember(item){mutableStateOf(item.str("priority").ifBlank{"normal"})}
+        val reviewedUndated=id.isNotBlank()&&item.str("status") in listOf("review","done")&&item.str("due_at").let{it.isBlank()||it=="null"}
         val validDate=day.isBlank()||runCatching{LocalDate.parse(day);true}.getOrDefault(false)
         val validTime=time.isBlank()||(day.isNotBlank()&&runCatching{java.time.LocalTime.parse(time);time.length==5}.getOrDefault(false))
         AlertDialog(onDismissRequest={editing=null},title={Text(if(id.isBlank())"Nuovo impegno" else "Modifica impegno")},text={
             Column(Modifier.heightIn(max=470.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
                 OutlinedTextField(title,{title=it},label={Text("Titolo")},singleLine=true)
                 for((k,label) in names)FilterChip(selected=type==k,onClick={type=k},label={Text(label)})
-                DateField("Data",day,{day=it;if(it.isBlank())time=""},enabled=enabled,clearable=type=="task"||status=="review",appearance=PickerAppearance(light,appearance?.optString("palette").orEmpty()))
+                DateField("Data",day,{day=it;if(it.isBlank())time=""},enabled=enabled,clearable=type=="task"||status=="review"||(status=="done"&&reviewedUndated),appearance=PickerAppearance(light,appearance?.optString("palette").orEmpty()))
                 TimeField("Ora facoltativa",time,{time=it},enabled=enabled&&day.isNotBlank(),appearance=PickerAppearance(light,appearance?.optString("palette").orEmpty()))
-                for((k,label) in listOf("review" to "Da verificare","todo" to "Da fare","done" to "Completato"))FilterChip(selected=status==k,onClick={status=k},label={Text(label)})
+                for((k,label) in listOf("review" to "Da verificare","todo" to "Da fare","done" to "Completato"))FilterChip(selected=status==k,onClick={status=k},label={Text(if(item.str("status")=="review"&&k=="todo")"Conferma" else if(item.str("status")=="review"&&k=="done")"Conferma e completa" else label)})
                 for((k,label) in listOf("low" to "Bassa","normal" to "Normale","high" to "Alta","urgent" to "Urgente"))FilterChip(selected=priority==k,onClick={priority=k},label={Text(label)})
                 OutlinedTextField(desc,{desc=it},label={Text("Descrizione / email originale")},minLines=3)
                 if(id.isNotBlank())TextButton(onClick={remove=true},enabled=enabled){Text("Elimina")}
             }
-        },confirmButton={TextButton(enabled=enabled&&title.isNotBlank()&&validDate&&validTime&&(type=="task"||status=="review"||day.isNotBlank()),onClick={
+        },confirmButton={TextButton(enabled=enabled&&title.isNotBlank()&&validDate&&validTime&&(type=="task"||status=="review"||day.isNotBlank()||(status=="done"&&reviewedUndated)),onClick={
             val due=ItalianDateTime.storedDue(item.str("due_at"),day,time)?:JSONObject.NULL
             save(id,JSONObject().put("title",title).put("description",desc).put("kind",type).put("due_at",due).put("status",status).put("priority",priority))
             editing=null
-        }){Text("Salva")}},dismissButton={TextButton(onClick={editing=null}){Text("Annulla")}})
+        }){Text(if(item.str("status")=="review"&&status=="done")"Conferma e completa" else if(item.str("status")=="review"&&status=="todo")"Conferma" else "Salva")}},dismissButton={TextButton(onClick={editing=null}){Text("Annulla")}})
         if(remove)AlertDialog(onDismissRequest={remove=false},title={Text("Eliminare l'impegno?")},confirmButton={TextButton(onClick={remove=false;delete(id);editing=null},enabled=enabled){Text("Elimina")}},dismissButton={TextButton(onClick={remove=false}){Text("Annulla")}})
     }
 }

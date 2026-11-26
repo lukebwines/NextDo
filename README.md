@@ -1,3 +1,8 @@
+# NextDo — Home Assistant add-on
+
+## 0.2.13-test — Conferma e completa
+Le voci professionali in stato Da verificare possono essere confermate oppure confermate e completate in un solo passaggio, anche dal dettaglio Android 0.2.8-test. Permessi esistenti, controllo revisione e completamento per singolo CdS preservati. La presa visione è separata. Nell'Area personale si può chiudere una voce già risolta senza inventare una data mancante; confermare un appuntamento o scadenza aperti richiede ancora la data. Nessuna migrazione o modifica alle regole di notifica. Backup e collaudo sul dispositivo richiesti.
+
 ## 0.2.12-test — PIN personale configurabile
 Il PIN dell’Area personale è configurabile da 4 a 12 cifre, sia alla prima impostazione sia successivamente in **Area personale → Sicurezza e accesso**. La modifica richiede il PIN attuale e la conferma del nuovo. Restano attivi blocco dopo cinque tentativi errati e sospensione per cinque minuti. La stessa lunghezza è accettata dall’autorizzazione dell’app Android. I PIN già esistenti a sei cifre restano validi. Nessuna migrazione del database e nessun dato personale viene modificato.
 

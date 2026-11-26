@@ -120,3 +120,60 @@ def test_push_payload_and_config(tmp_path,monkeypatch):
  assert c.post(p+"/push/disable",headers=h).status_code==200
  assert c.get(m+"/alerts/push/config",headers=alert).json()["config"] is None
  c.close()
+
+def test_review_actions_web_mobile_permissions_and_stale_revision(tmp_path):
+ c,h=init(tmp_path);p="/api/work-mobile";m="/api/mobile/v1/work"
+ create_user(c,h,"reader")
+ def create(title,**kw):
+  r=c.post("/api/tasks",headers=h,json={"title":title,"status":"review","labels":["Da verificare","Test"],"description":"[DA VERIFICARE] Scadenza generata automaticamente, non convalidata.",**kw})
+  assert r.status_code==200,r.text
+  return r.json()["id"]
+ def pair():
+  code=c.post(p+"/pair",headers=h).json()["code"]
+  return {"Authorization":"Bearer "+c.post(m+"/pair",json={"code":code}).json()["device_token"]}
+ tid=create("Already resolved",kind="appointment")
+ other=create("To confirm")
+ shared=create("Shared review",scope="common")
+ admin=pair()
+ row=c.get(m+"/agenda/"+str(tid),headers=admin).json()
+ assert row["can_confirm_review"] and row["can_complete_review"]
+ assert c.post(m+"/agenda/"+str(tid)+"/review",headers=admin,json={"revision":"old","action":"complete"}).status_code==409
+ assert c.post(m+"/agenda/"+str(tid)+"/ack",headers=admin,json={"revision":row["revision"]}).status_code==200
+ assert c.get("/api/tasks/"+str(tid)).json()["status"]=="review"
+ body={"revision":row["revision"],"action":"complete"}
+ assert c.post(m+"/agenda/"+str(tid)+"/review",headers=admin,json=body).json()["status"]=="done"
+ assert c.post(m+"/agenda/"+str(tid)+"/review",headers=admin,json=body).status_code==409
+ detail=c.get("/api/tasks/"+str(tid)).json()
+ assert detail["status"]=="done" and detail["due_at"] is None and detail["labels"]==["Test"]
+ assert "Scadenza confermata manualmente" in detail["description"]
+ assert tid not in [x["id"] for x in c.get(m+"/agenda",headers=admin).json()["items"]]
+ rev=c.get("/api/tasks/"+str(other)).json()["work_revision"]
+ assert c.post(p+"/review/"+str(other),headers=h,json={"revision":rev,"action":"confirm"}).json()["status"]=="todo"
+ sign_in(c,h,"reader")
+ reader=pair()
+ row=c.get(m+"/agenda/"+str(shared),headers=reader).json()
+ assert not row["can_confirm_review"] and not row["can_complete_review"]
+ assert c.post(m+"/agenda/"+str(shared)+"/review",headers=reader,json={"revision":row["revision"],"action":"complete"}).status_code==403
+ assert c.post(m+"/agenda/"+str(tid)+"/review",headers=reader,json=body).status_code==404
+ c.close()
+
+def test_review_complete_requires_explicit_form_confirmation_and_respects_per_course(tmp_path):
+ c,h=init(tmp_path)
+ def create(**kw):
+  r=c.post("/api/tasks",headers=h,json={"title":"Synthetic review","status":"review",**kw})
+  assert r.status_code==200,r.text
+  return r.json()["id"]
+ tid=create()
+ url="/api/tasks/"+str(tid)
+ row=c.get(url).json()
+ payload={"title":"Synthetic review","status":"done","scope":"personal"}
+ assert c.put(url,headers=h,json=payload).status_code==400
+ assert c.put(url,headers=h,json={**payload,"confirm_review":True,"review_revision":"old"}).status_code==409
+ assert c.put(url,headers=h,json={**payload,"confirm_review":True,"review_revision":row["work_revision"]}).status_code==200
+ assert c.get(url).json()["status"]=="done"
+ shared=create(scope="common",completion_mode="per_course")
+ row=c.get("/api/tasks/"+str(shared)).json()
+ assert row["can_confirm_review"] and not row["can_complete_review"]
+ assert c.post("/api/work-mobile/review/"+str(shared),headers=h,json={"revision":row["work_revision"],"action":"complete"}).status_code==403
+ assert c.get("/api/tasks/"+str(shared)).json()["status"]=="review"
+ c.close()

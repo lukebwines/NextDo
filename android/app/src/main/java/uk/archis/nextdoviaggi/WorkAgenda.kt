@@ -49,6 +49,7 @@ internal class WorkApi(private val base:String){
         return WorkAgenda(items,p.str("today"),p.str("week_start"),p.str("timezone"),p.str("updated_at"),p.str("display_name"))
     }
     fun acknowledge(token:String,id:Long,revision:String)=api.obj("/work/agenda/"+id+"/ack",token,JSONObject().put("revision",revision))
+    fun review(token:String,id:Long,revision:String,action:String)=api.obj("/work/agenda/"+id+"/review",token,JSONObject().put("revision",revision).put("action",action))
     fun detail(token:String,id:Long)=api.obj("/work/agenda/"+id,token)
     fun revoke(token:String)=api.obj("/work/revoke",token,JSONObject())
 }
@@ -181,7 +182,8 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
     Text("Presa visione sincronizzata; non modifica lo stato dell’attività.",color=MutedWork,fontSize=12.sp)
 }
 @Composable
-internal fun WorkDetailDialog(detail:JSONObject,onMap:(Boolean)->Unit,close:()->Unit){
+internal fun WorkDetailDialog(detail:JSONObject,busy:Boolean,onMap:(Boolean)->Unit,onReview:(String)->Unit,close:()->Unit){
+    var confirmComplete by remember(detail){mutableStateOf(false)}
     AlertDialog(onDismissRequest=close,title={Text(detail.str("title"))},text={
         Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text(statusName(detail.str("status"))+" · "+priorityName(detail.str("priority")))
@@ -192,6 +194,11 @@ internal fun WorkDetailDialog(detail:JSONObject,onMap:(Boolean)->Unit,close:()->
             }
             Text(detail.str("description").take(12000).ifBlank{"Nessuna descrizione"})
             if(detail.str("description").length>12000)Text("Descrizione lunga: consulta il testo completo sul web.",fontSize=12.sp)
+            if(detail.str("status")=="review"){
+                if(detail.optBoolean("can_confirm_review"))Button(onClick={onReview("confirm")},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("Conferma")}
+                if(detail.optBoolean("can_complete_review"))Button(onClick={confirmComplete=true},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("Conferma e completa")}
+            }
         }
     },confirmButton={TextButton(onClick=close){Text("Chiudi")}})
+    if(confirmComplete)AlertDialog(onDismissRequest={confirmComplete=false},title={Text("Confermare e completare?")},text={Text("La voce sarà confermata e chiusa in un solo passaggio.")},confirmButton={TextButton(onClick={confirmComplete=false;onReview("complete")},enabled=!busy){Text("Conferma e completa")}},dismissButton={TextButton(onClick={confirmComplete=false}){Text("Annulla")}})
 }

@@ -1,8 +1,8 @@
 """Explicitly paired, read-only professional agenda; no travel or admin access."""
-import hashlib,re,secrets,time
+import hashlib,re,secrets,time,json
 from datetime import datetime,date,timedelta,timezone
 from fastapi import HTTPException,Request
-from . import work_push, assistant_link
+from . import work_push, assistant_link, workspace
 
 def fail(code,msg):raise HTTPException(code,msg)
 def token():return secrets.token_urlsafe(32)
@@ -32,7 +32,16 @@ def day_info(value,tz):
   dt=(dt if dt.tzinfo else dt.replace(tzinfo=tz)).astimezone(tz)
   return dt.date().isoformat(),dt.isoformat()
  except (ValueError,OverflowError,TypeError):return None,None
-def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
+def review_options(c,u,t):
+ reviewing=t["status"]=="review" and t["kind"] in ("task","appointment") and workspace.can_read(c,u,t)
+ confirm=bool(reviewing and workspace.can_write(c,u,t))
+ complete=bool(confirm and workspace.can_finish(c,u,t) and t["completion_mode"]=="global")
+ return {"can_confirm_review":confirm,"can_complete_review":complete}
+
+def confirmed_fields(description,labels):
+ return description.replace('DA VERIFICARE - scadenza proposta automaticamente da email, non convalidata.','Scadenza confermata manualmente (origine: email Gmail NextDo).',1).replace('[DA VERIFICARE] Scadenza generata automaticamente, non convalidata.','Scadenza confermata manualmente (origine: Cloudflare Email Routing).',1),[x for x in labels if x!='Da verificare']
+
+def register(app,*,conn,user,csrf,accessible,tz,record,data_path,iso):
  with conn() as c:ensure(c)
  work_push.register(app,conn=conn,user=user,csrf=csrf,accessible=accessible,data_path=data_path,revision=revision,seen=seen)
  def credentials(c,uid):
@@ -63,6 +72,29 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
   return t
  def key_for(d,t):
   return digest(d["id"]+":"+revision(t))
+ def review(c,u,tid,b):
+  t=allowed_task(c,u,tid)
+  if b.get("revision")!=revision(t) or t["status"]!="review":fail(409,"Voce modificata o già verificata: aggiorna prima di procedere")
+  action=b.get("action")
+  if action not in ("confirm","complete"):fail(400,"Azione non valida")
+  options=review_options(c,u,t)
+  if not options["can_confirm_review"]:fail(403,"Conferma non autorizzata")
+  if action=="complete" and not options["can_complete_review"]:fail(403,"Completamento non autorizzato o previsto per singolo CdS")
+  status="done" if action=="complete" else "todo"
+  desc,labels=confirmed_fields(t["description"] or "",json.loads(t["labels"] or "[]"))
+  c.execute("UPDATE tasks SET status=?,description=?,labels=?,updated_at=? WHERE id=?",(status,desc,json.dumps(labels,ensure_ascii=False),iso(),tid))
+  note="Conferma e completamento manuale" if action=="complete" else "Conferma manuale"
+  c.execute("INSERT INTO task_progress(task_id,actor_id,old_status,new_status,note) VALUES(?,?,?,?,?)",(tid,u["id"],"review",status,note))
+  record(c,u["id"],"review_complete" if action=="complete" else "review_confirm","task",tid)
+  return {"ok":True,"status":status}
+ @app.post("/api/work-mobile/review/{tid}")
+ def web_review(tid:int,req:Request,b:dict):
+  u=user(req);csrf(req)
+  with conn() as c:return review(c,u,tid,b)
+ @app.post("/api/mobile/v1/work/agenda/{tid}/review")
+ def mobile_review(tid:int,req:Request,b:dict):
+  with conn() as c:
+   u,d=auth(c,req);return review(c,u,tid,b)
  @app.post("/api/work-mobile/ack/{tid}")
  def web_ack(tid:int,req:Request,b:dict):
   u=user(req);csrf(req)
@@ -165,7 +197,7 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
     overdue=False
     if day:
      overdue=day<today.isoformat() if not instant else datetime.fromisoformat(instant)<now
-    rows.append({"id":t["id"],"title":t["title"],"kind":t["kind"],"priority":t["priority"],"status":t["status"],"due_at":t["due_at"],"day":day,"instant":instant,"overdue":overdue,"updated_at":t["updated_at"],"revision":revision(t),"acknowledged":seen(c,u,t) is not None})
+    rows.append({"id":t["id"],"title":t["title"],"kind":t["kind"],"priority":t["priority"],"status":t["status"],"due_at":t["due_at"],"day":day,"instant":instant,"overdue":overdue,"updated_at":t["updated_at"],"revision":revision(t),"acknowledged":seen(c,u,t) is not None,**review_options(c,u,t)})
     if len(rows)>200:break
    more=len(rows)>200;rows=rows[:200]
    return {"items":rows,"next_after":rows[-1]["id"] if more else None,"today":today.isoformat(),"week_start":monday.isoformat(),"timezone":str(tz),"updated_at":now.isoformat(),"display_name":u["display_name"]}
@@ -174,7 +206,7 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path):
   with conn() as c:
    u,d=auth(c,req);t=c.execute("SELECT * FROM tasks WHERE id=? AND kind IN ('task','appointment')",(tid,)).fetchone()
    if not t or not accessible(c,u,t):fail(404,"Voce non disponibile")
-   return {"id":t["id"],"title":t["title"],"description":t["description"] or "","address":t["address"] or "","kind":t["kind"],"status":t["status"],"priority":t["priority"],"due_at":t["due_at"],"start_at":t["start_at"],"revision":revision(t),"acknowledged":seen(c,u,t) is not None}
+   return {"id":t["id"],"title":t["title"],"description":t["description"] or "","address":t["address"] or "","kind":t["kind"],"status":t["status"],"priority":t["priority"],"due_at":t["due_at"],"start_at":t["start_at"],"revision":revision(t),"acknowledged":seen(c,u,t) is not None,**review_options(c,u,t)}
 
  @app.post("/api/mobile/v1/work/alerts/enable")
  def enable_alerts(req:Request):

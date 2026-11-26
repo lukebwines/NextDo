@@ -141,15 +141,16 @@ const NextDoPersonal=(()=>{
    const title=input('title','Titolo',item.title||''),desc=el('textarea',{class:'field',rows:'5',value:item.description||''});
    const day=input('date','',String(item.due_at||'').slice(0,10),'date'),clock=input('time','',String(item.due_at||'').slice(11,16),'time');
    const type=select('kind',kinds.map(([k,l])=>[k,l]),item.kind||kind);
-   const status=select('status',[['review','Da verificare'],['todo','Da fare'],['done','Completato']],item.status||'todo');
+   const status=select('status',[['review','Da verificare'],['todo',item.status==='review'?'Conferma · Da fare':'Da fare'],['done',item.status==='review'?'Conferma e completa':'Completato']],item.status||'todo');
    const priority=select('priority',[['low','Bassa'],['normal','Normale'],['high','Alta'],['urgent','Urgente']],item.priority||'normal');
-   const commit=btn('Salva',async()=>{if(busy||token!==generation)return;busy=true;try{
+   const commit=btn('Salva',async()=>{if(busy||token!==generation)return;if(item.status==='review'&&status.value==='done'&&!confirm('Confermare e completare questo impegno?'))return;busy=true;try{
     const due=day.value?(day.value+(clock.value?'T'+clock.value+':00':'')):null;
     if(clock.value&&!day.value)throw Error('Inserisci anche la data');
     await api(path+'/items'+(item.id?'/'+item.id:''),{method:'POST',body:JSON.stringify({title:title.value,description:desc.value,kind:type.value,due_at:due,status:status.value,priority:priority.value})});
     back.remove();if(token===generation){section=type.value;render(main)}
    }catch(e){if(token===generation)report(e)}finally{busy=false}},'primary');
    box.append(field('Titolo',title),field('Tipo',type),field('Data',day),field('Ora (facoltativa)',clock),field('Stato',status),field('Priorità',priority),field('Descrizione / email originale',desc),toolbar(commit,btn('Annulla',()=>back.remove(),'small')));
+   if(item.status==='review')box.append(toolbar(btn('Conferma',()=>{status.value='todo';commit.click()},'small'),btn('Conferma e completa',()=>{status.value='done';commit.click()},'primary')));
    if(item.id)box.append(btn('Sposta in Professionale',async()=>{if(busy||!confirm('Spostare nell’area Professionale? Titolo e descrizione saranno gestiti come dati professionali.'))return;busy=true;try{await api(path+'/transfers',{method:'POST',body:JSON.stringify({action:'to_work',id:item.id,confirm:true})});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}},'small'));
    if(item.id)box.append(btn('Elimina',async()=>{if(busy||!confirm('Eliminare questo impegno personale?'))return;busy=true;try{await api(path+'/items/'+item.id,{method:'DELETE'});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}},'small'));
   }
