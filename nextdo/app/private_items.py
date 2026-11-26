@@ -60,6 +60,9 @@ def next_due(due,anchor,recurrence,now=None):
   return d.replace(year=y,month=m,day=min(initial.day,monthrange(y,m)[1]))
  try:
   d=advance(original)
+  if recurrence in ("daily","weekly") and d<=now:
+   step=timedelta(days=1 if recurrence=="daily" else 7)
+   d+=step*((now-d)//step+1)
   while d<=now:d=advance(d)
  except (ValueError,OverflowError):fail("Data successiva non valida")
  return d.date().isoformat() if len(due)==10 else d.isoformat(timespec="seconds")
@@ -85,11 +88,11 @@ def update(c,uid,i,b):
  return {"id":i}
 
 def snooze(c,uid,i,minutes):
- if type(minutes)!=int or minutes not in (10,30,60,1440):fail("Rinvio non valido")
+ if type(minutes)!=int or minutes not in (0,10,30,60,1440):fail("Rinvio non valido")
  old=c.execute("SELECT kind,status FROM private_items WHERE owner_id=? AND id=?",(uid,i)).fetchone()
  if not old:fail("Elemento non trovato",404)
  if old["kind"]!="task" or old["status"]=="done":fail("Rinvio disponibile per attività aperte")
- until=(datetime.now(TZ)+timedelta(minutes=minutes)).replace(tzinfo=None).isoformat(timespec="seconds")
+ until=(datetime.now(TZ)+timedelta(minutes=minutes)).replace(tzinfo=None).isoformat(timespec="seconds") if minutes else None
  c.execute("UPDATE private_items SET snoozed_until=? WHERE owner_id=? AND id=?",(until,uid,i))
  return {"id":i,"snoozed_until":until}
 

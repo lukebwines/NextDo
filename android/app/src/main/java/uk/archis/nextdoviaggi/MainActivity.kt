@@ -105,6 +105,16 @@ class MainActivity : ComponentActivity() {
             api.obj("/items",s).arr("items")
         }){privateAgenda=it;privateProblem=""}
     }
+    private fun snoozePrivateItem(id:String,minutes:Int){
+        val cfg=connection?:return
+        val s=session
+        if(locked||s.isBlank()||id.isBlank())return
+        task({
+            val api=TravelApi(cfg.getString("url"))
+            api.obj("/items/"+segment(id)+"/snooze",s,JSONObject().put("minutes",minutes))
+            api.obj("/items",s).arr("items")
+        }){privateAgenda=it;privateProblem="";PrivateAlerts.kick(this)}
+    }
     private fun deletePrivateItem(id:String){
         val cfg=connection?:return
         val s=session
@@ -932,7 +942,7 @@ class MainActivity : ComponentActivity() {
                             appearancePhoto!=null&&connection?.let{timelineOwner(it)==appearancePhotoOwner}==true,
                             {savePersonalAppearance(it)},{chooseAppearancePhoto()},{uploadAppearancePhoto()},
                             privateAgenda,{privateSection=it},privateAlertsEnabled,{togglePrivateAlerts()}, {connection?.str("url")?.takeIf{it.isNotBlank()}?.let{launchExternal(it)}}){openArea(NextDoArea.TRIPS)}
-                        else PrivateAgendaScreen(privateSection,privateAgenda,personalAppearance,session.isNotBlank()&&!busy,privateProblem,{privateSection=""},{refreshPrivateAgenda()},{id,body->savePrivateItem(id,body)},{id->deletePrivateItem(id)})
+                        else PrivateAgendaScreen(privateSection,privateAgenda,personalAppearance,session.isNotBlank()&&!busy,privateProblem,{privateSection=""},{refreshPrivateAgenda()},{id,body->savePrivateItem(id,body)},{id->deletePrivateItem(id)},{id,minutes->snoozePrivateItem(id,minutes)})
                     }
                     area==NextDoArea.SETTINGS -> SettingsLanding()
                     else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy,workError,{filter->openArea(NextDoArea.WORK);workFilter=filter},{id->loadWorkDetail(id)},{refreshWork()}){openArea(it)}

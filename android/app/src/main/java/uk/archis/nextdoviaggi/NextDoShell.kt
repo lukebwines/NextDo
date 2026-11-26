@@ -218,7 +218,7 @@ internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Bo
 }
 
 @Composable
-internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:JSONObject?,enabled:Boolean,problem:String,back:()->Unit,refresh:()->Unit,save:(String,JSONObject)->Unit,delete:(String)->Unit){
+internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:JSONObject?,enabled:Boolean,problem:String,back:()->Unit,refresh:()->Unit,save:(String,JSONObject)->Unit,delete:(String)->Unit,snooze:(String,Int)->Unit){
     val names=mapOf("task" to "Attività e promemoria","deadline" to "Scadenze","appointment" to "Appuntamenti")
     val light=appearance?.optString("theme")=="light"
     val panel=if(light)Color.White else ShellPanel
@@ -280,6 +280,10 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
                 for((k,label) in listOf("review" to "Da verificare","todo" to "Da fare","done" to "Completato"))FilterChip(selected=status==k,onClick={status=k},label={Text(if(item.str("status")=="review"&&k=="todo")"Conferma" else if(item.str("status")=="review"&&k=="done")"Conferma e completa" else label)})
                 for((k,label) in listOf("low" to "Bassa","normal" to "Normale","high" to "Alta","urgent" to "Urgente"))FilterChip(selected=priority==k,onClick={priority=k},label={Text(label)})
                 OutlinedTextField(desc,{desc=it},label={Text("Descrizione / email originale")},minLines=3)
+                if(id.isNotBlank()&&item.str("kind")=="task"&&item.str("status")!="done"){
+                    Text("Rinvia promemoria")
+                    for((minutes,label) in listOf(10 to "10 minuti",30 to "30 minuti",60 to "1 ora",1440 to "24 ore",0 to "Annulla rinvio"))TextButton(onClick={snooze(id,minutes);editing=null},enabled=enabled){Text(label)}
+                }
                 if(id.isNotBlank())TextButton(onClick={remove=true},enabled=enabled){Text("Elimina")}
             }
         },confirmButton={TextButton(enabled=enabled&&title.isNotBlank()&&validDate&&validTime&&(type=="task"||status=="review"||day.isNotBlank()||(status=="done"&&reviewedUndated)),onClick={
