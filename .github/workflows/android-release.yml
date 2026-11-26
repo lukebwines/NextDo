@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.8-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.9-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.8-test"
-            RELEASE_NOTES="Conferma o conferma e completa le voci da verificare. Azioni professionali nel dettaglio Android con permessi server e verifica della revisione; presa visione indipendente. Area personale: chiusura di impegni già risolti senza inventare date. Richiede NextDo Web 0.2.13-test per le nuove azioni. Aggiornare senza disinstallare. Collaudo fisico necessario."
+            test "$ANDROID_VERSION" = "0.2.9-test"
+            RELEASE_NOTES="Sincronizzazione automatica della copia offline Viaggi mentre l’app è visibile, sbloccata e autorizzata. Confronto versione di itinerario, PDF e diario; archivio e metadati cifrati con scrittura atomica, copia precedente preservata in caso di errore. Necessita NextDo Web 0.2.14-test per il controllo automatico. Una copia offline alla volta; aggiornare senza disinstallare. Collaudo Samsung necessario."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then

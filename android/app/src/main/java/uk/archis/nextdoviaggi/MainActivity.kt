@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
     private var allowWorkScreenshots by mutableStateOf(true)
     private var allowPersonalScreenshots by mutableStateOf(true)
     private var allowTravelScreenshots by mutableStateOf(false)
-    private var foreground = false
+    private var foreground by mutableStateOf(false)
     private fun updateCaptureProtection(){
         val allowed=foreground&&!locked&&android.os.Build.VERSION.SDK_INT>=33&&when(area){
             NextDoArea.HOME,NextDoArea.WORK -> allowWorkScreenshots
@@ -237,6 +237,25 @@ class MainActivity : ComponentActivity() {
     }
     private var offline by mutableStateOf(false)
     private var offlineMeta by mutableStateOf<JSONObject?>(null)
+    private var offlineSyncBusy by mutableStateOf(false)
+    private var offlineSyncStatus by mutableStateOf("")
+    private var offlineOpenedStamp by mutableStateOf("")
+    private var offlineLastChecked by mutableStateOf("")
+    private val offlineGuard=Any()
+    private var offlineSyncGeneration=0
+    private fun readOfflineMeta(cfg:JSONObject?):JSONObject? {
+        if(cfg==null)return null
+        return synchronized(offlineGuard){
+            if(vault.exists(OFFLINE_FILE)) OfflineSnapshot.decode(vault.read(OFFLINE_FILE),timelineOwner(cfg)).meta
+            else if(vault.exists("offline_meta")&&vault.exists("offline")) JSONObject(String(vault.read("offline_meta"),Charsets.UTF_8))
+            else null
+        }
+    }
+    private fun clearOfflineFiles(){
+        synchronized(offlineGuard){
+            vault.remove(OFFLINE_FILE);vault.remove("offline");vault.remove("offline_meta")
+        }
+    }
     private var section by mutableStateOf("Home")
     // Only retain the picker URI, not the raw history, across the normal app lock.
     private var timelineFile by mutableStateOf<Uri?>(null)
@@ -254,7 +273,7 @@ class MainActivity : ComponentActivity() {
     private var pdfMessage by mutableStateOf("")
     private var pageCount by mutableStateOf(0)
     private var pageBitmap by mutableStateOf<Bitmap?>(null)
-    private var epoch = 0
+    @Volatile private var epoch = 0
     private var authCancel: CancellationSignal? = null
     private val authHandler = Handler(Looper.getMainLooper())
     private val autoLock = Runnable { lockLocal() }
@@ -285,15 +304,17 @@ class MainActivity : ComponentActivity() {
         val cfg=connection ?: return
         task({resumeServer(cfg)}) { r -> session=r.token;trips=r.trips;error=r.error;travelAuthState=r.authState }
     }
-    private data class DeviceUnlockData(val cfg:JSONObject?,val meta:JSONObject?,val resumed:ResumeResult,val work:JSONObject?)
+    private data class DeviceUnlockData(val cfg:JSONObject?,val meta:JSONObject?,val resumed:ResumeResult,val work:JSONObject?,val offlineProblem:String="")
     private fun finishDeviceUnlock() {
         task({
             val cfg = if (vault.exists("connection")) JSONObject(String(vault.read("connection"), Charsets.UTF_8)) else null
-            val meta = if (vault.exists("offline_meta")) JSONObject(String(vault.read("offline_meta"), Charsets.UTF_8)) else null
+            val metaResult=runCatching{readOfflineMeta(cfg)}
+            val meta=metaResult.getOrNull()
             val work=if(vault.exists("work_connection")) JSONObject(String(vault.read("work_connection"),Charsets.UTF_8)) else null
-            DeviceUnlockData(cfg,meta,if(cfg!=null)resumeServer(cfg) else ResumeResult(),work)
-        }) { (cfg, meta, resumed, work) ->
+            DeviceUnlockData(cfg,meta,if(cfg!=null)resumeServer(cfg) else ResumeResult(),work,if(metaResult.isFailure)"Copia offline non leggibile. Nessun file è stato cancellato; scarica una nuova copia." else "")
+        }) { (cfg, meta, resumed, work, offlineProblem) ->
             workConnection=work
+            offlineSyncStatus=offlineProblem
             connection = cfg; offlineMeta = meta; locked = false; session=resumed.token; trips=resumed.trips; error=resumed.error;travelAuthState=resumed.authState
             updateCaptureProtection()
             authHandler.removeCallbacks(autoLock)
@@ -352,7 +373,8 @@ class MainActivity : ComponentActivity() {
         if (!authenticating) lockLocal()
     }
     private fun lockLocal() {
-        epoch++
+        synchronized(offlineGuard){epoch++}
+        offlineSyncGeneration++;offlineSyncBusy=false;offlineSyncStatus="";offlineOpenedStamp="";offlineLastChecked=""
         authHandler.removeCallbacks(autoLock)
         val pending = authCancel
         authCancel = null
@@ -432,11 +454,12 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun connect(base: String, code: String, replacing:Boolean=false) {
+        if(offlineSyncBusy)return
         task({
             val a = TravelApi(base)
             val r = a.obj("/pair", data = JSONObject().put("code", code.trim()).put("label", "Android " + android.os.Build.MODEL.take(60)))
             val cfg = JSONObject().put("url", base.trim()).put("token", r.getString("device_token"))
-            if(replacing){PrivateAlerts.disable(this);vault.remove("offline");vault.remove("offline_meta")}
+            if(replacing){PrivateAlerts.disable(this);clearOfflineFiles()}
             vault.write("connection", cfg.toString().toByteArray())
             cfg
         }) { connection = it;travelAuthState=TravelAuthState.PIN_REQUIRED;if(replacing){offlineMeta=null;pendingZip=null;zipScope="";timelineFile=null;timelineScope="";timelineTrip=""} }
@@ -509,29 +532,78 @@ class MainActivity : ComponentActivity() {
         selectedDay = t.days.firstOrNull { it.str("date") >= LocalDate.now().toString() }?.str("date")
             ?: t.days.firstOrNull()?.str("date").orEmpty()
     }
-    private fun downloadTrip() {
-        val cfg = connection ?: return
-        val t = current ?: return
-        val s = session
-        task({
-            val bytes = TravelApi(cfg.getString("url")).call("/trips/" + segment(t.id) + "/offline?include_timeline=true", s)
-            val parsed = TripPackage.parse(bytes)
-            require(parsed.id == t.id) { "Viaggio non corrispondente" }
-            val meta = JSONObject().put("title", parsed.info.str("title")).put("id", parsed.id)
-                .put("saved", java.time.OffsetDateTime.now().toString()).put("pdfs", parsed.docs.size)
-            vault.write("offline", bytes)
-            vault.write("offline_meta", meta.toString().toByteArray())
-            meta
-        }) { offlineMeta = it }
+    private fun syncOffline(id:String,manual:Boolean=false,replace:Boolean=false) {
+        val cfg=connection?:return
+        val s=session
+        if(locked||!foreground||s.isBlank()||busy||offlineSyncBusy||editor!=null||pdf!=null)return
+        val previous=offlineMeta
+        if(!manual&&previous?.str("id")!=id)return
+        if(previous!=null&&previous.str("id")!=id&&!replace)return
+        val owner=timelineOwner(cfg)
+        val started=epoch;val generation=++offlineSyncGeneration
+        offlineSyncBusy=true;offlineSyncStatus="Controllo aggiornamenti…"
+        lifecycleScope.launch {
+            try {
+                val result=withContext(Dispatchers.IO){
+                    val api=TravelApi(cfg.str("url"))
+                    if(!manual){
+                        val remote=api.obj("/trips/"+segment(id)+"/offline-state",s)
+                        require(remote.str("id")==id&&remote.optInt("revision",-1)>=0){"Versione server non valida"}
+                        if(!requiresOfflineDownload(previous?.str("snapshot").orEmpty(),remote.str("snapshot")))return@withContext null
+                    }
+                    val downloaded=OfflineSnapshot.download(api,s,id,owner,requireVersion=!manual)
+                    val encoded=downloaded.encode()
+                    synchronized(offlineGuard){
+                        // Reject a late result after app lock, logout or a new device association.
+                        require(started==epoch){"Sessione locale scaduta"}
+                        val storedCfg=JSONObject(String(vault.read("connection"),Charsets.UTF_8))
+                        require(timelineOwner(storedCfg)==owner){"Associazione cambiata"}
+                        // Archive and metadata are one encrypted AtomicFile, never two independent writes.
+                        vault.write(OFFLINE_FILE,encoded)
+                        // Keep legacy files until the new atomic write has fully succeeded.
+                        vault.remove("offline");vault.remove("offline_meta")
+                    }
+                    downloaded.meta
+                }
+                if(started==epoch&&generation==offlineSyncGeneration&&!locked&&session==s){
+                    if(result!=null)offlineMeta=result
+                    offlineLastChecked=java.time.OffsetDateTime.now().toString()
+                    offlineSyncStatus=if((result?:previous)?.str("snapshot").orEmpty().isBlank())"Copia salvata; controllo versione non supportato dal server" else "Copia aggiornata"
+                }
+            }catch(e:CancellationException){throw e}
+            catch(e:Exception){
+                if(started==epoch&&generation==offlineSyncGeneration&&!locked){
+                    offlineSyncStatus=when(e){
+                        is TravelHttpException->if(e.status==401)"Autorizzazione scaduta: riconnetti NextDo. Copia precedente conservata." else "Controllo non riuscito (HTTP ${e.status}). Copia precedente conservata."
+                        else->"Aggiornamento non riuscito. L’eventuale copia precedente è conservata."
+                    }
+                }
+            }finally{if(started==epoch&&generation==offlineSyncGeneration)offlineSyncBusy=false}
+        }
+    }
+    private fun downloadTrip(replace:Boolean=false) {
+        val t=current?:return
+        syncOffline(t.id,manual=true,replace=replace)
     }
     private fun openOffline() {
-        task({ TripPackage.parse(vault.read("offline")) }) { openTrip(it, true) }
+        val cfg=connection?:return
+        val legacySaved=offlineMeta?.str("saved").orEmpty()
+        task({
+            val (modern,raw)=synchronized(offlineGuard){
+                if(vault.exists(OFFLINE_FILE))true to vault.read(OFFLINE_FILE) else false to vault.read("offline")
+            }
+            if(modern){
+                val snapshot=OfflineSnapshot.decode(raw,timelineOwner(cfg))
+                snapshot.trip() to snapshot.meta.str("saved")
+            }else TripPackage.parse(raw) to legacySaved
+        }) { (trip,saved) -> offlineOpenedStamp=saved;openTrip(trip,true) }
     }
     private fun forget() {
+        if(offlineSyncBusy)return
         PrivateAlerts.disable(this);privateAlertsEnabled=false
         timelineFile=null;timelineTrip="";timelineScope=""
         pendingZip=null;zipScope=""
-        task({ vault.clear() }) { lockLocal() }
+        task({ synchronized(offlineGuard){vault.clear()} }) { lockLocal() }
     }
     private fun viewPdf(name: String) {
         val t = current ?: return
@@ -707,6 +779,19 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable private fun App() {
+        // Only while the app is unlocked and visible; never introduce a background travel credential.
+        LaunchedEffect(locked,foreground,session,offlineMeta?.str("id"),area){
+            if(!locked&&foreground&&offlineMeta!=null&&connection!=null){
+                while(true){
+                    if(!busy&&!offlineSyncBusy&&editor==null&&pdf==null){
+                        val id=offlineMeta?.str("id").orEmpty()
+                        if(session.isNotBlank()&&id.isNotBlank())syncOffline(id)
+                        else if(travelAuthState==TravelAuthState.RETRY&&connection?.str("remember_token").orEmpty().isNotBlank())retryServer()
+                    }
+                    kotlinx.coroutines.delay(60000)
+                }
+            }
+        }
         LaunchedEffect(locked,area,session){
             if(!locked&&area==NextDoArea.PERSONAL&&session.isNotBlank()){
                 val cfg=connection
@@ -1087,7 +1172,7 @@ class MainActivity : ComponentActivity() {
                 }
                 TravelAuthState.REPAIR_REQUIRED -> TravelCard("Associazione non più valida","Genera un nuovo codice di associazione dal Web. La copia offline già presente resta consultabile finché non la cancelli.") {
                     OutlinedTextField(code,{code=it},label={Text("Nuovo codice associazione")},singleLine=true,visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
-                    Action("Associa nuovamente",!busy&&code.isNotBlank()) {
+                    Action("Associa nuovamente",!busy&&!offlineSyncBusy&&code.isNotBlank()) {
                         val c=code;code=""
                         // A replacement association may belong to a different account.
                         // Clear the prior offline copy only after an explicit confirmation.
@@ -1118,16 +1203,19 @@ class MainActivity : ComponentActivity() {
             for (item in trips) TravelCard(item.str("title"),ItalianDateTime.date(item.str("start"))+"  —  "+ItalianDateTime.date(item.str("end"))) {
                 Action("Apri viaggio") { selectTrip(item.str("id")) }
             }
-            TextButton(onClick={session="";trips=emptyList();retryServer()}) { Text("Riconnetti") }
+            TextButton(onClick={session="";trips=emptyList();retryServer()},enabled=!busy&&!offlineSyncBusy) { Text("Riconnetti") }
         }
         offlineMeta?.let { meta ->
             TravelCard("Disponibile offline",meta.str("title")+" · "+meta.optInt("pdfs")+" PDF") {
                 Pill("NESSUNA CONNESSIONE NECESSARIA")
                 Text("Ultimo download: "+ItalianDateTime.dateTime(meta.str("saved")),color=Muted,fontSize=12.sp)
+                OfflineSyncInfo()
+                if(session.isNotBlank())Action("Controlla aggiornamenti",!busy&&!offlineSyncBusy){syncOffline(meta.str("id"))}
                 Action("Apri copia offline") { openOffline() }
             }
         }
-        if(cfg!=null || offlineMeta!=null) TextButton(onClick={erase=true}) { Text("Disassocia e cancella dati locali",color=Sand) }
+        if(offlineMeta==null&&offlineSyncStatus.isNotBlank())Text(offlineSyncStatus,color=Sand,fontSize=12.sp)
+        if(cfg!=null || offlineMeta!=null) TextButton(onClick={erase=true},enabled=!busy&&!offlineSyncBusy) { Text("Disassocia e cancella dati locali",color=Sand) }
         if(erase) AlertDialog(onDismissRequest={erase=false},title={Text("Cancellare i dati locali?")},text={Text("La copia offline e l’associazione verranno eliminate. I viaggi su NextDo non saranno modificati. Revoca il dispositivo anche dal web.")},
             confirmButton={TextButton(onClick={erase=false;forget()}){Text("Cancella")}},dismissButton={TextButton(onClick={erase=false}){Text("Annulla")}})
     }
@@ -1150,6 +1238,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    @Composable private fun OfflineSyncInfo(){
+        if(offlineSyncBusy)LinearProgressIndicator(Modifier.fillMaxWidth())
+        Text(offlineSyncStatus.ifBlank{if(session.isBlank())"Copia locale · non verificata online" else "Controllo automatico quando NextDo è raggiungibile"},color=Muted,fontSize=12.sp)
+        if(offlineLastChecked.isNotBlank())Text("Ultimo controllo riuscito: "+ItalianDateTime.dateTime(offlineLastChecked),color=Muted,fontSize=12.sp)
+    }
     @Composable private fun Home(t: TripPackage) {
         Hero(t)
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
@@ -1163,13 +1256,22 @@ class MainActivity : ComponentActivity() {
         }
         if(!offline) TravelCard("Porta il viaggio con te","Scarica itinerari, guide, foto e PDF in un unico archivio cifrato. Una sola copia offline alla volta.") {
             var replace by remember { mutableStateOf(false) }
-            if(offlineMeta?.str("id")==t.id) Pill("COPIA OFFLINE PRESENTE")
-            Action("Scarica / aggiorna offline") {
+            if(offlineMeta?.str("id")==t.id){
+                Pill("COPIA OFFLINE PRESENTE")
+                Text("Ultimo download: "+ItalianDateTime.dateTime(offlineMeta?.str("saved").orEmpty()),color=Muted,fontSize=12.sp)
+            }
+            OfflineSyncInfo()
+            Action("Scarica / aggiorna offline",!busy&&!offlineSyncBusy) {
                 if(offlineMeta!=null&&offlineMeta?.str("id")!=t.id)replace=true else downloadTrip()
             }
-            if(replace) AlertDialog(onDismissRequest={replace=false},title={Text("Sostituire il viaggio offline?")},text={Text("La copia offline precedente sarà sostituita. L’archivio centrale non cambia.")},confirmButton={TextButton(onClick={replace=false;downloadTrip()}){Text("Sostituisci")}},dismissButton={TextButton(onClick={replace=false}){Text("Annulla")}})
+            if(replace) AlertDialog(onDismissRequest={replace=false},title={Text("Sostituire il viaggio offline?")},text={Text("La copia offline precedente sarà sostituita. L’archivio centrale non cambia.")},confirmButton={TextButton(onClick={replace=false;downloadTrip(true)}){Text("Sostituisci")}},dismissButton={TextButton(onClick={replace=false}){Text("Annulla")}})
         }
-        else Text("Copia offline in sola lettura. Per aggiornare i dati torna all’elenco e connettiti a NextDo.",color=Muted,fontSize=12.sp)
+        else {
+            Text("Copia offline in sola lettura. Si aggiorna automaticamente quando l’app è sbloccata e NextDo è raggiungibile.",color=Muted,fontSize=12.sp)
+            OfflineSyncInfo()
+            if(offlineMeta?.str("id")==t.id&&offlineMeta?.str("saved")!=offlineOpenedStamp)Action("Apri copia aggiornata",!busy&&!offlineSyncBusy){openOffline()}
+            if(session.isNotBlank())Action("Controlla aggiornamenti",!busy&&!offlineSyncBusy){syncOffline(t.id)}
+        }
     }
     @Composable private fun Metric(value:String,label:String,modifier:Modifier,onClick:()->Unit) {
         Column(modifier.clip(RoundedCornerShape(18.dp)).background(Panel).clickable(onClick=onClick).padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
