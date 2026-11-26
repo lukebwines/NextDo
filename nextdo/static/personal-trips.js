@@ -57,8 +57,8 @@ const NextDoPersonal=(()=>{
   main=m;const token=++generation;let root=main.querySelector('#personal-content');if(!root){root=el('div',{id:'personal-content'});main.append(root)}root.replaceChildren(paragraph('Caricamento…'));
   try{
    const status=await api(path+'/status');if(token!==generation||!root.isConnected)return;
-   if(!status.unlocked){unlocked=false;clearTimeout(timer);clearTimeout(keepAliveTimer);timer=null;keepAliveTimer=null;trip=null;section='home';root.classList.remove('travel-shell','personal-hub-shell');const pin=input('pin','6 cifre','','password');pin.setAttribute('inputmode','numeric');pin.maxLength=6;const confirmPin=input('confirm','Conferma PIN','','password');confirmPin.setAttribute('inputmode','numeric');confirmPin.maxLength=6;
-    const f=el('form',{},[paragraph(status.configured?'Inserisci il PIN per accedere ai viaggi.':'Imposta un PIN privato di 6 cifre. Conservalo: il ripristino non è ancora disponibile.'),field('PIN',pin),...(status.configured?[]:[field('Conferma PIN',confirmPin)]),el('button',{class:'btn primary',type:'submit',text:status.configured?'Sblocca':'Imposta PIN'})]);
+   if(!status.unlocked){unlocked=false;clearTimeout(timer);clearTimeout(keepAliveTimer);timer=null;keepAliveTimer=null;trip=null;section='home';root.classList.remove('travel-shell','personal-hub-shell');const pin=input('pin','4–12 cifre','','password');pin.setAttribute('inputmode','numeric');pin.maxLength=12;pin.minLength=4;pin.pattern='[0-9]{4,12}';pin.required=true;pin.autocomplete=status.configured?'current-password':'new-password';const confirmPin=input('confirm','Conferma PIN','','password');confirmPin.setAttribute('inputmode','numeric');confirmPin.maxLength=12;confirmPin.minLength=4;confirmPin.pattern='[0-9]{4,12}';confirmPin.required=!status.configured;confirmPin.autocomplete='new-password';
+    const f=el('form',{},[paragraph(status.configured?'Inserisci il PIN personale per accedere.':'Crea un PIN personale da 4 a 12 cifre. Potrai modificarlo in Sicurezza e accesso.'),field('PIN (4–12 cifre)',pin),...(status.configured?[]:[field('Conferma PIN',confirmPin)]),el('button',{class:'btn primary',type:'submit',text:status.configured?'Sblocca':'Imposta PIN'})]);
     f.addEventListener('submit',async e=>{e.preventDefault();try{await api(path+'/unlock',{method:'POST',body:JSON.stringify({pin:pin.value,confirm:confirmPin.value})});if(token===generation)render(main)}catch(e){report(e)}});root.replaceChildren(card('Area personale protetta',f));return;
    }
    unlocked=true;resetTimer();await overview(root,token);
@@ -111,6 +111,30 @@ const NextDoPersonal=(()=>{
   const reset=btn('Ripristina aspetto',()=>changeAppearance('/appearance',JSON.stringify({theme:'dark',palette:'ocean',background:'gradient',clear_photo:true})),'small');
   panel.append(node('h2','','Personalizza'),el('div',{class:'personal-appearance-options'},[field('Tema',theme),field('Colore',palette),field('Sfondo',background)]),toolbar(save,reset),field('Fotografia privata (max 5 MB)',file),toolbar(upload,...(appearance.photo?[btn('Rimuovi foto',()=>changeAppearance('/appearance',JSON.stringify({clear_photo:true})),'small')]:[])));
   const settings=el('details',{class:'personal-appearance-details'},[node('summary','','Personalizza il tuo spazio'),panel]);
+  const securityPanel=el('section',{class:'personal-appearance-settings'});
+  const currentPin=input('current-pin','PIN attuale','','password'),newPin=input('new-pin','Nuovo PIN (4–12 cifre)','','password'),confirmNewPin=input('confirm-new-pin','Conferma nuovo PIN','','password');
+  for(const control of [currentPin,newPin,confirmNewPin]){
+   control.setAttribute('inputmode','numeric');control.maxLength=12;control.minLength=4;control.pattern='[0-9]{4,12}';control.required=true;control.autocomplete='off';
+  }
+  const pinForm=el('form',{},[
+   paragraph('Scegli un codice numerico personale da 4 a 12 cifre. Il nuovo PIN sarà richiesto anche quando dovrai autorizzare nuovamente l’app Android.'),
+   field('PIN attuale',currentPin),field('Nuovo PIN',newPin),field('Conferma nuovo PIN',confirmNewPin),
+   el('button',{class:'btn primary',type:'submit',text:'Aggiorna PIN'})
+  ]);
+  pinForm.addEventListener('submit',async e=>{
+   e.preventDefault();
+   if(!/^[0-9]{4,12}$/.test(currentPin.value))return msg('Il PIN attuale deve contenere da 4 a 12 cifre',true);
+   if(!/^[0-9]{4,12}$/.test(newPin.value))return msg('Il nuovo PIN deve contenere da 4 a 12 cifre',true);
+   if(newPin.value!==confirmNewPin.value)return msg('La conferma del nuovo PIN non corrisponde',true);
+   if(newPin.value===currentPin.value)return msg('Il nuovo PIN deve essere diverso da quello attuale',true);
+   try{
+    await api(path+'/change-pin',{method:'POST',body:JSON.stringify({current_pin:currentPin.value,new_pin:newPin.value,confirm:confirmNewPin.value})});
+    currentPin.value='';newPin.value='';confirmNewPin.value='';
+    msg('PIN aggiornato correttamente');
+   }catch(e){report(e)}
+  });
+  securityPanel.append(node('h2','','Sicurezza e accesso'),pinForm);
+  const securitySettings=el('details',{class:'personal-appearance-details'},[node('summary','','Sicurezza e accesso'),securityPanel]);
   const agenda=el('section',{class:'personal-agenda'});
   function editItem(kind,item={}){
    const {box,back}=modal(item.id?'Modifica impegno':'Nuovo impegno');back.setAttribute('data-personal-modal','');
@@ -166,7 +190,7 @@ const NextDoPersonal=(()=>{
    }
    shell.append(hero,agenda);
   }else{
-   shell.append(hero,settings,grid,toolbar(btn('Sposta / riclassifica impegni',transfers,'small'),btn('Backup protetto',protectedBackup,'small')));
+   shell.append(hero,settings,securitySettings,grid,toolbar(btn('Sposta / riclassifica impegni',transfers,'small'),btn('Backup protetto',protectedBackup,'small')));
    if(items){
     const today=localDay(new Date());
     const alerts=items.filter(x=>x.status!=='done'&&(x.status==='review'||x.priority==='urgent'||(x.due_at&&x.due_at.slice(0,10)<=today)));

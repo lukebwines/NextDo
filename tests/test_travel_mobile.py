@@ -103,3 +103,15 @@ def test_mobile_import_create_edit(tmp_path):
  assert c.post(url+"/edit",headers=other,json={"revision":6,"kind":"trip","fields":{"title":"Other"}}).status_code==404
  assert c.get(mobile+"/trips",headers=other).json()==[]
  c.close()
+
+def test_mobile_pin_accepts_custom_four_digit_pin(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"4321","confirm":"4321"}).status_code==200
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ paired=c.post(mobile+"/pair",json={"code":code,"label":"Four digit test"})
+ assert paired.status_code==200,paired.text
+ device={"Authorization":"Bearer "+paired.json()["device_token"]}
+ assert c.post(mobile+"/unlock",headers=device,json={"pin":"123456"}).status_code==403
+ unlocked=c.post(mobile+"/unlock",headers=device,json={"pin":"4321"})
+ assert unlocked.status_code==200,unlocked.text
+ c.close()

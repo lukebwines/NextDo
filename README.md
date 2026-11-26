@@ -1,5 +1,7 @@
-# NextDo — Home Assistant add-on
+## 0.2.12-test — PIN personale configurabile
+Il PIN dell’Area personale è configurabile da 4 a 12 cifre, sia alla prima impostazione sia successivamente in **Area personale → Sicurezza e accesso**. La modifica richiede il PIN attuale e la conferma del nuovo. Restano attivi blocco dopo cinque tentativi errati e sospensione per cinque minuti. La stessa lunghezza è accettata dall’autorizzazione dell’app Android. I PIN già esistenti a sei cifre restano validi. Nessuna migrazione del database e nessun dato personale viene modificato.
 
+# NextDo — Home Assistant add-on
 **0.2.11-test — Menu e accesso all'Area personale.** La voce «I miei impegni di lavoro» è spostata in Operatività; «Area personale» resta separata. Uscire dalla sezione senza logout non revoca più immediatamente il PIN: il rientro entro 5 minuti dall'ultima attività non richiede un nuovo inserimento. Timeout di inattività 5 minuti, keepalive limitato alla sezione privata, blocco immediato al logout. I dati privati vengono rimossi dalla vista e dalla memoria applicativa quando si passa ad altre sezioni. Nessuna modifica all'APK.
 
 **0.1.45-test — Regola automatica email → ICS.** In Impostazioni selezionare un destinatario verificato, autorizzare l’invio e attivare la regola. Per le nuove email Cloudflare elaborate dopo l’attivazione, invio cumulativo delle nuove voci datate e supportate da evidenza, non trascorse. Titolo [DA VERIFICARE], stato TENTATIVE, nessun testo originale, destinatario fisso; task in revisione. Coda persistente e dedup per testo, nessun retry di esito incerto. Disattivazione o modifica cancella la coda; nessun invio storico. Collaudo reale necessario.
