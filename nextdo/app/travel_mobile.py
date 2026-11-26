@@ -186,7 +186,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   rev=b.get("revision");kind=b.get("kind");fields=b.get("fields")
   if type(rev)!=int or not isinstance(fields,dict):fail(400,"Modifica non valida")
   if kind!="booking" and ("template_id" in b or "specific_fields" in b):fail(400,"Campi riservati alle prenotazioni")
-  allowed_fields={"trip":{"title","subtitle"},"day":{"place","headline","description"},"event":{"time","title","details"},"booking":{"title","type","date","place","status","ref","price"}}
+  allowed_fields={"trip":{"title","subtitle"},"day":{"place","headline","description"},"event":{"time","title","details"},"booking":{"title","type","date","place","status","ref","price"},"budget":{"amount","currency"},"expense":{"title","date","amount","currency","category","status","base_amount","base_currency","booking_id","doc","notes"}}
   if not isinstance(kind,str) or kind not in allowed_fields or not fields or set(fields)-allowed_fields[kind]:fail(400,"Campi non modificabili")
   if any(not isinstance(v,str) or len(v)>20000 or "\x00" in v for v in fields.values()):fail(400,"Testo non valido")
   with db() as c:
@@ -194,6 +194,13 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
    if r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
    m,state,files=read_archive(r["archive"])
    if kind=="trip":target=m["trip"]
+   elif kind=="budget":target=m.setdefault("budget",{})
+   elif kind=="expense":
+    expenses=m.setdefault("expenses",[]);idx=b.get("index")
+    if idx is None:
+     target={};expenses.append(target)
+    elif type(idx)==int and 0<=idx<len(expenses):target=expenses[idx]
+    else:fail(404,"Spesa non trovata")
    elif kind in ("day","event"):
     day=next((d for d in m.get("days",[]) if d["date"]==b.get("date")),None)
     if day is None:fail(404,"Giornata non trovata")
@@ -227,8 +234,13 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
       if not isinstance(pair,list) or len(pair)!=2 or any(not isinstance(x,str) or len(x)>20000 or "\x00" in x for x in pair):fail(400,"Campo specifico non valido")
       if not pair[0].strip() and pair not in target.get("fields",[]):fail(400,"Nome campo obbligatorio")
      target["fields"]=pairs
+   if kind in ("budget","expense"):
+    for key in ("currency","base_currency"):
+     if key in fields:fields[key]=fields[key].strip().upper()
+    for key in ("amount","base_amount"):
+     if key in fields:fields[key]=fields[key].strip().replace(",",".")
    target.update(fields)
-   if kind in ("trip","event","booking") and not str(target.get("title","")).strip():fail(400,"Titolo obbligatorio")
+   if kind in ("trip","event","booking","expense") and not str(target.get("title","")).strip():fail(400,"Titolo obbligatorio")
    revision=save(c,owner,m,state,files,rev)
    catalog=template_catalog(c,owner)
   return {"revision":revision,"manifest":m,"state":state,"templates":catalog}

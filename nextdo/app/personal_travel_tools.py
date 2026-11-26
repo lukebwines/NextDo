@@ -125,6 +125,10 @@ def analyze_booking(data_path,text):
  # Every nonempty value must appear literally in the user-approved excerpt.
  return {k:v.strip() if isinstance(v:=parsed.get(k),str) and 0<len(v)<=500 and v.strip() in text else "" for k in ("title","type","ref","date","place","price","status")}
 
+def validate_budget(b):
+ if not isinstance(b,dict) or set(b)!={"amount","currency"}:fail("Budget non valido")
+ validate_expense(b)
+
 def validate_expense(e):
  try:
   amount=Decimal(str(e.get("amount","")))
@@ -133,7 +137,13 @@ def validate_expense(e):
   if e.get("date"):
    d=date.fromisoformat(e["date"])
    if d.isoformat()!=e["date"]:raise ValueError()
- except (ValueError,InvalidOperation,TypeError):fail("Importo, valuta o data non validi")
+  if e.get("status","") not in ("","Pagata","Da sostenere","Da verificare"):raise ValueError()
+  equivalent=e.get("base_amount","");equivalent_currency=e.get("base_currency","")
+  if equivalent!="" or equivalent_currency!="":
+   if not re.fullmatch(r"[A-Z]{3}",str(equivalent_currency)):raise ValueError()
+   n=Decimal(str(equivalent))
+   if not n.is_finite() or n<0 or n>10000000 or n.as_tuple().exponent < -2:raise ValueError()
+ except (ValueError,InvalidOperation,TypeError):fail("Importo, valuta, stato o data non validi")
 
 
 def diary_tile(z,x,y,key):

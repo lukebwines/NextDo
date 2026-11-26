@@ -522,7 +522,14 @@ class MainActivity : ComponentActivity() {
     private fun edit(kind:String, data:JSONObject, target:JSONObject=JSONObject()) {
         val t=current ?: return
         if(!canEdit())return
-        if(kind!="booking"){editor=TravelEditor(kind,t.id,t.revision,data,target);return}
+        if(kind!="booking"){
+            val choices=if(kind=="expense")mapOf(
+                "status" to listOf("Da verificare" to "Da verificare","Pagata" to "Pagata","Da sostenere" to "Da sostenere"),
+                "booking_id" to (listOf("" to "Nessuna")+t.bookings.map{it.str("id") to it.str("title")}),
+                "doc" to (listOf("" to "Nessuna")+documentMap(t).map{it.key to it.value})
+            )else emptyMap()
+            editor=TravelEditor(kind,t.id,t.revision,data,target,choices=choices);return
+        }
         val cfg=connection?:return;val s=session
         task({
             try{bookingCatalog(TravelApi(cfg.str("url")).obj("/booking-templates",s).optJSONArray("templates"))}
@@ -904,6 +911,7 @@ class MainActivity : ComponentActivity() {
                             "PDF" -> Documents(t)
                             "Guide" -> Guides(t)
                             "Diario" -> TimelineScreen(t)
+                            "Budget" -> BudgetScreen(t)
                         }
                     }
                     area==NextDoArea.TRIPS -> ConnectionScreen()
@@ -1257,6 +1265,9 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun Home(t: TripPackage) {
         Hero(t)
+        TravelCard("Budget e spese",t.manifest.optJSONObject("budget")?.let{it.str("currency")+" "+it.str("amount")} ?: "Organizza spese previste e pagate"){
+            Action("Apri budget"){section="Budget"}
+        }
         val policies=t.bookings.filter{b->bookingModel(b,t.templates).id=="insurance"||((b.str("kind").isBlank()||b.str("kind")=="other")&&inferBookingKind("",b.str("type"),emptyList())=="insurance")}
         val emergencyGuides=t.guides.filter{g->Regex("emergenz|emergency|consolat|consulat|ambasciat|embassy",RegexOption.IGNORE_CASE).containsMatchIn(g.str("category")+" "+g.str("title"))}
         if(policies.isNotEmpty()||emergencyGuides.isNotEmpty())TravelCard("Assicurazione ed emergenze",if(offline)"Dati e documenti della copia offline" else "Polizze e recapiti salvati nel viaggio"){
@@ -1416,6 +1427,52 @@ class MainActivity : ComponentActivity() {
         t.bookings.forEach{b->bookingDocuments(b).forEach{(name,label)->docs[name]=b.str("title")+" · "+label}}
         t.docs.keys.forEach{docs.putIfAbsent(it,it)}
         return docs
+    }
+    @Composable private fun BudgetScreen(t:TripPackage) {
+        Text("Budget e spese",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
+        val b=t.manifest.optJSONObject("budget")
+        val expenses=t.manifest.arr("expenses")
+        val currency=b?.str("currency").orEmpty()
+        val limit=b?.str("amount")?.toBigDecimalOrNull()
+        fun money(v:java.math.BigDecimal)=v.setScale(2).toPlainString()
+        val converted=expenses.map{e->
+            when{
+                e.str("currency")==currency -> e.str("amount").toBigDecimalOrNull()
+                e.str("base_currency")==currency -> e.str("base_amount").toBigDecimalOrNull()
+                else -> null
+            }
+        }
+        val committed=converted.filterNotNull().fold(java.math.BigDecimal.ZERO){acc,n->acc+n}
+        val missing=converted.count{it==null}
+        TravelCard("Budget complessivo",if(limit!=null)currency+" "+money(limit) else "Non impostato"){
+            if(limit!=null){
+                Text("Spese e impegni conteggiati: "+currency+" "+money(committed))
+                Text((if(missing>0)"Residuo parziale: " else "Residuo: ")+currency+" "+money(limit-committed))
+                if(committed>limit)Text("ATTENZIONE: budget superato",color=Sand)
+                if(missing>0)Text(missing.toString()+" spese senza controvalore nella valuta del budget, escluse dal calcolo.",color=Muted)
+            }
+            if(canEdit())Action("Imposta / modifica budget",!busy){edit("budget",b?:JSONObject().put("currency","EUR"))}
+        }
+        TravelCard("Spese e impegni per valuta","Importi originali, senza sommare automaticamente i prezzi delle prenotazioni"){
+            fun line(rows:List<JSONObject>)=rows.groupBy{it.str("currency")}.entries.joinToString(" · "){(cur,list)->
+                cur+" "+money(list.mapNotNull{it.str("amount").toBigDecimalOrNull()}.fold(java.math.BigDecimal.ZERO){acc,n->acc+n})
+            }.ifBlank{"—"}
+            Text("Totale: "+line(expenses))
+            Text("Pagate: "+line(expenses.filter{it.str("status")=="Pagata"}))
+            Text("Da sostenere: "+line(expenses.filter{it.str("status")=="Da sostenere"}))
+            Text("Da verificare: "+line(expenses.filter{it.str("status") !in listOf("Pagata","Da sostenere")}))
+            if(canEdit())Action("Aggiungi spesa / ricevuta",!busy){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Da verificare"))}
+            if(offline)Text("Copia offline in sola lettura",color=Muted)
+        }
+        expenses.forEachIndexed{index,e->
+            TravelCard(e.str("title"),listOf(ItalianDateTime.date(e.str("date")),e.str("currency")+" "+e.str("amount"),e.str("category"),e.str("status").ifBlank{"Da verificare"}).filter{it.isNotBlank()}.joinToString(" · ")){
+                t.bookings.firstOrNull{it.str("id")==e.str("booking_id")}?.let{Text("Prenotazione: "+it.str("title"))}
+                if(e.str("notes").isNotBlank())Text(e.str("notes"))
+                if(e.str("doc").isNotBlank())Action("Apri ricevuta"){viewPdf(e.str("doc"))}
+                if(canEdit())Action("Modifica",!busy){edit("expense",JSONObject(e.toString()).apply{if(str("status").isBlank())put("status","Da verificare")},JSONObject().put("index",index))}
+            }
+        }
+        Action("Torna alla panoramica"){section="Home"}
     }
     @Composable private fun Documents(t:TripPackage) {
         Text("Documenti e voucher",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)

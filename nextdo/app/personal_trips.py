@@ -121,9 +121,11 @@ def validate_manifest(m,available):
   for e in events:
    if not isinstance(e,dict) or (e.get("bid") and e["bid"] not in bids) or (e.get("gid") and e["gid"] not in gids):fail("Collegamento evento non valido")
  for d in rows("documents",160):doc(d.get("file"))
+ if "budget" in m:tools.validate_budget(m["budget"])
  for e in rows("expenses",160):
   if not isinstance(e.get("title"),str) or not e["title"].strip():fail("Spesa non valida")
   tools.validate_expense(e)
+  if e.get("booking_id") and (not isinstance(e["booking_id"],str) or e["booking_id"] not in bids):fail("Prenotazione della spesa non trovata")
   doc(e.get("doc"))
  if any(k not in {"day:"+d["date"] for d in m.get("days",[])}|{"booking:"+i for i in bids} for k in m.get("travel_photos",{})):fail("Foto associata a una tappa inesistente")
  if refs!=set(available):fail("PDF mancanti o non dichiarati")

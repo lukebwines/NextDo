@@ -262,7 +262,7 @@ const NextDoPersonal=(()=>{
  async function load(id){section='trips';const token=generation;try{const result=await api(path+'/trips/'+encodeURIComponent(id));if(token!==generation||S.view!=='personal')return;trip=result;selected=trip.manifest.days[0]?.date||'';tab='panoramica';render(main)}catch(e){report(e)}}
  function editor(title,fields,submit){
   const {box,back}=modal(title);back.setAttribute('data-personal-modal','');const f=el('form',{class:'formgrid'});const controls={};
-  for(const [key,label,value,kind] of fields){const c=kind==='textarea'?el('textarea',{class:'field',rows:'4',value:value??''}):input(key,'',value??'',kind||'text');controls[key]=c;f.append(field(label,c))}
+  for(const [key,label,value,kind] of fields){const c=Array.isArray(kind)?select(key,kind):kind==='textarea'?el('textarea',{class:'field',rows:'4',value:value??''}):input(key,'',value??'',kind||'text');if(Array.isArray(kind))c.value=value??'';controls[key]=c;f.append(field(label,c))}
   f.append(el('div',{class:'actions full'},[btn('Annulla',()=>back.remove()),el('button',{class:'btn primary',type:'submit',text:'Salva'})]));
   f.addEventListener('submit',async e=>{e.preventDefault();if(busy)return;busy=true;try{await submit(Object.fromEntries(Object.entries(controls).map(([k,c])=>[k,c.value])));back.remove()}catch(e){report(e)}finally{busy=false}});box.append(f)
  }
@@ -546,8 +546,25 @@ const NextDoPersonal=(()=>{
   const docs=allDocs(trip.manifest),pick=select('doc',[['','Nessun PDF / testo incollato'],...[...docs].map(([name,title])=>[name,title])]);const text=el('textarea',{class:'field',rows:'9',placeholder:'Incolla il testo della conferma o ricevuta…'});const target=tripURL(),token=generation;
   box.append(paragraph('Carica prima un PDF in Documenti oppure incolla una conferma. L’estrazione PDF è locale. Prima dell’invio a GroqCloud elimina dati non necessari, numeri di carte, passaporti e credenziali.'),field('Documento',pick),btn('Estrai testo dal PDF',async()=>{if(!pick.value)return;try{const r=await api(target+'/documents/'+encodeURIComponent(pick.value)+'/text');text.value=r.text}catch(e){report(e)}},'small'),field('Testo da inviare all’AI (modificabile)',text),btn('Analizza con GroqCloud',async()=>{if(!text.value.trim()||!confirm('Inviare a GroqCloud il testo visibile? Nessun dato sarà salvato automaticamente.'))return;try{const source=pick.value;const b=await api(path+'/analyze-booking',{method:'POST',body:JSON.stringify({text:text.value})});if(token!==generation)return;back.remove();bookingEdit({...b,doc:source,status:b.status||'Da verificare'},-1);msg('Controlla e conferma tutti i campi proposti')}catch(e){report(e)}},'primary'));
  }
+ function budgetEditor(){
+  editor('Budget del viaggio',fieldlist(trip.manifest.budget||{currency:'EUR'},[['amount','Budget complessivo'],['currency','Valuta ISO (EUR, USD…)']]),v=>save(t=>{t.manifest.budget={amount:v.amount.trim().replace(',','.'),currency:v.currency.trim().toUpperCase()}}))
+ }
  function expenseEditor(e={},index=-1){
-  editor('Ricevuta / spesa',[...fieldlist(e,[['title','Descrizione'],['date','Data','date'],['amount','Importo (es. 12.50)'],['currency','Valuta ISO (EUR, USD…)'],['category','Categoria'],['doc','Nome PDF già caricato'],['notes','Note','textarea']])],v=>save(t=>{v.currency=v.currency.toUpperCase();const arr=t.manifest.expenses||(t.manifest.expenses=[]);if(index<0)arr.push(v);else arr[index]=v}))
+  const m=trip.manifest,docChoices=[['','Nessun PDF'],...[...allDocs(m)].map(([k,v])=>[k,v])],bookingChoices=[['','Nessuna prenotazione'],...m.bookings.map(b=>[b.id,b.title])];
+  const initial={currency:m.budget?.currency||'EUR',status:'Da verificare',...e};initial.status=initial.status||'Da verificare';
+  editor('Ricevuta / spesa',fieldlist(initial,[['title','Descrizione'],['date','Data','date'],['amount','Importo originale'],['currency','Valuta ISO (EUR, USD…)'],['status','Stato',[['Da verificare','Da verificare'],['Pagata','Pagata'],['Da sostenere','Da sostenere']]],['category','Categoria'],['base_amount','Controvalore manuale (facoltativo)'],['base_currency','Valuta del controvalore (es. EUR)'],['booking_id','Prenotazione',bookingChoices],['doc','Ricevuta in archivio',docChoices],['notes','Note','textarea']]),v=>save(t=>{for(const k of ['currency','base_currency'])v[k]=v[k].trim().toUpperCase();for(const k of ['amount','base_amount'])v[k]=v[k].trim().replace(',','.');const arr=t.manifest.expenses||(t.manifest.expenses=[]);if(index<0)arr.push(v);else arr[index]={...arr[index],...v}}))
+ }
+ function budgetCards(m){
+  const expenses=m.expenses||[],b=m.budget,totals=new Map(),paid=new Map(),planned=new Map(),uncertain=new Map();
+  const cents=v=>Math.round(Number(v)*100),fmt=(c,v)=>c+' '+(v/100).toFixed(2),add=(map,k,v)=>map.set(k,(map.get(k)||0)+v);
+  let committed=0,missing=0;
+  for(const e of expenses){
+   const value=cents(e.amount),status=e.status||'Da verificare';
+   add(totals,e.currency,value);add(status==='Pagata'?paid:status==='Da sostenere'?planned:uncertain,e.currency,value);
+   if(b){if(e.currency===b.currency)committed+=value;else if(e.base_currency===b.currency&&e.base_amount!==undefined&&e.base_amount!=='')committed+=cents(e.base_amount);else missing++}
+  }
+  const lines=map=>[...map].map(([k,v])=>fmt(k,v)).join(' · ')||'—';
+  return [card('Budget complessivo',paragraph(b?fmt(b.currency,cents(b.amount)):'Budget non impostato'),...(b?[paragraph('Spese e impegni conteggiati: '+fmt(b.currency,committed)),paragraph('Residuo'+(missing?' parziale':'')+': '+fmt(b.currency,cents(b.amount)-committed)),...(committed>cents(b.amount)?[paragraph('ATTENZIONE: budget superato')]:[]),...(missing?[paragraph(missing+' spese senza controvalore nella valuta del budget, escluse dal calcolo.')]:[])]:[]),btn('Imposta / modifica budget',budgetEditor,'primary')),card('Spese e impegni per valuta',paragraph('Totale: '+lines(totals)),paragraph('Pagate: '+lines(paid)),paragraph('Da sostenere: '+lines(planned)),paragraph('Da verificare: '+lines(uncertain)),paragraph('Le spese sono registrate una sola volta; i prezzi delle prenotazioni non vengono sommati automaticamente.'),btn('+ Ricevuta / spesa',()=>expenseEditor(),'primary'))];
  }
  function timelineView(root,tr){
   const token=generation,url=path+'/trips/'+encodeURIComponent(tr.id)+'/timeline';
@@ -610,7 +627,7 @@ const NextDoPersonal=(()=>{
   const status=delta>0?delta+' giorni alla partenza':today<=tr.end?'In viaggio':'Viaggio concluso';
   const hero=el('section',{class:'travel-hero'+(m.cover?' has-photo':'')},[...(m.cover?[el('img',{class:'travel-cover',src:'data:image/jpeg;base64,'+m.cover.jpeg,alt:'Copertina del viaggio'})]:[]),el('div',{class:'travel-hero-inner'},[node('div','travel-kicker','IL TUO VIAGGIO'),node('h2','',tr.title),node('p','',tr.subtitle||''),el('div',{class:'travel-hero-meta'},[node('span','travel-status',status),node('span','',dayFmt(tr.start)+' — '+dayFmt(tr.end))]),toolbar(btn('Oggi / prossima giornata',()=>{selected=m.days.find(d=>d.date>=today)?.date||m.days[0]?.date;switchTab('giornata')},'primary'),btn('Cambia copertina',coverEditor,'small'))]),...(m.cover?[el('div',{class:'travel-credit'},[m.cover.credit||'',m.cover.license?' · '+m.cover.license:'',safeLink(m.cover.source,'Fonte')])]:[])]);
   root.append(hero);
-  const header=el('nav',{class:'travel-tabs'},[...[['panoramica','Panoramica'],['giornata','Itinerario'],['prenotazioni','Prenotazioni'],['guide','Guide e GPS'],['mappa','Mappa'],['timeline','Diario di bordo'],['spese','Spese'],['documenti','Documenti']].map(([k,l])=>btn(l,()=>switchTab(k),tab===k?'primary':'small')),el('a',{class:'btn small',href:'api/personal/trips/'+encodeURIComponent(tr.id)+'/export',download:'',text:'Esporta ZIP'})]);
+  const header=el('nav',{class:'travel-tabs'},[...[['panoramica','Panoramica'],['giornata','Itinerario'],['prenotazioni','Prenotazioni'],['guide','Guide e GPS'],['mappa','Mappa'],['timeline','Diario di bordo'],['spese','Budget'],['documenti','Documenti']].map(([k,l])=>btn(l,()=>switchTab(k),tab===k?'primary':'small')),el('a',{class:'btn small',href:'api/personal/trips/'+encodeURIComponent(tr.id)+'/export',download:'',text:'Esporta ZIP'})]);
   root.append(header);
   if(tab==='panoramica'){
    const policies=m.bookings.filter(b=>bookingKind(b)==='insurance'||((!b.kind||b.kind==='other')&&/assicurazion|polizza|insurance/i.test(String(b.type||''))));
@@ -625,9 +642,8 @@ const NextDoPersonal=(()=>{
    for(const [i,b] of m.bookings.entries())root.append(card(b.title,paragraph(b.place||'Luogo originale non definito'),...(b.locations||[]).map(locationLine),toolbar(navLink(b),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'))));
    for(const d of m.days)if((d.route_points||[]).length)root.append(card(dayFmt(d.date),routeCard(d)));
   }else if(tab==='spese'){
-   const expenses=m.expenses||[],totals={};for(const e of expenses){const cents=Math.round(Number(e.amount)*100);totals[e.currency]=(totals[e.currency]||0)+cents}
-   root.append(card('Spese registrate',paragraph(Object.entries(totals).map(([k,v])=>k+' '+(v/100).toFixed(2)).join(' · ')||'Nessuna spesa registrata'),btn('+ Ricevuta / spesa',()=>expenseEditor(),'primary')));
-   for(const [i,e] of expenses.entries())root.append(card(e.title,paragraph([e.date,e.category,e.currency+' '+e.amount,e.notes].filter(Boolean).join(' · ')),toolbar(doc(e.doc),btn('Modifica',()=>expenseEditor(e,i),'small'))));
+   root.append(...budgetCards(m));
+   for(const [i,e] of (m.expenses||[]).entries())root.append(card(e.title,paragraph([e.date?dayFmt(e.date):'',e.category,e.currency+' '+e.amount,e.status||'Da verificare',e.notes].filter(Boolean).join(' · ')),paragraph(m.bookings.find(b=>b.id===e.booking_id)?.title||''),toolbar(doc(e.doc),btn('Modifica',()=>expenseEditor(e,i),'small'))));
   }else if(tab==='prenotazioni'){
    root.append(toolbar(btn('+ Prenotazione',()=>bookingEdit({},-1),'primary'),btn('Acquisisci con AI',aiEditor,'primary'),btn('Gestisci tipologie',templateManager,'small')));
    for(const [i,b] of m.bookings.entries()){const item=card(b.title,spotPhoto(m.travel_photos?.['booking:'+b.id]),paragraph([b.type,b.date,b.status,b.ref,b.place,b.price].filter(Boolean).join(' · ')),lines(b.lines),lines(b.template_label?(b.fields||[]).filter(([,v])=>String(v).trim()):b.fields),...(b.locations||[]).map(locationLine),toolbar(...bookingDocs(b).map(a=>doc(a.file,a.label)),btn('Gestisci PDF ('+bookingDocs(b).length+')',()=>manageBookingDocs(b),'small'),navLink(b),safeLink(b.source,'Fonte'),safeLink(b.extraLink,b.extraLabel||'Link'),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'),btn('Foto della tappa',()=>coverEditor('booking:'+b.id,b.place||b.title),'small'),btn('Modifica',()=>bookingEdit(b,i),'small')));root.append(item);if(focusBooking===b.id){focusBooking='';requestAnimationFrame(()=>{if(item.isConnected)item.scrollIntoView({block:'start'})})}}
