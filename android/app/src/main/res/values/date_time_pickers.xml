@@ -1,0 +1,26 @@
+<resources>
+    <style name="NextDoPickerLightOcean" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#176E71</item>
+    </style>
+    <style name="NextDoPickerDarkOcean" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#69E0D2</item>
+    </style>
+    <style name="NextDoPickerLightForest" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#275C39</item>
+    </style>
+    <style name="NextDoPickerDarkForest" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#9EE0A3</item>
+    </style>
+    <style name="NextDoPickerLightSunset" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#914A35</item>
+    </style>
+    <style name="NextDoPickerDarkSunset" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#FFD49A</item>
+    </style>
+    <style name="NextDoPickerLightLavender" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#514383</item>
+    </style>
+    <style name="NextDoPickerDarkLavender" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#CBBAFF</item>
+    </style>
+</resources>

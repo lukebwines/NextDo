@@ -89,7 +89,7 @@ private fun StatusTile(label:String,icon:ImageVector,accent:Color,modifier:Modif
 @Composable
 internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolean,agenda:WorkAgenda?,workConnected:Boolean,workBusy:Boolean,workError:String,openWork:(String)->Unit,onDetail:(Long)->Unit,onRefresh:()->Unit,open:(NextDoArea)->Unit) {
     Text("La tua dashboard",fontSize=29.sp,fontWeight=FontWeight.ExtraBold,color=ShellWhite)
-    Text(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy",Locale.ITALIAN)),color=ShellMuted,fontSize=14.sp)
+    Text(ItalianDateTime.date(LocalDate.now()),color=ShellMuted,fontSize=14.sp)
     ShellCard("Professionale","Agenda, scadenze e appuntamenti",Icons.Default.Work,WorkBlue,enabled,{open(NextDoArea.WORK)}) {
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
             StatusTile("Scadenze",Icons.Default.Event,WorkBlue,Modifier.weight(1f),agenda?.items?.count{it.kind=="task"}?.toString()?:"—",enabled){openWork("tasks")}
@@ -105,7 +105,7 @@ internal fun NextDoDashboard(enabled:Boolean,connected:Boolean,hasOffline:Boolea
         }
         if(workError.isNotBlank())Text(workError,color=ShellSand,fontSize=12.sp)
         if(workConnected)TextButton(onClick=onRefresh,enabled=!workBusy&&enabled){Text("Aggiorna agenda")}
-        Text(when{workBusy->"Aggiornamento agenda…";agenda!=null->"Ultima sincronizzazione: "+agenda.updated.take(16).replace('T',' ');workConnected->"Agenda non disponibile. Apri Lavoro per riprovare.";else->"Associa l’area professionale. I trattini non indicano assenza di impegni."},color=ShellMuted,fontSize=12.sp)
+        Text(when{workBusy->"Aggiornamento agenda…";agenda!=null->"Ultima sincronizzazione: "+ItalianDateTime.dateTime(agenda.updated);workConnected->"Agenda non disponibile. Apri Lavoro per riprovare.";else->"Associa l’area professionale. I trattini non indicano assenza di impegni."},color=ShellMuted,fontSize=12.sp)
         agenda?.let{data->
             val entries=orderedWork(data.items)
             HorizontalDivider(color=ShellMuted.copy(alpha=.2f))
@@ -244,7 +244,7 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
                 Row(Modifier.fillMaxWidth().padding(16.dp),verticalAlignment=Alignment.CenterVertically){
                     Column(Modifier.weight(1f)){
                         Text(item.str("title"),color=ink,fontWeight=FontWeight.Bold,fontSize=17.sp)
-                        Text(item.str("due_at").takeIf{it.isNotBlank()&&it!="null"}?.replace("T"," ")?.take(16)?:"Senza data",color=muted,fontSize=13.sp)
+                        Text(ItalianDateTime.dateTime(item.str("due_at")).takeIf{it.isNotBlank()&&it!="null"}?:"Senza data",color=muted,fontSize=13.sp)
                         Text(status,color=accent,fontSize=12.sp)
                     }
                     Icon(Icons.Default.ChevronRight,"Apri",tint=accent)
@@ -257,7 +257,7 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
         var title by remember(item){mutableStateOf(item.str("title"))}
         var desc by remember(item){mutableStateOf(item.str("description"))}
         var type by remember(item){mutableStateOf(item.str("kind").ifBlank{kind})}
-        var day by remember(item){mutableStateOf(item.str("due_at").takeIf{it!="null"}.orEmpty().take(10))}
+        var day by remember(item){mutableStateOf(if(id.isBlank()&&kind!="task")LocalDate.now().toString() else item.str("due_at").takeIf{it!="null"}.orEmpty().take(10))}
         var time by remember(item){mutableStateOf(item.str("due_at").takeIf{it.length>=16}.orEmpty().drop(11).take(5))}
         var status by remember(item){mutableStateOf(item.str("status").ifBlank{"todo"})}
         var priority by remember(item){mutableStateOf(item.str("priority").ifBlank{"normal"})}
@@ -267,15 +267,15 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
             Column(Modifier.heightIn(max=470.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
                 OutlinedTextField(title,{title=it},label={Text("Titolo")},singleLine=true)
                 for((k,label) in names)FilterChip(selected=type==k,onClick={type=k},label={Text(label)})
-                OutlinedTextField(day,{day=it},label={Text("Data (AAAA-MM-GG)")},singleLine=true,isError=!validDate)
-                OutlinedTextField(time,{time=it},label={Text("Ora facoltativa (HH:MM)")},singleLine=true,isError=!validTime)
+                DateField("Data",day,{day=it;if(it.isBlank())time=""},enabled=enabled,clearable=type=="task"||status=="review",appearance=PickerAppearance(light,appearance?.optString("palette").orEmpty()))
+                TimeField("Ora facoltativa",time,{time=it},enabled=enabled&&day.isNotBlank(),appearance=PickerAppearance(light,appearance?.optString("palette").orEmpty()))
                 for((k,label) in listOf("review" to "Da verificare","todo" to "Da fare","done" to "Completato"))FilterChip(selected=status==k,onClick={status=k},label={Text(label)})
                 for((k,label) in listOf("low" to "Bassa","normal" to "Normale","high" to "Alta","urgent" to "Urgente"))FilterChip(selected=priority==k,onClick={priority=k},label={Text(label)})
                 OutlinedTextField(desc,{desc=it},label={Text("Descrizione / email originale")},minLines=3)
                 if(id.isNotBlank())TextButton(onClick={remove=true},enabled=enabled){Text("Elimina")}
             }
         },confirmButton={TextButton(enabled=enabled&&title.isNotBlank()&&validDate&&validTime&&(type=="task"||status=="review"||day.isNotBlank()),onClick={
-            val due=if(day.isBlank())JSONObject.NULL else day+if(time.isBlank())"" else "T"+time+":00"
+            val due=ItalianDateTime.storedDue(item.str("due_at"),day,time)?:JSONObject.NULL
             save(id,JSONObject().put("title",title).put("description",desc).put("kind",type).put("due_at",due).put("status",status).put("priority",priority))
             editing=null
         }){Text("Salva")}},dismissButton={TextButton(onClick={editing=null}){Text("Annulla")}})

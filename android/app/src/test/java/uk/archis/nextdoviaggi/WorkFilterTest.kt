@@ -16,6 +16,15 @@ class WorkFilterTest {
         assertEquals(listOf(3L),all.filter{workMatches(it,"review")}.map{it.id})
         assertEquals(listOf(1L,2L),all.filter{workMatches(it,"tasks")}.map{it.id})
     }
+    @Test fun labelsDoNotChangeTheIsoValuesUsedForOrdering(){
+        val a=item(1,day="2026-11-26").copy(instant="2026-11-26T14:45:00+01:00")
+        val b=item(2,day="2026-12-01")
+        assertEquals("26/11/2026 · 14:45",a.timeLabel)
+        assertEquals("01/12/2026",b.timeLabel)
+        assertEquals("Data da definire",item(3).timeLabel)
+        assertEquals("2026-11-26",a.day)
+        assertEquals(listOf(1L,2L),orderedWork(listOf(b,a)).map{it.id})
+    }
     @Test fun dashboardPrioritizesWithoutDroppingOpenItems(){
         val all=listOf(item(1),item(2,day="2027-02-01"),item(3,status="review"),item(4,priority="high"),item(5,overdue=true,day="2026-11-01"))
         assertEquals(listOf(5L,4L,3L,2L,1L),orderedWork(all).map{it.id})

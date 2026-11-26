@@ -16,13 +16,13 @@ data class TravelEditor(val kind:String,val tripId:String="",val revision:Int=-1
 @Composable
 fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->Unit,onSave:(JSONObject)->Unit) {
     val labels=when(editor.kind) {
-        "new" -> listOf("title" to "Titolo", "subtitle" to "Sottotitolo", "start" to "Inizio (AAAA-MM-GG)", "end" to "Fine (AAAA-MM-GG)")
+        "new" -> listOf("title" to "Titolo", "subtitle" to "Sottotitolo", "start" to "Inizio", "end" to "Fine")
         "trip" -> listOf("title" to "Titolo","subtitle" to "Sottotitolo")
         "day" -> listOf("place" to "Località","headline" to "Titolo giornata","description" to "Descrizione")
         "event" -> listOf("time" to "Orario","title" to "Titolo","details" to "Dettagli")
         else -> listOf("title" to "Titolo","type" to "Tipologia","date" to "Data / periodo","place" to "Località","status" to "Stato","ref" to "Riferimento","price" to "Prezzo")
     }
-    val values=remember(editor) { mutableStateMapOf<String,String>().apply { labels.forEach { (k,_) -> put(k,editor.initial.str(k)) } } }
+    val values=remember(editor) { mutableStateMapOf<String,String>().apply { labels.forEach { (k,_) -> put(k,editor.initial.str(k).ifBlank{if(editor.kind=="new"&&(k=="start"||k=="end"))LocalDate.now().toString() else ""}) } } }
     val datesOk=if(editor.kind!="new") true else try {
         ChronoUnit.DAYS.between(LocalDate.parse(values["start"].orEmpty()),LocalDate.parse(values["end"].orEmpty())) in 0L..179L
     } catch(_:Exception) { false }
@@ -31,12 +31,49 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
         "new" -> "Nuovo viaggio"; "trip" -> "Dati viaggio"; "day" -> "Modifica giornata"; "event" -> "Evento"; else -> "Prenotazione"
     })},text={
         Column(Modifier.heightIn(max=460.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            for((k,label) in labels) OutlinedTextField(values[k].orEmpty(),{values[k]=it.take(20000)},label={Text(label)},enabled=!busy,
-                singleLine=k!="details" && k!="description",modifier=Modifier.fillMaxWidth())
+            for((k,label) in labels) {
+                val value=values[k].orEmpty()
+                when {
+                    k=="start"||k=="end" -> DateField(label,value,{values[k]=it},enabled=!busy)
+                    k=="time" -> TravelTimeInput(value,{values[k]=it},!busy)
+                    k=="date" -> BookingDateInput(value,{values[k]=it},!busy)
+                    else -> OutlinedTextField(value,{values[k]=it.take(20000)},label={Text(label)},enabled=!busy,
+                        singleLine=k!="details"&&k!="description",modifier=Modifier.fillMaxWidth())
+                }
+            }
             if(!datesOk) Text("Inserisci date valide, periodo massimo 180 giorni.")
             if(error.isNotBlank()) Text(error,color=MaterialTheme.colorScheme.error)
             if(busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
     },confirmButton={TextButton(onClick={val b=JSONObject();labels.forEach{(k,_)->b.put(k,values[k].orEmpty())};onSave(b)},enabled=!busy&&datesOk&&titleOk){Text("Salva")}},
       dismissButton={TextButton(onClick=onCancel,enabled=!busy){Text("Annulla")}})
+}
+
+/** Text fallback is intentional for inherited bookings, ranges and local-time annotations. */
+@Composable
+private fun TravelTimeInput(value:String,change:(String)->Unit,enabled:Boolean){
+    var freeText by remember{mutableStateOf(false)}
+    TimeField("Orario locale",value,change,enabled=enabled)
+    if(value.isNotBlank()&&ItalianDateTime.parseTime(value)==null)Text("L’orario originale contiene indicazioni complesse. La scelta di un’ora lo sostituisce; puoi conservarlo come testo libero.",style=MaterialTheme.typography.bodySmall)
+    TextButton(onClick={freeText=!freeText},enabled=enabled){Text(if(freeText)"Nascondi testo libero" else "Orario complesso / testo libero")}
+    if(freeText)OutlinedTextField(value,{change(it.take(20000))},label={Text("Orario originale / intervallo")},enabled=enabled,modifier=Modifier.fillMaxWidth())
+}
+@Composable
+private fun BookingDateInput(value:String,change:(String)->Unit,enabled:Boolean){
+    var freeText by remember{mutableStateOf(false)}
+    val first=ItalianDateTime.firstDate(value)
+    val period=ItalianDateTime.period(value)
+    val end=period?.second?.toString().orEmpty()
+    DateField("Data / periodo",value,{start->
+        val selected=ItalianDateTime.parseDate(start)
+        change(if(selected!=null&&period!=null&&selected<=period.second)start+" — "+period.second.toString() else start)
+    },enabled=enabled,clearable=true)
+    if(first!=null){
+        DateField("Fine periodo (facoltativa)",end,{last->
+            change(if(last.isBlank())first.toString() else first.toString()+" — "+last)
+        },enabled=enabled,clearable=true,fallback=first,min=first)
+    }
+    Text("La scelta di una data sostituisce il valore precedente. Per indicazioni complesse o con fusi diversi conserva il testo originale.",style=MaterialTheme.typography.bodySmall)
+    TextButton(onClick={freeText=!freeText},enabled=enabled){Text(if(freeText)"Nascondi testo libero" else "Periodo complesso / testo libero")}
+    if(freeText)OutlinedTextField(value,{change(it.take(20000))},label={Text("Data / periodo originale")},enabled=enabled,modifier=Modifier.fillMaxWidth())
 }

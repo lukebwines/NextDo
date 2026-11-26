@@ -1005,8 +1005,8 @@ class MainActivity : ComponentActivity() {
         }
         if(offline)return
         TravelCard("Diario di bordo","Importa la cronologia esportata da Google Maps. Nessuna registrazione GPS aggiuntiva.") {
-            OutlinedTextField(from,{from=it;preview=null},label={Text("Dal (AAAA-MM-GG)")},singleLine=true,enabled=!busy)
-            OutlinedTextField(to,{to=it;preview=null},label={Text("Al (incluso, AAAA-MM-GG)")},singleLine=true,enabled=!busy)
+            DateField("Dal",from,{from=it;preview=null},enabled=!busy)
+            DateField("Al (incluso)",to,{to=it;preview=null},enabled=!busy)
             Text("Le date seguono il fuso presente nei singoli eventi di Google. Gli eventi a cavallo dei limiti vengono esclusi; i punti del percorso vengono filtrati singolarmente.",color=Muted,fontSize=12.sp)
             Action("Scegli file JSON",!busy&&cfg!=null){
                 preview=null;timelineFile=null;timelineTrip=t.id;timelineScope=timelineOwner(cfg!!)
@@ -1025,9 +1025,9 @@ class MainActivity : ComponentActivity() {
             preview?.let{p->
                 val paths=p.getJSONArray("paths")
                 val points=(0 until paths.length()).sumOf{paths.getJSONArray(it).length()}
-                Text(p.getString("from")+" — "+p.getString("to"),color=Teal)
+                Text(ItalianDateTime.date(p.getString("from"))+" — "+ItalianDateTime.date(p.getString("to")),color=Teal)
                 Text("Visite: "+p.getJSONArray("visits").length()+" · Spostamenti: "+p.getJSONArray("activities").length()+" · Punti: "+points)
-                for(v in p.arr("visits").take(5))Text(v.str("startTime")+" · "+v.getJSONObject("location").optDouble("lat")+", "+v.getJSONObject("location").optDouble("lon"),color=Muted,fontSize=12.sp)
+                for(v in p.arr("visits").take(5))Text(ItalianDateTime.dateTime(v.str("startTime"),true)+" · "+v.getJSONObject("location").optDouble("lat")+", "+v.getJSONObject("location").optDouble("lon"),color=Muted,fontSize=12.sp)
                 Text("Il file originale e gli altri periodi non vengono inviati. Un nuovo import sostituisce il diario precedente di questo viaggio.",color=Sand,fontSize=12.sp)
                 Action("Conferma e sincronizza",!busy&&cfg!=null&&session.isNotBlank()){confirm=true}
             }
@@ -1105,7 +1105,7 @@ class MainActivity : ComponentActivity() {
                 TextButton(onClick={pendingZip=null},enabled=!busy){Text("Annulla")}
             }
             if(trips.isEmpty()) Text("Nessun viaggio disponibile",color=Muted)
-            for (item in trips) TravelCard(item.str("title"),item.str("start")+"  —  "+item.str("end")) {
+            for (item in trips) TravelCard(item.str("title"),ItalianDateTime.date(item.str("start"))+"  —  "+ItalianDateTime.date(item.str("end"))) {
                 Action("Apri viaggio") { selectTrip(item.str("id")) }
             }
             TextButton(onClick={session="";trips=emptyList();retryServer()}) { Text("Riconnetti") }
@@ -1113,7 +1113,7 @@ class MainActivity : ComponentActivity() {
         offlineMeta?.let { meta ->
             TravelCard("Disponibile offline",meta.str("title")+" · "+meta.optInt("pdfs")+" PDF") {
                 Pill("NESSUNA CONNESSIONE NECESSARIA")
-                Text("Ultimo download: "+meta.str("saved").take(16).replace('T',' '),color=Muted,fontSize=12.sp)
+                Text("Ultimo download: "+ItalianDateTime.dateTime(meta.str("saved")),color=Muted,fontSize=12.sp)
                 Action("Apri copia offline") { openOffline() }
             }
         }
@@ -1136,7 +1136,7 @@ class MainActivity : ComponentActivity() {
                 Pill(countdown,Sand)
                 Text(info.str("title"),fontSize=32.sp,fontWeight=FontWeight.ExtraBold,color=White,lineHeight=34.sp)
                 Text(info.str("subtitle"),color=White,fontSize=13.sp)
-                Text(info.str("start")+" — "+info.str("end"),color=Muted,fontSize=12.sp)
+                Text(ItalianDateTime.date(info.str("start"))+" — "+ItalianDateTime.date(info.str("end")),color=Muted,fontSize=12.sp)
             }
         }
     }
@@ -1148,7 +1148,7 @@ class MainActivity : ComponentActivity() {
             Metric(documentMap(t).size.toString(),"PDF",Modifier.weight(1f)){section="PDF"}
         }
         val next=t.days.firstOrNull{it.str("date")==selectedDay}
-        TravelCard("La prossima tappa",next?.let { listOf(it.str("date"),it.str("place"),it.str("headline")).filter{v->v.isNotBlank()}.joinToString(" · ") } ?: "Programma da definire") {
+        TravelCard("La prossima tappa",next?.let { listOf(ItalianDateTime.date(it.str("date")),it.str("place"),it.str("headline")).filter{v->v.isNotBlank()}.joinToString(" · ") } ?: "Programma da definire") {
             Action("Vai all’itinerario") { section="Oggi" }
         }
         if(!offline) TravelCard("Porta il viaggio con te","Scarica itinerari, guide, foto e PDF in un unico archivio cifrato. Una sola copia offline alla volta.") {
@@ -1171,7 +1171,7 @@ class MainActivity : ComponentActivity() {
         Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
             val i=t.days.indexOfFirst{it.str("date")==selectedDay}
             IconButton(onClick={if(i>0)selectedDay=t.days[i-1].str("date")},enabled=i>0){Icon(Icons.Default.ArrowBack,"Giorno precedente")}
-            Text(selectedDay.ifBlank{"Nessuna giornata"},Modifier.weight(1f),color=Teal,fontSize=19.sp,fontWeight=FontWeight.Bold)
+            Text(ItalianDateTime.date(selectedDay).ifBlank{"Nessuna giornata"},Modifier.weight(1f),color=Teal,fontSize=19.sp,fontWeight=FontWeight.Bold)
             IconButton(onClick={if(i>=0&&i<t.days.lastIndex)selectedDay=t.days[i+1].str("date")},enabled=i>=0&&i<t.days.lastIndex){Icon(Icons.Default.ArrowForward,"Giorno successivo")}
         }
         val d=t.days.firstOrNull{it.str("date")==selectedDay}?:return
@@ -1189,7 +1189,7 @@ class MainActivity : ComponentActivity() {
             val guide=t.guides.firstOrNull{it.str("id")==e.str("gid")}
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                 Column(Modifier.width(55.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-                    Text(e.str("time").ifBlank{"·"},color=Sand,fontSize=13.sp,fontWeight=FontWeight.Bold)
+                    Text(ItalianDateTime.temporalText(e.str("time")).ifBlank{"·"},color=Sand,fontSize=13.sp,fontWeight=FontWeight.Bold)
                     Box(Modifier.padding(top=6.dp).size(8.dp).clip(RoundedCornerShape(10.dp)).background(Teal))
                     Box(Modifier.padding(top=4.dp).width(2.dp).height(60.dp).background(Teal.copy(alpha=.3f)))
                 }
@@ -1244,7 +1244,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun BookingScreen(t:TripPackage) {
         Text("Le tue prenotazioni",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
         if(canEdit()) Action("Aggiungi prenotazione",!busy){edit("booking",JSONObject())}
-        for(b in t.bookings)TravelCard(b.str("title"),listOf(b.str("type"),b.str("date"),b.str("place")).filter{it.isNotBlank()}.joinToString(" · ")) {
+        for(b in t.bookings)TravelCard(b.str("title"),listOf(b.str("type"),ItalianDateTime.temporalText(b.str("date")),b.str("place")).filter{it.isNotBlank()}.joinToString(" · ")) {
             if(canEdit()) TextButton(onClick={edit("booking",b,JSONObject().put("id",b.str("id")))},enabled=!busy){Text("Modifica prenotazione")}
             Photo(t.manifest.optJSONObject("travel_photos")?.optJSONObject("booking:"+b.str("id")))
             if(b.str("status").isNotBlank())Pill(b.str("status"))
@@ -1252,7 +1252,7 @@ class MainActivity : ComponentActivity() {
             if(b.str("price").isNotBlank())Text(b.str("price"),color=Teal,fontWeight=FontWeight.Bold)
             for(key in listOf("lines","fields")) {
                 val a=b.optJSONArray(key)?:continue
-                for(i in 0 until a.length())a.optJSONArray(i)?.let{Text(it.optString(0)+": "+it.optString(1),fontSize=13.sp,color=Muted)}
+                for(i in 0 until a.length())a.optJSONArray(i)?.let{Text(it.optString(0)+": "+ItalianDateTime.fieldValue(it.optString(0),it.optString(1)),fontSize=13.sp,color=Muted)}
             }
             BookingActions(b)
         }

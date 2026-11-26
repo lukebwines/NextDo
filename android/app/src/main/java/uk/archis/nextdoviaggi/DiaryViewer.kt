@@ -84,9 +84,10 @@ fun DiaryViewer(t:TripPackage,data:JSONObject?,loadMap:((Int,Int,Int,(Bitmap)->U
     val minutes=acts.sumOf{a->try{Duration.between(OffsetDateTime.parse(a.str("startTime")),OffsetDateTime.parse(a.str("endTime"))).toMinutes().coerceAtLeast(0)}catch(_:Exception){0L}}
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
         TextButton(onClick={val i=dates.indexOf(day);day=if(i>0)dates[i-1] else ""},enabled=day.isNotEmpty()&&!busy){Text("‹")}
-        Text(if(day.isBlank())"Tutto il viaggio" else day)
+        Text(if(day.isBlank())"Tutto il viaggio" else ItalianDateTime.date(day))
         TextButton(onClick={val i=dates.indexOf(day);if(i<dates.lastIndex)day=dates[i+1]},enabled=dates.indexOf(day)<dates.lastIndex&&!busy){Text("›")}
     }
+    if(dates.isNotEmpty())DateField("Filtra per giornata",day,{value->if(value.isBlank()||value in dates)day=value},enabled=!busy,clearable=true,fallback=ItalianDateTime.parseDate(dates.first())?:java.time.LocalDate.now(),min=ItalianDateTime.parseDate(dates.first()),max=ItalianDateTime.parseDate(dates.last()))
     Text(visits.size.toString()+" visite · "+acts.size+" spostamenti · "+plans.flatten().size+" tappe previste")
     Text((if(distances.isEmpty())"Distanza non disponibile" else String.format(java.util.Locale.ITALY,"%.1f km registrati",distances.sum()/1000))+" · "+minutes+" min negli spostamenti",fontSize=12.sp)
     if(view!=null){
@@ -125,9 +126,9 @@ fun DiaryViewer(t:TripPackage,data:JSONObject?,loadMap:((Int,Int,Int,(Bitmap)->U
     val events=(visits.map{it to "Visita"}+acts.map{it to "Spostamento"}).sortedBy{it.first.str("startTime")}
     for((v,label) in events.take(200)){
         HorizontalDivider()
-        Text(label+" · "+v.str("startTime").take(16).replace('T',' '))
+        Text(label+" · "+ItalianDateTime.dateTime(v.str("startTime"),true))
         val location=point(v.optJSONObject("location"))
-        Text(if(location!=null)location.lat.toString()+", "+location.lon else v.str("mode")+" · "+v.str("endTime").take(16).replace('T',' '),fontSize=12.sp)
+        Text(if(location!=null)location.lat.toString()+", "+location.lon else v.str("mode")+" · "+ItalianDateTime.dateTime(v.str("endTime"),true),fontSize=12.sp)
     }
     if(events.size>200)Text("Mostrati i primi 200 eventi: filtra per giorno.")
     if(day.isNotBlank()){

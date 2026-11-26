@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.5-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.6-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.5-test"
-            RELEASE_NOTES="Area Personale: dashboard, tema e sfondi sincronizzati, attività, scadenze, appuntamenti e avvisi riservati opt-in. Richiede NextDo Web 0.2.10-test. Smistamento dei mittenti personali configurabile sul web; spostamento e riclassificazione con conferma sul web. Avvisi periodici indicativi, non allarmi esatti. Collaudo fisico richiesto."
+            test "$ANDROID_VERSION" = "0.2.6-test"
+            RELEASE_NOTES="Date italiane GG/MM/AAAA e orari a 24 ore HH:mm; calendari nativi in italiano con lunedì come primo giorno e selettori orari nelle schermate modificabili. Uniformate agenda professionale, dashboard, agenda personale, viaggi, prenotazioni e diario. Valori facoltativi rimovibili; fusi e dati originali preservati. Nessuna modifica ad API, database, backend o avvisi. Compatibile con Web 0.2.10-test. Aggiornare senza disinstallare. Collaudo sul dispositivo necessario."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then
