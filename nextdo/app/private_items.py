@@ -1,5 +1,9 @@
 """Personal agenda isolated from professional task APIs."""
-from datetime import date,datetime
+from datetime import date,datetime,timedelta
+from calendar import monthrange
+from zoneinfo import ZoneInfo
+import os
+TZ=ZoneInfo(os.environ.get('NEXTDO_TZ','Europe/Rome'))
 from fastapi import HTTPException,Request
 
 def fail(msg,code=400):raise HTTPException(code,msg)
@@ -10,6 +14,10 @@ def ensure(c):
  title TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',kind TEXT NOT NULL,
  due_at TEXT,status TEXT NOT NULL DEFAULT 'todo',priority TEXT NOT NULL DEFAULT 'normal',
  created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+ cols={r[1] for r in c.execute("PRAGMA table_info(private_items)")}
+ if "recurrence" not in cols:c.execute("ALTER TABLE private_items ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'none'")
+ if "recurrence_anchor" not in cols:c.execute("ALTER TABLE private_items ADD COLUMN recurrence_anchor TEXT")
+ if "snoozed_until" not in cols:c.execute("ALTER TABLE private_items ADD COLUMN snoozed_until TEXT")
  c.execute("CREATE INDEX IF NOT EXISTS private_items_owner ON private_items(owner_id,status,due_at)")
 
 def owner_id(c,identity):
@@ -18,7 +26,7 @@ def owner_id(c,identity):
  return r[0]
 
 def list_items(c,uid):
- return [dict(r) for r in c.execute("SELECT id,title,description,kind,due_at,status,priority FROM private_items WHERE owner_id=? ORDER BY status='done',due_at IS NULL,due_at,id DESC",(uid,))]
+ return [dict(r) for r in c.execute("SELECT id,title,description,kind,due_at,status,priority,recurrence,snoozed_until FROM private_items WHERE owner_id=? ORDER BY status='done',due_at IS NULL,due_at,id DESC",(uid,))]
 
 def checked(b,allow_undated_done=False):
  title=b.get("title");description=b.get("description","");kind=b.get("kind","task")
@@ -34,18 +42,56 @@ def checked(b,allow_undated_done=False):
     if "T" not in due or d.tzinfo is not None:raise ValueError()
   except ValueError:fail("Data non valida")
  if kind in ("appointment","deadline") and not due and status!="review" and not (status=="done" and allow_undated_done):fail("Inserire una data")
- return title.strip(),description,kind,due,status,priority
+ recurrence=b.get("recurrence","none")
+ if recurrence not in ("none","daily","weekly","monthly","yearly"):fail("Ripetizione non valida")
+ if recurrence!="none" and (kind!="task" or not due):fail("La ripetizione richiede un'attività con data")
+ return title.strip(),description,kind,due,status,priority,recurrence
+
+def next_due(due,anchor,recurrence,now=None):
+ original=datetime.fromisoformat(due)
+ initial=datetime.fromisoformat(anchor or due)
+ now=now or datetime.now(TZ).replace(tzinfo=None)
+ if len(due)==10:now=datetime.combine(now.date(),datetime.min.time())
+ def advance(d):
+  if recurrence=="daily":return d+timedelta(days=1)
+  if recurrence=="weekly":return d+timedelta(days=7)
+  months=1 if recurrence=="monthly" else 12
+  i=d.year*12+d.month-1+months;y,m=divmod(i,12);m+=1
+  return d.replace(year=y,month=m,day=min(initial.day,monthrange(y,m)[1]))
+ try:
+  d=advance(original)
+  while d<=now:d=advance(d)
+ except (ValueError,OverflowError):fail("Data successiva non valida")
+ return d.date().isoformat() if len(due)==10 else d.isoformat(timespec="seconds")
 
 def create(c,uid,b):
  vals=checked(b)
- return c.execute("INSERT INTO private_items(owner_id,title,description,kind,due_at,status,priority) VALUES(?,?,?,?,?,?,?)",(uid,*vals)).lastrowid
+ return c.execute("INSERT INTO private_items(owner_id,title,description,kind,due_at,status,priority,recurrence,recurrence_anchor) VALUES(?,?,?,?,?,?,?,?,?)",(uid,*vals,vals[3] if vals[6]!="none" else None)).lastrowid
 
 def update(c,uid,i,b):
  old=c.execute("SELECT * FROM private_items WHERE owner_id=? AND id=?",(uid,i)).fetchone()
  if not old:fail("Elemento non trovato",404)
- vals=checked({**dict(old),**b},allow_undated_done=old['status'] in ('review','done') and old['due_at'] is None)
- c.execute("UPDATE private_items SET title=?,description=?,kind=?,due_at=?,status=?,priority=?,updated_at=CURRENT_TIMESTAMP WHERE owner_id=? AND id=?",(*vals,uid,i))
+ merged={**dict(old),**b}
+ if merged["kind"]!="task" or not merged.get("due_at"):
+  if "recurrence" not in b:merged["recurrence"]="none"
+ vals=list(checked(merged,allow_undated_done=old['status'] in ('review','done') and old['due_at'] is None))
+ anchor=old["recurrence_anchor"] if vals[6]==old["recurrence"] and vals[3]==old["due_at"] else vals[3]
+ if vals[6]=="none":anchor=None
+ snooze=old["snoozed_until"] if vals[3]==old["due_at"] and vals[4]!="done" else None
+ if vals[4]=="done" and old["status"]!="done" and vals[6]!="none":
+  if "expected_due" not in b or b["expected_due"]!=old["due_at"]:fail("Ricaricare l'attività ricorrente prima di completarla",409)
+  vals[3]=next_due(vals[3],anchor,vals[6]);vals[4]="todo";snooze=None
+ c.execute("UPDATE private_items SET title=?,description=?,kind=?,due_at=?,status=?,priority=?,recurrence=?,recurrence_anchor=?,snoozed_until=?,updated_at=CURRENT_TIMESTAMP WHERE owner_id=? AND id=?",(*vals,anchor,snooze,uid,i))
  return {"id":i}
+
+def snooze(c,uid,i,minutes):
+ if type(minutes)!=int or minutes not in (10,30,60,1440):fail("Rinvio non valido")
+ old=c.execute("SELECT kind,status FROM private_items WHERE owner_id=? AND id=?",(uid,i)).fetchone()
+ if not old:fail("Elemento non trovato",404)
+ if old["kind"]!="task" or old["status"]=="done":fail("Rinvio disponibile per attività aperte")
+ until=(datetime.now(TZ)+timedelta(minutes=minutes)).replace(tzinfo=None).isoformat(timespec="seconds")
+ c.execute("UPDATE private_items SET snoozed_until=? WHERE owner_id=? AND id=?",(until,uid,i))
+ return {"id":i,"snoozed_until":until}
 
 def remove(c,uid,i):
  if not c.execute("DELETE FROM private_items WHERE owner_id=? AND id=?",(uid,i)).rowcount:fail("Elemento non trovato",404)
@@ -66,6 +112,10 @@ def register(app,conn,web_owner,mobile_owner,data_path):
   def edit(item_id:int,req:Request,b:dict):
    identity=authorize(req,True)
    with conn() as c:return update(c,owner_id(c,identity),item_id,b)
+  @app.post(prefix+"/items/{item_id}/snooze")
+  def postpone(item_id:int,req:Request,b:dict):
+   identity=authorize(req,True)
+   with conn() as c:return snooze(c,owner_id(c,identity),item_id,b.get("minutes"))
   @app.post(prefix+"/items/{item_id}/delete")
   @app.delete(prefix+"/items/{item_id}")
   def delete(item_id:int,req:Request):

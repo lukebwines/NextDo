@@ -35,6 +35,7 @@ def work_to_private(c,uid,tid):
 def to_work(c,uid,i):
  t=c.execute("SELECT * FROM private_items WHERE id=? AND owner_id=?",(i,uid)).fetchone()
  if not t:fail("Impegno non trovato",404)
+ if t["recurrence"]!="none" or t["snoozed_until"]:fail("Disattivare la ripetizione e rimuovere il rinvio prima del trasferimento")
  if c.execute("SELECT 1 FROM cloudflare_private_fingerprints WHERE private_item_id=?",(i,)).fetchone():fail("Impegno proveniente da email: il trasferimento richiede la gestione della provenienza")
  tid=c.execute("""INSERT INTO tasks(title,description,kind,priority,status,due_at,owner_id,scope,labels)
  VALUES(?,?,?,?,?,?,?,'personal','[]')""",(t["title"],t["description"],"appointment" if t["kind"]=="appointment" else "task","critical" if t["priority"]=="urgent" else t["priority"],t["status"],t["due_at"],uid)).lastrowid

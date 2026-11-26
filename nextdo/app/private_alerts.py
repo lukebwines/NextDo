@@ -14,7 +14,14 @@ def due_notices(items,now,secret):
   marks=[]
   if item["status"]=="review":marks.append("review")
   if item["priority"]=="urgent":marks.append("urgent")
-  value=item["due_at"]
+  postponed=item.get("snoozed_until")
+  if postponed:
+   try:
+    seconds=datetime.fromisoformat(postponed).replace(tzinfo=TZ).timestamp()-now.timestamp()
+    if seconds>0:continue
+    marks=["snooze"] if seconds>=-86400 else []
+   except (ValueError,TypeError,OverflowError):pass
+  value=None if postponed else item["due_at"]
   if value:
    try:
     due=datetime.fromisoformat(value)
