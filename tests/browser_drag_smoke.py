@@ -101,15 +101,23 @@ def main():
      assert dashboard_page.locator('.dash-task-row',has_text='Dashboard private note').count()==0
      pending=dashboard_page.locator('.dash-task-row',has_text='Dashboard appointment 7')
      assert 'Da verificare' in pending.inner_text() and 'Senza data' in pending.inner_text()
-     assert not pending.locator('input[type="checkbox"]').is_enabled()
+     assert pending.locator('input[type="checkbox"]').is_enabled()
+     pending.locator('input[type="checkbox"]').click()
+     dashboard_page.get_by_role('button',name='Conferma e completa',exact=True).wait_for()
+     dashboard_page.get_by_role('button',name='Annulla',exact=True).click()
+     assert pending.is_visible()
      dashboard_page.get_by_role('button',name='Da verificare: 9 attività, apri elenco filtrato').click()
      assert dashboard_page.locator('.rowtask',has_text='Dashboard appointment').count()==8
      assert dashboard_page.locator('.rowtask',has_text='Dashboard deadline review').count()==1
+     dashboard_page.locator('.rowtask',has_text='Dashboard deadline review').locator('input[type="checkbox"]').click()
+     dashboard_page.get_by_role('button',name='Conferma e completa',exact=True).click()
+     dashboard_page.locator('.rowtask',has_text='Dashboard deadline review').wait_for(state='detached')
      dashboard_page.get_by_role('button',name='Dashboard',exact=True).click()
      assert '30 giorni' in dashboard_page.locator('.metric-done').inner_text()
      dashboard_page.locator('.metric-done').click()
      dashboard_page.locator('.archive-results .rowtask',has_text='Dashboard completed appointment').wait_for()
-     assert dashboard_page.locator('.archive-results .rowtask').count()==1
+     assert dashboard_page.locator('.archive-results .rowtask',has_text='Dashboard deadline review').count()==1
+     assert dashboard_page.locator('.archive-results .rowtask').count()==2
      dashboard_page.get_by_role('button',name='Impostazioni',exact=True).click()
      dashboard_page.get_by_label('Periodo contatore completate').select_option('7')
      dashboard_page.get_by_role('button',name='Salva periodo').click()
