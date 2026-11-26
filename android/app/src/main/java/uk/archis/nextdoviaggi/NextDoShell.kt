@@ -196,7 +196,7 @@ internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Bo
                 Text("Promemoria personali",Modifier.weight(1f),color=textColor,fontWeight=FontWeight.Bold)
                 Switch(checked=alertsEnabled,onCheckedChange={toggleAlerts()},enabled=enabled&&(connected||alertsEnabled))
             }
-            Text("Avvisi riservati anche in background. Controllo indicativo ogni 15 minuti.",color=muted,fontSize=12.sp)
+            Text("Avvisi riservati anche offline dopo la sincronizzazione. Gli orari sono indicativi e dipendono da Android.",color=muted,fontSize=12.sp)
         }
     }
     TextButton(onClick=openTransfers,enabled=enabled&&connected){Text("Sposta / riclassifica impegni sul web",color=PrivateTeal)}
@@ -249,6 +249,9 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
                         if(item.str("recurrence") !in listOf("","none"))Text("Ricorrente",color=muted,fontSize=12.sp)
                         if(item.str("snoozed_until").let{it.isNotBlank()&&it!="null"})Text("Rinviato: "+ItalianDateTime.dateTime(item.str("snoozed_until")),color=muted,fontSize=12.sp)
                     }
+                    if(item.str("status")!="done"&&item.str("id").isNotBlank())IconButton(onClick={
+                        save(item.str("id"),JSONObject().put("status","done").put("expected_due",item.opt("due_at")?:JSONObject.NULL))
+                    },enabled=enabled){Icon(Icons.Default.Check,"Completa",tint=accent)}
                     Icon(Icons.Default.ChevronRight,"Apri",tint=accent)
                 }
             }
