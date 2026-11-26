@@ -27,7 +27,7 @@ const NextDoPersonal=(()=>{
  function resetTimer(){
   if(!unlocked)return;
   lastActivity=Date.now();clearTimeout(timer);
-  timer=setTimeout(()=>{lock();if(S.view==='personal'&&main?.isConnected)render(main)},IDLE_MS);
+  timer=setTimeout(async()=>{await lock();if(S.view==='personal'&&main?.isConnected)render(main)},IDLE_MS);
   scheduleKeepAlive();
  }
  function noteActivity(){if(S.view==='personal'&&unlocked)resetTimer()}
