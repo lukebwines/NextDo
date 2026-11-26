@@ -239,6 +239,8 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
      if key in fields:fields[key]=fields[key].strip().upper()
     for key in ("amount","base_amount"):
      if key in fields:fields[key]=fields[key].strip().replace(",",".")
+   if kind=="expense" and any(k in fields and str(target.get(k,""))!=fields[k] for k in ("amount","currency","base_amount","base_currency")):
+    target.pop("fx_date",None);target.pop("fx_source",None)
    target.update(fields)
    if kind in ("trip","event","booking","expense") and not str(target.get("title","")).strip():fail(400,"Titolo obbligatorio")
    revision=save(c,owner,m,state,files,rev)
@@ -284,6 +286,61 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
     raw=out.getvalue()
     if len(raw)>limit:fail(413,"Archivio offline oltre 32 MB")
    return Response(raw,media_type="application/zip",headers={"Cache-Control":"no-store","X-NextDo-Revision":str(r["revision"]),"X-NextDo-Snapshot":snapshot(c,owner,r,include_timeline,catalog),"X-NextDo-Archive-SHA256":hashlib.sha256(raw).hexdigest()})
+ @app.get("/api/mobile/v1/exchange-rates")
+ def exchange_rates_mobile(req:Request):
+  from . import personal_travel_tools as tools
+  auth(req)
+  return tools.exchange_rates()
+ @app.post("/api/mobile/v1/trips/{tid}/expenses/convert")
+ def convert_expenses_mobile(tid:str,req:Request,b:dict):
+  from . import personal_travel_tools as tools
+  owner=auth(req)["owner"];rev=b.get("revision")
+  quote=tools.exchange_rates()
+  from decimal import Decimal, ROUND_HALF_UP
+  with db() as c:
+   r=load(c,owner,tid)
+   if type(rev)!=int or r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
+   m,state,files=read_archive(r["archive"])
+   budget=m.get("budget")
+   if not budget:fail(400,"Impostare prima il budget")
+   cur=budget["currency"];rates=quote["rates"];count=0
+   for e in m.get("expenses",[]):
+    if e["currency"]==cur or e.get("base_amount","")!="" or e["currency"] not in rates or cur not in rates:continue
+    value=(Decimal(str(e["amount"]))/Decimal(rates[e["currency"]])*Decimal(rates[cur])).quantize(Decimal("0.01"),rounding=ROUND_HALF_UP)
+    e.update(base_amount=str(value),base_currency=cur,fx_date=quote["date"],fx_source="BCE (indicativo)");count+=1
+   revision=save(c,owner,m,state,files,rev) if count else rev
+   return {"revision":revision,"manifest":m,"state":state,"templates":template_catalog(c,owner),"converted":count}
+ @app.post("/api/mobile/v1/trips/{tid}/expenses/delete")
+ def delete_expense_mobile(tid:str,req:Request,b:dict):
+  from . import personal_travel_tools as tools
+  owner=auth(req)["owner"]
+  with db() as c:
+   r=load(c,owner,tid);rev=b.get("revision")
+   if type(rev)!=int or r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
+   m,state,files=read_archive(r["archive"])
+   tools.remove_expense(m,b.get("index"),files)
+   revision=save(c,owner,m,state,files,rev)
+   return {"revision":revision,"manifest":m,"state":state,"templates":template_catalog(c,owner)}
+ @app.post("/api/mobile/v1/trips/{tid}/expenses/receipt")
+ def receipt_mobile(tid:str,req:Request,b:dict):
+  from . import personal_travel_tools as tools
+  owner=auth(req)["owner"];rev=b.get("revision");idx=b.get("index")
+  if type(rev)!=int or type(idx)!=int:fail(400,"Spesa non valida")
+  raw=tools.receipt_pdf(b.get("content"))
+  with db() as c:
+   r=load(c,owner,tid)
+   if r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
+   m,state,files=read_archive(r["archive"]);expenses=m.get("expenses",[])
+   if not 0<=idx<len(expenses):fail(404,"Spesa non trovata")
+   name="ricevuta-"+secrets.token_hex(12)+".pdf"
+   if name in files:fail(409,"Nome ricevuta già presente")
+   old=expenses[idx].get("doc")
+   if old and old in files and not any(d.get("file")==old for d in m.get("documents",[])):
+    m.setdefault("documents",[]).append({"file":old,"title":old})
+   files[name]=raw;m.setdefault("documents",[]).append({"file":name,"title":expenses[idx]["title"]+" - ricevuta"})
+   expenses[idx]["doc"]=name
+   revision=save(c,owner,m,state,files,rev)
+   return {"revision":revision,"manifest":m,"state":state,"templates":template_catalog(c,owner)}
  @app.get("/api/mobile/v1/trips/{tid}/documents/{name}")
  def document(tid:str,name:str,req:Request):
   owner=auth(req)["owner"]

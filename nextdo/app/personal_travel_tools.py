@@ -171,3 +171,52 @@ def diary_tile(z,x,y,key):
    if pic is not None:im.paste(pic,((dx+1)*256,(dy+1)*256))
  out=io.BytesIO();im.save(out,format="PNG")
  return out.getvalue()
+
+def exchange_rates():
+ """Latest public ECB fixing. No user or trip data is sent."""
+ from xml.etree import ElementTree
+ raw=fetch("https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",limit=65536)
+ try:
+  if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():raise ValueError()
+  root=ElementTree.fromstring(raw)
+  day=next(x for x in root.iter() if "time" in x.attrib)
+  stamp=date.fromisoformat(day.attrib["time"]).isoformat()
+  rates={"EUR":"1"}
+  for x in day:
+   cur=x.attrib["currency"];value=Decimal(x.attrib["rate"])
+   if not re.fullmatch(r"[A-Z]{3}",cur) or not value.is_finite() or not 0<value<100000000:raise ValueError()
+   rates[cur]=str(value)
+  if len(rates)<2:raise ValueError()
+  return {"date":stamp,"rates":rates,"source":"BCE"}
+ except (ValueError,KeyError,StopIteration,InvalidOperation,ElementTree.ParseError):fail("Tassi BCE non disponibili",502)
+
+def remove_expense(m,index,files):
+ expenses=m.get("expenses",[])
+ if type(index)!=int or not 0<=index<len(expenses):fail("Spesa non trovata",404)
+ name=expenses[index].get("doc")
+ # Keep the original receipt in the private document library, even if it had no other reference.
+ if name and name in files and not any(d.get("file")==name for d in m.get("documents",[])):
+  m.setdefault("documents",[]).append({"file":name,"title":name})
+ del expenses[index]
+
+def receipt_pdf(encoded):
+ if not isinstance(encoded,str) or len(encoded)>14*1024*1024:fail("Ricevuta oltre 10 MB")
+ try:raw=base64.b64decode(encoded,validate=True)
+ except (ValueError,TypeError):fail("Ricevuta non valida")
+ if not raw or len(raw)>10*1024*1024:fail("Ricevuta oltre 10 MB")
+ if raw.startswith(b"%PDF-"):
+  try:
+   from pypdf import PdfReader
+   reader=PdfReader(io.BytesIO(raw))
+   if reader.is_encrypted or not 0<len(reader.pages)<=100:raise ValueError()
+  except Exception:fail("PDF non valido o protetto")
+  return raw
+ try:
+  from PIL import Image,ImageOps
+  with Image.open(io.BytesIO(raw)) as im:
+   if im.format not in ("JPEG","PNG","WEBP") or im.width*im.height>25000000:raise ValueError()
+   image=ImageOps.exif_transpose(im).convert("RGB")
+   image.thumbnail((2200,2200))
+   out=io.BytesIO();image.save(out,format="PDF",resolution=150)
+   return out.getvalue()
+ except Exception:fail("Ricevuta non valida: usare PDF, JPEG, PNG o WebP")

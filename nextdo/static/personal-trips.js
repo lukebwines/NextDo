@@ -552,19 +552,39 @@ const NextDoPersonal=(()=>{
  function expenseEditor(e={},index=-1){
   const m=trip.manifest,docChoices=[['','Nessun PDF'],...[...allDocs(m)].map(([k,v])=>[k,v])],bookingChoices=[['','Nessuna prenotazione'],...m.bookings.map(b=>[b.id,b.title])];
   const initial={currency:m.budget?.currency||'EUR',status:'Da verificare',...e};initial.status=initial.status||'Da verificare';
-  editor('Ricevuta / spesa',fieldlist(initial,[['title','Descrizione'],['date','Data','date'],['amount','Importo originale'],['currency','Valuta ISO (EUR, USD…)'],['status','Stato',[['Da verificare','Da verificare'],['Pagata','Pagata'],['Da sostenere','Da sostenere']]],['category','Categoria'],['base_amount','Controvalore manuale (facoltativo)'],['base_currency','Valuta del controvalore (es. EUR)'],['booking_id','Prenotazione',bookingChoices],['doc','Ricevuta in archivio',docChoices],['notes','Note','textarea']]),v=>save(t=>{for(const k of ['currency','base_currency'])v[k]=v[k].trim().toUpperCase();for(const k of ['amount','base_amount'])v[k]=v[k].trim().replace(',','.');const arr=t.manifest.expenses||(t.manifest.expenses=[]);if(index<0)arr.push(v);else arr[index]={...arr[index],...v}}))
+  editor('Ricevuta / spesa',fieldlist(initial,[['title','Descrizione'],['date','Data','date'],['amount','Importo originale'],['currency','Valuta ISO (EUR, USD…)'],['status','Stato',[['Da verificare','Da verificare'],['Pagata','Pagata'],['Da sostenere','Da sostenere']]],['category','Categoria'],['base_amount','Controvalore manuale (facoltativo)'],['base_currency','Valuta del controvalore (es. EUR)'],['booking_id','Prenotazione',bookingChoices],['doc','Ricevuta in archivio',docChoices],['notes','Note','textarea']]),v=>save(t=>{for(const k of ['currency','base_currency'])v[k]=v[k].trim().toUpperCase();for(const k of ['amount','base_amount'])v[k]=v[k].trim().replace(',','.');const arr=t.manifest.expenses||(t.manifest.expenses=[]);if(index<0)arr.push(v);else {const previous=arr[index];arr[index]={...previous,...v};if(['amount','currency','base_amount','base_currency'].some(k=>String(previous[k]??'')!==String(v[k]??''))){delete arr[index].fx_date;delete arr[index].fx_source}}}))
+ }
+ async function deleteExpense(index){
+  if(!confirm('Eliminare questa spesa? La ricevuta resta nell’archivio documenti.'))return;
+  try{await api(tripURL()+'/expenses/delete',{method:'POST',body:JSON.stringify({revision:trip.revision,index})});await reloadView()}catch(e){report(e)}
+ }
+ async function convertExpenses(){
+  const m=trip.manifest,b=m.budget;if(!b)return;
+  const token=generation,id=m.trip.id,revision=trip.revision;
+  try{
+   const quote=await api(path+'/exchange-rates');
+   if(token!==generation||trip?.manifest.trip.id!==id||trip.revision!==revision)return;
+   const pending=(m.expenses||[]).filter(e=>e.currency!==b.currency&&(e.base_amount===undefined||e.base_amount==='')&&quote.rates[e.currency]&&quote.rates[b.currency]);
+   if(!pending.length)return msg('Nessuna spesa convertibile senza controvalore.');
+   if(!confirm('Applicare il cambio indicativo BCE del '+dayFmt(quote.date)+' a '+pending.length+' spese senza controvalore? Non include commissioni bancarie.'))return;
+   await save(t=>{for(const e of t.manifest.expenses||[]){
+    if(e.currency===b.currency||(e.base_amount!==undefined&&e.base_amount!=='')||!quote.rates[e.currency]||!quote.rates[b.currency])continue;
+    e.base_amount=(Number(e.amount)/Number(quote.rates[e.currency])*Number(quote.rates[b.currency])).toFixed(2);
+    e.base_currency=b.currency;e.fx_date=quote.date;e.fx_source='BCE (indicativo)';
+   }});
+  }catch(e){report(e)}
  }
  function budgetCards(m){
   const expenses=m.expenses||[],b=m.budget,totals=new Map(),paid=new Map(),planned=new Map(),uncertain=new Map();
   const cents=v=>Math.round(Number(v)*100),fmt=(c,v)=>c+' '+(v/100).toFixed(2),add=(map,k,v)=>map.set(k,(map.get(k)||0)+v);
-  let committed=0,missing=0;
+  let committed=0,missing=0;const categories=new Map();
   for(const e of expenses){
    const value=cents(e.amount),status=e.status||'Da verificare';
    add(totals,e.currency,value);add(status==='Pagata'?paid:status==='Da sostenere'?planned:uncertain,e.currency,value);
-   if(b){if(e.currency===b.currency)committed+=value;else if(e.base_currency===b.currency&&e.base_amount!==undefined&&e.base_amount!=='')committed+=cents(e.base_amount);else missing++}
+   if(b){let converted=null;if(e.currency===b.currency)converted=value;else if(e.base_currency===b.currency&&e.base_amount!==undefined&&e.base_amount!=='')converted=cents(e.base_amount);if(converted===null)missing++;else{committed+=converted;add(categories,e.category||'Altro',converted)}}
   }
   const lines=map=>[...map].map(([k,v])=>fmt(k,v)).join(' · ')||'—';
-  return [card('Budget complessivo',paragraph(b?fmt(b.currency,cents(b.amount)):'Budget non impostato'),...(b?[paragraph('Spese e impegni conteggiati: '+fmt(b.currency,committed)),paragraph('Residuo'+(missing?' parziale':'')+': '+fmt(b.currency,cents(b.amount)-committed)),...(committed>cents(b.amount)?[paragraph('ATTENZIONE: budget superato')]:[]),...(missing?[paragraph(missing+' spese senza controvalore nella valuta del budget, escluse dal calcolo.')]:[])]:[]),btn('Imposta / modifica budget',budgetEditor,'primary')),card('Spese e impegni per valuta',paragraph('Totale: '+lines(totals)),paragraph('Pagate: '+lines(paid)),paragraph('Da sostenere: '+lines(planned)),paragraph('Da verificare: '+lines(uncertain)),paragraph('Le spese sono registrate una sola volta; i prezzi delle prenotazioni non vengono sommati automaticamente.'),btn('+ Ricevuta / spesa',()=>expenseEditor(),'primary'))];
+  return [card('Budget complessivo',paragraph(b?fmt(b.currency,cents(b.amount)):'Budget non impostato'),...(b?[paragraph('Spese e impegni conteggiati: '+fmt(b.currency,committed)),paragraph('Residuo'+(missing?' parziale':'')+': '+fmt(b.currency,cents(b.amount)-committed)),...(committed>cents(b.amount)?[paragraph('ATTENZIONE: budget superato')]:[]),...(missing?[paragraph(missing+' spese senza controvalore nella valuta del budget, escluse dal calcolo.')]:[])]:[]),btn('Imposta / modifica budget',budgetEditor,'primary'),...(b?[btn('Completa cambi mancanti (BCE)',convertExpenses,'small')]:[])),card('Spese e impegni per valuta',paragraph('Totale: '+lines(totals)),paragraph('Pagate: '+lines(paid)),paragraph('Da sostenere: '+lines(planned)),paragraph('Da verificare: '+lines(uncertain)),paragraph('Le spese sono registrate una sola volta; i prezzi delle prenotazioni non vengono sommati automaticamente.'),btn('+ Ricevuta / spesa',()=>expenseEditor(),'primary'),btn('Spesa rapida pagata',()=>expenseEditor({status:'Pagata',date:new Date().toLocaleDateString('sv-SE')}),'small')),...(b&&categories.size?[card('Ripartizione per categoria'+(missing?' (parziale)':''),...[...categories].sort((a,b)=>b[1]-a[1]).map(([label,value])=>el('div',{class:'travel-mini'},[paragraph(label+' · '+fmt(b.currency,value)),el('progress',{value:String(value),max:String(Math.max(committed,1)),style:'width:100%'})])) )]:[])];
  }
  function timelineView(root,tr){
   const token=generation,url=path+'/trips/'+encodeURIComponent(tr.id)+'/timeline';
@@ -643,7 +663,7 @@ const NextDoPersonal=(()=>{
    for(const d of m.days)if((d.route_points||[]).length)root.append(card(dayFmt(d.date),routeCard(d)));
   }else if(tab==='spese'){
    root.append(...budgetCards(m));
-   for(const [i,e] of (m.expenses||[]).entries())root.append(card(e.title,paragraph([e.date?dayFmt(e.date):'',e.category,e.currency+' '+e.amount,e.status||'Da verificare',e.notes].filter(Boolean).join(' · ')),paragraph(m.bookings.find(b=>b.id===e.booking_id)?.title||''),toolbar(doc(e.doc),btn('Modifica',()=>expenseEditor(e,i),'small'))));
+   for(const [i,e] of (m.expenses||[]).entries())root.append(card(e.title,paragraph([e.date?dayFmt(e.date):'',e.category,e.currency+' '+e.amount,e.status||'Da verificare',e.notes].filter(Boolean).join(' · ')),paragraph(m.bookings.find(b=>b.id===e.booking_id)?.title||''),paragraph(e.fx_source?e.fx_source+' · '+e.fx_date:''),toolbar(doc(e.doc),btn('Modifica',()=>expenseEditor(e,i),'small'),btn('Elimina',()=>deleteExpense(i),'small'))));
   }else if(tab==='prenotazioni'){
    root.append(toolbar(btn('+ Prenotazione',()=>bookingEdit({},-1),'primary'),btn('Acquisisci con AI',aiEditor,'primary'),btn('Gestisci tipologie',templateManager,'small')));
    for(const [i,b] of m.bookings.entries()){const item=card(b.title,spotPhoto(m.travel_photos?.['booking:'+b.id]),paragraph([b.type,b.date,b.status,b.ref,b.place,b.price].filter(Boolean).join(' · ')),lines(b.lines),lines(b.template_label?(b.fields||[]).filter(([,v])=>String(v).trim()):b.fields),...(b.locations||[]).map(locationLine),toolbar(...bookingDocs(b).map(a=>doc(a.file,a.label)),btn('Gestisci PDF ('+bookingDocs(b).length+')',()=>manageBookingDocs(b),'small'),navLink(b),safeLink(b.source,'Fonte'),safeLink(b.extraLink,b.extraLabel||'Link'),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'),btn('Foto della tappa',()=>coverEditor('booking:'+b.id,b.place||b.title),'small'),btn('Modifica',()=>bookingEdit(b,i),'small')));root.append(item);if(focusBooking===b.id){focusBooking='';requestAnimationFrame(()=>{if(item.isConnected)item.scrollIntoView({block:'start'})})}}

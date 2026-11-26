@@ -568,6 +568,19 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   with db() as c:
    r=load(c,owner,tid);_,_,files=read_archive(r["archive"])
    return {"revision":save(c,owner,m,state,files,rev)}
+ @app.get("/api/personal/exchange-rates")
+ def personal_exchange_rates(req:Request):
+  allowed(req)
+  return tools.exchange_rates()
+ @app.post("/api/personal/trips/{tid}/expenses/delete")
+ def delete_expense(tid:str,req:Request,b:dict):
+  owner=allowed(req,True)
+  with db() as c:
+   r=load(c,owner,tid);rev=b.get("revision")
+   if type(rev)!=int or r["revision"]!=rev:fail("Il viaggio è stato modificato: ricaricare",409)
+   m,state,files=read_archive(r["archive"])
+   tools.remove_expense(m,b.get("index"),files)
+   return {"revision":save(c,owner,m,state,files,rev)}
  @app.post("/api/personal/trips/{tid}/documents")
  def upload_doc(tid:str,req:Request,file:UploadFile=File(...)):
   owner=allowed(req,True)

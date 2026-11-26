@@ -1428,8 +1428,49 @@ class MainActivity : ComponentActivity() {
         t.docs.keys.forEach{docs.putIfAbsent(it,it)}
         return docs
     }
+    private fun budgetOperation(t:TripPackage,action:String,body:JSONObject) {
+        val cfg=connection?:return
+        val s=session
+        if(!canEdit()||busy||current?.id!=t.id||current?.revision!=t.revision)return
+        task({
+            val r=TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/expenses/"+action,s,body.put("revision",t.revision))
+            TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision"),templates=bookingCatalog(r.optJSONArray("templates")))
+        }){current=it}
+    }
+    private var receiptTarget:Triple<String,String,Pair<Int,Int>>?=null
+    private var receiptUri by mutableStateOf<Uri?>(null)
+    private val receiptPicker=registerForActivityResult(ActivityResultContracts.OpenDocument()){uri->
+        receiptUri=uri
+        if(uri==null)receiptTarget=null
+    }
+    private fun chooseReceipt(t:TripPackage,index:Int) {
+        val cfg=connection?:return
+        if(!canEdit()||busy)return
+        receiptTarget=Triple(timelineOwner(cfg),t.id,t.revision to index);receiptUri=null
+        receiptPicker.launch(arrayOf("application/pdf","image/jpeg","image/png","image/webp"))
+    }
+    private fun uploadReceipt(t:TripPackage,index:Int) {
+        val cfg=connection?:return
+        val uri=receiptUri?:return
+        val target=receiptTarget?:return
+        val s=session
+        if(!canEdit()||busy||target!=Triple(timelineOwner(cfg),t.id,t.revision to index))return
+        task({
+            val raw=contentResolver.openInputStream(uri)?.use { input ->
+                val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
+                var n=input.read(buffer)
+                while(n!=-1){require(out.size()+n<=10*1024*1024){"Ricevuta oltre 10 MB"};out.write(buffer,0,n);n=input.read(buffer)}
+                out.toByteArray()
+            }?:error("Ricevuta non disponibile")
+            val r=TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/expenses/receipt",s,JSONObject().put("revision",t.revision).put("index",index).put("content",Base64.encodeToString(raw,Base64.NO_WRAP)))
+            TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision"),templates=bookingCatalog(r.optJSONArray("templates")))
+        }){current=it;receiptTarget=null;receiptUri=null}
+    }
     @Composable private fun BudgetScreen(t:TripPackage) {
         Text("Budget e spese",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
+        var deleteIndex by remember(t.id,t.revision){mutableStateOf<Int?>(null)}
+        var convertConfirm by remember(t.id,t.revision){mutableStateOf(false)}
+        val cfg=connection
         val b=t.manifest.optJSONObject("budget")
         val expenses=t.manifest.arr("expenses")
         val currency=b?.str("currency").orEmpty()
@@ -1451,7 +1492,10 @@ class MainActivity : ComponentActivity() {
                 if(committed>limit)Text("ATTENZIONE: budget superato",color=Sand)
                 if(missing>0)Text(missing.toString()+" spese senza controvalore nella valuta del budget, escluse dal calcolo.",color=Muted)
             }
-            if(canEdit())Action("Imposta / modifica budget",!busy){edit("budget",b?:JSONObject().put("currency","EUR"))}
+            if(canEdit()){
+                Action("Imposta / modifica budget",!busy){edit("budget",b?:JSONObject().put("currency","EUR"))}
+                if(limit!=null&&missing>0)Action("Completa cambi mancanti (BCE)",!busy){convertConfirm=true}
+            }
         }
         TravelCard("Spese e impegni per valuta","Importi originali, senza sommare automaticamente i prezzi delle prenotazioni"){
             fun line(rows:List<JSONObject>)=rows.groupBy{it.str("currency")}.entries.joinToString(" · "){(cur,list)->
@@ -1461,17 +1505,39 @@ class MainActivity : ComponentActivity() {
             Text("Pagate: "+line(expenses.filter{it.str("status")=="Pagata"}))
             Text("Da sostenere: "+line(expenses.filter{it.str("status")=="Da sostenere"}))
             Text("Da verificare: "+line(expenses.filter{it.str("status") !in listOf("Pagata","Da sostenere")}))
-            if(canEdit())Action("Aggiungi spesa / ricevuta",!busy){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Da verificare"))}
+            if(canEdit()){
+                Action("Aggiungi spesa / ricevuta",!busy){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Da verificare"))}
+                Action("Spesa rapida pagata",!busy){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Pagata").put("date",LocalDate.now().toString()))}
+            }
             if(offline)Text("Copia offline in sola lettura",color=Muted)
+        }
+        if(limit!=null&&committed.signum()>0)TravelCard("Ripartizione per categoria",if(missing>0)"Importi convertiti · parziale" else currency){
+            val categories=expenses.mapIndexedNotNull{index,e->converted[index]?.let{e.str("category").ifBlank{"Altro"} to it}}.groupBy({it.first},{it.second}).mapValues{(_,list)->list.fold(java.math.BigDecimal.ZERO){acc,n->acc+n}}.entries.sortedByDescending{it.value}
+            for((name,value) in categories){
+                Text(name+" · "+currency+" "+money(value))
+                LinearProgressIndicator(progress={ (value.toDouble()/committed.toDouble()).toFloat().coerceIn(0f,1f) },modifier=Modifier.fillMaxWidth(),color=Teal)
+            }
         }
         expenses.forEachIndexed{index,e->
             TravelCard(e.str("title"),listOf(ItalianDateTime.date(e.str("date")),e.str("currency")+" "+e.str("amount"),e.str("category"),e.str("status").ifBlank{"Da verificare"}).filter{it.isNotBlank()}.joinToString(" · ")){
                 t.bookings.firstOrNull{it.str("id")==e.str("booking_id")}?.let{Text("Prenotazione: "+it.str("title"))}
                 if(e.str("notes").isNotBlank())Text(e.str("notes"))
                 if(e.str("doc").isNotBlank())Action("Apri ricevuta"){viewPdf(e.str("doc"))}
-                if(canEdit())Action("Modifica",!busy){edit("expense",JSONObject(e.toString()).apply{if(str("status").isBlank())put("status","Da verificare")},JSONObject().put("index",index))}
+                if(e.str("fx_source").isNotBlank())Text(e.str("fx_source")+" · "+ItalianDateTime.date(e.str("fx_date")),color=Muted)
+                if(canEdit()){
+                    Action("Modifica",!busy){edit("expense",JSONObject(e.toString()).apply{if(str("status").isBlank())put("status","Da verificare")},JSONObject().put("index",index))}
+                    Action("Seleziona ricevuta PDF o foto",!busy){chooseReceipt(t,index)}
+                    if(cfg!=null&&receiptUri!=null&&receiptTarget==Triple(timelineOwner(cfg),t.id,t.revision to index)){
+                        Text("Ricevuta selezionata. Conferma il caricamento.",color=Muted)
+                        Action("Carica ricevuta",!busy){uploadReceipt(t,index)}
+                        TextButton(onClick={receiptUri=null;receiptTarget=null}){Text("Annulla ricevuta")}
+                    }
+                    TextButton(onClick={deleteIndex=index},enabled=!busy){Text("Elimina spesa",color=Sand)}
+                }
             }
         }
+        deleteIndex?.let{index->AlertDialog(onDismissRequest={deleteIndex=null},title={Text("Eliminare la spesa?")},text={Text("La ricevuta resta nell’archivio documenti.")},confirmButton={TextButton(onClick={deleteIndex=null;budgetOperation(t,"delete",JSONObject().put("index",index))}){Text("Elimina")}},dismissButton={TextButton(onClick={deleteIndex=null}){Text("Annulla")}})}
+        if(convertConfirm)AlertDialog(onDismissRequest={convertConfirm=false},title={Text("Cambio BCE indicativo")},text={Text("Applica il tasso di riferimento più recente solo alle spese senza controvalore. Non include commissioni bancarie.")},confirmButton={TextButton(onClick={convertConfirm=false;budgetOperation(t,"convert",JSONObject())}){Text("Converti")}},dismissButton={TextButton(onClick={convertConfirm=false}){Text("Annulla")}})
         Action("Torna alla panoramica"){section="Home"}
     }
     @Composable private fun Documents(t:TripPackage) {

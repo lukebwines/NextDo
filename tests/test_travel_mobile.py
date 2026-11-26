@@ -228,3 +228,33 @@ def test_mobile_budget_and_expenses(tmp_path):
  assert c.get(p+"/trips/"+m["trip"]["id"],headers=h).json()["manifest"]==result
  assert c.get(url+"/offline",headers=s).status_code==200
  c.close()
+
+def test_budget_delete_conversion_and_receipt(tmp_path,monkeypatch):
+ from app import personal_travel_tools as tools
+ import base64,io
+ from PIL import Image
+ monkeypatch.setattr(tools,"exchange_rates",lambda:{"date":"2026-11-25","rates":{"EUR":"1","USD":"1.25"},"source":"BCE"})
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ s={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers={"Authorization":"Bearer "+d["device_token"]},json={"pin":"123456"}).json()["session_token"]}
+ raw,m=sample()
+ assert c.post(mobile+"/trips/import",headers={**s,"Content-Type":"application/zip"},content=raw).status_code==200
+ url=mobile+"/trips/"+m["trip"]["id"]
+ def edit(rev,kind,fields):return c.post(url+"/edit",headers=s,json={"revision":rev,"kind":kind,"fields":fields})
+ assert edit(0,"budget",{"amount":"1000","currency":"EUR"}).status_code==200
+ assert edit(1,"expense",{"title":"Test","amount":"25","currency":"USD"}).status_code==200
+ r=c.post(url+"/expenses/convert",headers=s,json={"revision":2});assert r.status_code==200,r.text
+ assert r.json()["manifest"]["expenses"][0]["base_amount"]=="20.00"
+ assert r.json()["manifest"]["expenses"][0]["fx_date"]=="2026-11-25"
+ assert c.post(url+"/expenses/convert",headers=s,json={"revision":3}).json()["revision"]==3
+ img=io.BytesIO();Image.new("RGB",(20,30),"white").save(img,format="PNG")
+ r=c.post(url+"/expenses/receipt",headers=s,json={"revision":3,"index":0,"content":base64.b64encode(img.getvalue()).decode()});assert r.status_code==200,r.text
+ name=r.json()["manifest"]["expenses"][0]["doc"]
+ assert c.get(url+"/documents/"+name,headers=s).content.startswith(b"%PDF-")
+ assert c.post(url+"/expenses/delete",headers=s,json={"revision":3,"index":0}).status_code==409
+ r=c.post(url+"/expenses/delete",headers=s,json={"revision":4,"index":0});assert r.status_code==200,r.text
+ assert r.json()["manifest"]["expenses"]==[]
+ assert c.get(url+"/documents/"+name,headers=s).status_code==200
+ c.close()
