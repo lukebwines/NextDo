@@ -1,5 +1,7 @@
 # NextDo — Home Assistant add-on
 
+**0.2.11-test — Menu e accesso all'Area personale.** La voce «I miei impegni di lavoro» è spostata in Operatività; «Area personale» resta separata. Uscire dalla sezione senza logout non revoca più immediatamente il PIN: il rientro entro 5 minuti dall'ultima attività non richiede un nuovo inserimento. Timeout di inattività 5 minuti, keepalive limitato alla sezione privata, blocco immediato al logout. I dati privati vengono rimossi dalla vista e dalla memoria applicativa quando si passa ad altre sezioni. Nessuna modifica all'APK.
+
 **0.1.45-test — Regola automatica email → ICS.** In Impostazioni selezionare un destinatario verificato, autorizzare l’invio e attivare la regola. Per le nuove email Cloudflare elaborate dopo l’attivazione, invio cumulativo delle nuove voci datate e supportate da evidenza, non trascorse. Titolo [DA VERIFICARE], stato TENTATIVE, nessun testo originale, destinatario fisso; task in revisione. Coda persistente e dedup per testo, nessun retry di esito incerto. Disattivazione o modifica cancella la coda; nessun invio storico. Collaudo reale necessario.
 
 **0.1.44-test — Posta in uscita Cloudflare.** Configurazione locale separata dalla ricezione, token cifrato, prova sintetica con ICS, conferma manuale della ricezione, invio ICS singolo o cumulativo a un destinatario autorizzato per invio. Solo amministratore, nessun invio automatico. Vedere [guida](docs/cloudflare-outbound.md).

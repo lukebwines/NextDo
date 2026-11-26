@@ -446,6 +446,17 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   if error:fail(*error)
   grant(owner,session)
   return {"unlocked":True}
+ @app.post("/api/personal/keepalive")
+ def keepalive(req:Request):
+  owner,session=identity(req);csrf(req)
+  now=time.monotonic()
+  with mutex:
+   expires=grants.get((owner,session),0)
+   if expires<=now:
+    grants.pop((owner,session),None)
+    fail("Area personale bloccata",423)
+   grants[(owner,session)]=now+300
+  return {"unlocked":True}
  @app.post("/api/personal/lock")
  def lock(req:Request):
   owner,session=identity(req);csrf(req)

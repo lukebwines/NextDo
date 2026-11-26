@@ -1,6 +1,6 @@
 /* Private, native NextDo view. No localStorage, no work task integration. */
 const NextDoPersonal=(()=>{
- let generation=0,timer=null,main=null,trip=null,selected='',tab='panoramica',busy=false,section='home',templates=[],focusBooking='';
+ let generation=0,timer=null,keepAliveTimer=null,main=null,trip=null,selected='',tab='panoramica',busy=false,section='home',templates=[],focusBooking='',unlocked=false,lastActivity=0;
  const path='/personal';
  const clone=x=>JSON.parse(JSON.stringify(x));
  const uid=()=>crypto.getRandomValues(new Uint32Array(2)).join('-');
@@ -11,17 +11,57 @@ const NextDoPersonal=(()=>{
  const paragraph=(s)=>node('p','sub',s||'');
  const lines=a=>el('div',{},(a||[]).map(([k,v])=>el('p',{},[node('strong','',k+': '),String(v)])));
  const report=e=>{msg(e.message,true);if(e.message.includes('bloccata')){trip=null;render(main)}};
- function resetTimer(){clearTimeout(timer);timer=setTimeout(()=>{lock();if(S.view==='personal'&&main?.isConnected)render(main)},300000)}
- async function lock(){geoKey='';generation++;clearTimeout(timer);trip=null;selected='';section='home';templates=[];focusBooking='';busy=false;document.querySelectorAll('[data-personal-modal]').forEach(x=>x.remove());if(main?.isConnected)main.querySelector('#personal-content')?.replaceChildren();try{await api(path+'/lock',{method:'POST'})}catch{}}
+ const IDLE_MS=300000;
+ function scheduleKeepAlive(){
+  clearTimeout(keepAliveTimer);keepAliveTimer=null;
+  if(!unlocked||S.view!=='personal')return;
+  keepAliveTimer=setTimeout(async()=>{
+   keepAliveTimer=null;
+   if(!unlocked||S.view!=='personal')return;
+   if(Date.now()-lastActivity>=IDLE_MS)return;
+   try{await api(path+'/keepalive',{method:'POST'})}
+   catch(e){if(e.status===423||String(e.message||'').toLowerCase().includes('bloccata')){unlocked=false;if(S.view==='personal'&&main?.isConnected)render(main);return}}
+   scheduleKeepAlive();
+  },60000);
+ }
+ function resetTimer(){
+  if(!unlocked)return;
+  lastActivity=Date.now();clearTimeout(timer);
+  timer=setTimeout(async()=>{await lock();if(S.view==='personal'&&main?.isConnected)render(main)},IDLE_MS);
+  scheduleKeepAlive();
+ }
+ function noteActivity(){if(S.view==='personal'&&unlocked)resetTimer()}
+ for(const event of ['pointerdown','keydown','input','change','wheel'])document.addEventListener(event,noteActivity,{passive:true});
+ document.addEventListener('visibilitychange',async()=>{
+  if(document.hidden||S.view!=='personal'||!unlocked)return;
+  if(Date.now()-lastActivity>=IDLE_MS){await lock();if(S.view==='personal'&&main?.isConnected)render(main);return}
+  try{
+   const status=await api(path+'/status');
+   if(!status.unlocked){unlocked=false;clearTimeout(timer);clearTimeout(keepAliveTimer);if(S.view==='personal'&&main?.isConnected)render(main);return}
+   noteActivity();
+  }catch{}
+ });
+ function suspend(){
+  geoKey='';generation++;trip=null;selected='';section='home';templates=[];focusBooking='';busy=false;
+  document.querySelectorAll('[data-personal-modal]').forEach(x=>x.remove());
+  if(main?.isConnected)main.querySelector('#personal-content')?.replaceChildren();
+ }
+ async function lock(){
+  geoKey='';generation++;unlocked=false;clearTimeout(timer);clearTimeout(keepAliveTimer);timer=null;keepAliveTimer=null;
+  trip=null;selected='';section='home';templates=[];focusBooking='';busy=false;
+  document.querySelectorAll('[data-personal-modal]').forEach(x=>x.remove());
+  if(main?.isConnected)main.querySelector('#personal-content')?.replaceChildren();
+  try{await api(path+'/lock',{method:'POST'})}catch{}
+ }
  async function render(m){
   main=m;const token=++generation;let root=main.querySelector('#personal-content');if(!root){root=el('div',{id:'personal-content'});main.append(root)}root.replaceChildren(paragraph('Caricamento…'));
   try{
    const status=await api(path+'/status');if(token!==generation||!root.isConnected)return;
-   if(!status.unlocked){trip=null;section='home';root.classList.remove('travel-shell','personal-hub-shell');clearTimeout(timer);const pin=input('pin','6 cifre','','password');pin.setAttribute('inputmode','numeric');pin.maxLength=6;const confirmPin=input('confirm','Conferma PIN','','password');confirmPin.setAttribute('inputmode','numeric');confirmPin.maxLength=6;
+   if(!status.unlocked){unlocked=false;clearTimeout(timer);clearTimeout(keepAliveTimer);timer=null;keepAliveTimer=null;trip=null;section='home';root.classList.remove('travel-shell','personal-hub-shell');const pin=input('pin','6 cifre','','password');pin.setAttribute('inputmode','numeric');pin.maxLength=6;const confirmPin=input('confirm','Conferma PIN','','password');confirmPin.setAttribute('inputmode','numeric');confirmPin.maxLength=6;
     const f=el('form',{},[paragraph(status.configured?'Inserisci il PIN per accedere ai viaggi.':'Imposta un PIN privato di 6 cifre. Conservalo: il ripristino non è ancora disponibile.'),field('PIN',pin),...(status.configured?[]:[field('Conferma PIN',confirmPin)]),el('button',{class:'btn primary',type:'submit',text:status.configured?'Sblocca':'Imposta PIN'})]);
     f.addEventListener('submit',async e=>{e.preventDefault();try{await api(path+'/unlock',{method:'POST',body:JSON.stringify({pin:pin.value,confirm:confirmPin.value})});if(token===generation)render(main)}catch(e){report(e)}});root.replaceChildren(card('Area personale protetta',f));return;
    }
-   resetTimer();await overview(root,token);
+   unlocked=true;resetTimer();await overview(root,token);
   }catch(e){if(token===generation)root.replaceChildren(paragraph(e.message))}
  }
  async function overview(root,token){
@@ -604,5 +644,5 @@ const NextDoPersonal=(()=>{
   if(trip){trip=null;render(main);return true}
   section='home';render(main);return true;
  }
- return {render,lock,goBack,isBusy:()=>busy};
+ return {render,lock,suspend,goBack,isBusy:()=>busy};
 })();
