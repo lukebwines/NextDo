@@ -567,11 +567,8 @@ const NextDoPersonal=(()=>{
    const pending=(m.expenses||[]).filter(e=>e.currency!==b.currency&&(e.base_amount===undefined||e.base_amount==='')&&quote.rates[e.currency]&&quote.rates[b.currency]);
    if(!pending.length)return msg('Nessuna spesa convertibile senza controvalore.');
    if(!confirm('Applicare il cambio indicativo BCE del '+dayFmt(quote.date)+' a '+pending.length+' spese senza controvalore? Non include commissioni bancarie.'))return;
-   await save(t=>{for(const e of t.manifest.expenses||[]){
-    if(e.currency===b.currency||(e.base_amount!==undefined&&e.base_amount!=='')||!quote.rates[e.currency]||!quote.rates[b.currency])continue;
-    e.base_amount=(Number(e.amount)/Number(quote.rates[e.currency])*Number(quote.rates[b.currency])).toFixed(2);
-    e.base_currency=b.currency;e.fx_date=quote.date;e.fx_source='BCE (indicativo)';
-   }});
+   const result=await api(tripURL()+'/expenses/convert',{method:'POST',body:JSON.stringify({revision})});
+   if(token===generation&&trip?.manifest.trip.id===id){await reloadView();msg(result.converted+' spese convertite · BCE '+dayFmt(result.date))}
   }catch(e){report(e)}
  }
  function budgetCards(m){

@@ -220,3 +220,16 @@ def receipt_pdf(encoded):
    out=io.BytesIO();image.save(out,format="PDF",resolution=150)
    return out.getvalue()
  except Exception:fail("Ricevuta non valida: usare PDF, JPEG, PNG o WebP")
+
+def apply_exchange_rates(m,quote):
+ """Fill only absent countervalues. Decimal rounding is shared by Web and APK."""
+ from decimal import ROUND_HALF_UP
+ budget=m.get("budget")
+ if not budget:fail("Impostare prima il budget")
+ cur=budget["currency"];rates=quote["rates"];count=0
+ for e in m.get("expenses",[]):
+  if e["currency"]==cur or e.get("base_amount","")!="" or e["currency"] not in rates or cur not in rates:continue
+  value=(Decimal(str(e["amount"]))/Decimal(rates[e["currency"]])*Decimal(rates[cur])).quantize(Decimal("0.01"),rounding=ROUND_HALF_UP)
+  if value>10000000:continue
+  e.update(base_amount=str(value),base_currency=cur,fx_date=quote["date"],fx_source="BCE (indicativo)");count+=1
+ return count

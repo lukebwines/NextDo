@@ -323,6 +323,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        java.io.File(cacheDir,"receipt-capture").deleteRecursively()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
@@ -433,6 +434,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onDestroy() {
+        clearReceipt()
         lockLocal()
         super.onDestroy()
     }
@@ -550,6 +552,8 @@ class MainActivity : ComponentActivity() {
     private fun openTrip(t: TripPackage, cached: Boolean) {
         area=NextDoArea.TRIPS; current = t; offline = cached; section = "Home"; updateCaptureProtection()
         loadExpenseQueue(t.id)
+        val cfg=connection
+        if(receiptTarget!=null&&(cfg==null||receiptTarget?.first!=timelineOwner(cfg)||receiptTarget?.second!=t.id||receiptTarget?.third?.first!=t.revision))clearReceipt()
         selectedDay = t.days.firstOrNull { it.str("date") >= LocalDate.now().toString() }?.str("date")
             ?: t.days.firstOrNull()?.str("date").orEmpty()
     }
@@ -623,7 +627,7 @@ class MainActivity : ComponentActivity() {
         if(offlineSyncBusy)return
         PrivateAlerts.disable(this);privateAlertsEnabled=false
         timelineFile=null;timelineTrip="";timelineScope=""
-        pendingZip=null;zipScope="";receiptTarget=null;receiptUri=null;pendingExpenses=emptyList()
+        pendingZip=null;zipScope="";clearReceipt();pendingExpenses=emptyList()
         task({ synchronized(offlineGuard){vault.clear()} }) { lockLocal() }
     }
     private fun viewPdf(name: String) {
@@ -1516,6 +1520,31 @@ class MainActivity : ComponentActivity() {
             TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision"),templates=bookingCatalog(r.optJSONArray("templates")))
         }){current=it}
     }
+    private var cameraFile:java.io.File?=null
+    private var cameraUri:Uri?=null
+    private fun clearReceipt(){
+        cameraUri?.let{try{revokeUriPermission(it,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)}catch(_:Exception){}}
+        cameraFile?.delete();cameraFile=null;cameraUri=null;receiptUri=null;receiptTarget=null
+    }
+    private val receiptCamera=registerForActivityResult(ActivityResultContracts.TakePicture()){ok->
+        val uri=cameraUri
+        if(ok&&uri!=null&&cameraFile?.length()?.let{it>0}==true){
+            receiptUri=uri
+            try{revokeUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)}catch(_:Exception){}
+        }else clearReceipt()
+    }
+    private fun captureReceipt(t:TripPackage,index:Int){
+        val cfg=connection?:return
+        if(!canEdit()||busy)return
+        clearReceipt()
+        try{
+            val dir=java.io.File(cacheDir,"receipt-capture").apply{mkdirs()}
+            val file=java.io.File.createTempFile("receipt-",".jpg",dir);cameraFile=file
+            val uri=androidx.core.content.FileProvider.getUriForFile(this,"uk.archis.nextdoviaggi.updates",file);cameraUri=uri
+            receiptTarget=Triple(timelineOwner(cfg),t.id,t.revision to index)
+            receiptCamera.launch(uri)
+        }catch(e:Exception){clearReceipt();error="Fotocamera non disponibile"}
+    }
     private var receiptTarget:Triple<String,String,Pair<Int,Int>>?=null
     private var receiptUri by mutableStateOf<Uri?>(null)
     private val receiptPicker=registerForActivityResult(ActivityResultContracts.OpenDocument()){uri->
@@ -1525,7 +1554,7 @@ class MainActivity : ComponentActivity() {
     private fun chooseReceipt(t:TripPackage,index:Int) {
         val cfg=connection?:return
         if(!canEdit()||busy)return
-        receiptTarget=Triple(timelineOwner(cfg),t.id,t.revision to index);receiptUri=null
+        clearReceipt();receiptTarget=Triple(timelineOwner(cfg),t.id,t.revision to index)
         receiptPicker.launch(arrayOf("application/pdf","image/jpeg","image/png","image/webp"))
     }
     private fun uploadReceipt(t:TripPackage,index:Int) {
@@ -1543,7 +1572,7 @@ class MainActivity : ComponentActivity() {
             }?:error("Ricevuta non disponibile")
             val r=TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/expenses/receipt",s,JSONObject().put("revision",t.revision).put("index",index).put("content",Base64.encodeToString(raw,Base64.NO_WRAP)))
             TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision"),templates=bookingCatalog(r.optJSONArray("templates")))
-        }){current=it;receiptTarget=null;receiptUri=null}
+        }){current=it;clearReceipt()}
     }
     @Composable private fun BudgetScreen(t:TripPackage) {
         Text("Budget e spese",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
@@ -1587,11 +1616,11 @@ class MainActivity : ComponentActivity() {
             Text("Da verificare: "+line(expenses.filter{it.str("status") !in listOf("Pagata","Da sostenere")}))
             if(canEdit()){
                 Action("Aggiungi spesa / ricevuta",!busy){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Da verificare"))}
-                Action("Spesa rapida pagata",!busy){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Pagata").put("date",LocalDate.now().toString()))}
+                Action("Spesa rapida pagata",!busy){edit("expense",JSONObject().put("_quick",true).put("currency",currency.ifBlank{"EUR"}).put("status","Pagata").put("date",LocalDate.now().toString()))}
             }
             if(offline){
                 Text("Archivio offline in sola lettura; puoi accodare nuove spese cifrate sul telefono.",color=Muted)
-                Action("Registra spesa offline",!busy&&queueProblem.isBlank()){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Pagata").put("date",LocalDate.now().toString()))}
+                Action("Registra spesa offline",!busy&&queueProblem.isBlank()){edit("expense",JSONObject().put("_quick",true).put("currency",currency.ifBlank{"EUR"}).put("status","Pagata").put("date",LocalDate.now().toString()))}
             }
         }
         if(queueProblem.isNotBlank())Text(queueProblem,color=Sand)
@@ -1619,11 +1648,12 @@ class MainActivity : ComponentActivity() {
                 if(e.str("fx_source").isNotBlank())Text(e.str("fx_source")+" · "+ItalianDateTime.date(e.str("fx_date")),color=Muted)
                 if(canEdit()){
                     Action("Modifica",!busy){edit("expense",JSONObject(e.toString()).apply{if(str("status").isBlank())put("status","Da verificare")},JSONObject().put("index",index))}
+                    Action("Fotografa scontrino",!busy){captureReceipt(t,index)}
                     Action("Seleziona ricevuta PDF o foto",!busy){chooseReceipt(t,index)}
                     if(cfg!=null&&receiptUri!=null&&receiptTarget==Triple(timelineOwner(cfg),t.id,t.revision to index)){
                         Text("Ricevuta selezionata. Conferma il caricamento.",color=Muted)
                         Action("Carica ricevuta",!busy){uploadReceipt(t,index)}
-                        TextButton(onClick={receiptUri=null;receiptTarget=null}){Text("Annulla ricevuta")}
+                        TextButton(onClick={clearReceipt()}){Text("Annulla ricevuta")}
                     }
                     TextButton(onClick={deleteIndex=index},enabled=!busy){Text("Elimina spesa",color=Sand)}
                 }

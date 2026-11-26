@@ -325,18 +325,11 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   from . import personal_travel_tools as tools
   owner=auth(req)["owner"];rev=b.get("revision")
   quote=tools.exchange_rates()
-  from decimal import Decimal, ROUND_HALF_UP
   with db() as c:
    r=load(c,owner,tid)
    if type(rev)!=int or r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
    m,state,files=read_archive(r["archive"])
-   budget=m.get("budget")
-   if not budget:fail(400,"Impostare prima il budget")
-   cur=budget["currency"];rates=quote["rates"];count=0
-   for e in m.get("expenses",[]):
-    if e["currency"]==cur or e.get("base_amount","")!="" or e["currency"] not in rates or cur not in rates:continue
-    value=(Decimal(str(e["amount"]))/Decimal(rates[e["currency"]])*Decimal(rates[cur])).quantize(Decimal("0.01"),rounding=ROUND_HALF_UP)
-    e.update(base_amount=str(value),base_currency=cur,fx_date=quote["date"],fx_source="BCE (indicativo)");count+=1
+   count=tools.apply_exchange_rates(m,quote)
    revision=save(c,owner,m,state,files,rev) if count else rev
    return {"revision":revision,"manifest":m,"state":state,"templates":template_catalog(c,owner),"converted":count}
  @app.post("/api/mobile/v1/trips/{tid}/expenses/delete")

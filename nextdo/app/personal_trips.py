@@ -574,6 +574,17 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
  def personal_exchange_rates(req:Request):
   allowed(req)
   return tools.exchange_rates()
+ @app.post("/api/personal/trips/{tid}/expenses/convert")
+ def convert_expenses(tid:str,req:Request,b:dict):
+  owner=allowed(req,True);rev=b.get("revision")
+  quote=tools.exchange_rates()
+  with db() as c:
+   r=load(c,owner,tid)
+   if type(rev)!=int or r["revision"]!=rev:fail("Il viaggio è stato modificato: ricaricare",409)
+   m,state,files=read_archive(r["archive"])
+   count=tools.apply_exchange_rates(m,quote)
+   revision=save(c,owner,m,state,files,rev) if count else rev
+   return {"revision":revision,"converted":count,"date":quote["date"]}
  @app.post("/api/personal/trips/{tid}/expenses/delete")
  def delete_expense(tid:str,req:Request,b:dict):
   owner=allowed(req,True)

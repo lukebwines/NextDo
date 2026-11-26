@@ -27,6 +27,8 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
     val model=models.firstOrNull{it.id==selected}?:initial
     fun suggest(t:BookingTemplate){missingTemplateFields(specific.map{it.label},t.fields).take((200-specific.size).coerceAtLeast(0)).forEach{specific.add(BookingField(it,"",false,true))}}
     LaunchedEffect(editor){if(dynamic&&!existing)suggest(model)}
+    val quick=editor.kind=="expense"&&editor.initial.optBoolean("_quick")
+    var showMore by remember(editor){mutableStateOf(!quick)}
     val labels=when(editor.kind) {
         "new" -> listOf("title" to "Titolo", "subtitle" to "Sottotitolo", "start" to "Inizio", "end" to "Fine")
         "trip" -> listOf("title" to "Titolo","subtitle" to "Sottotitolo")
@@ -60,6 +62,7 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
                 if(model.roles.isNotEmpty())Text("Ruoli dei luoghi: "+model.roles.joinToString(" · "),style=MaterialTheme.typography.bodySmall)
             }
             for((k,label) in labels) {
+                if(quick&&!showMore&&k !in setOf("title","amount","currency","category","date","status"))continue
                 val value=values[k].orEmpty()
                 when {
                     k=="start"||k=="end" -> DateField(label,value,{values[k]=it},enabled=!busy)
@@ -77,9 +80,10 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
                         }
                     }
                     else -> OutlinedTextField(value,{values[k]=it.take(20000)},label={Text(if(k=="type"&&dynamic)"Categoria originale (facoltativa)" else label)},enabled=!busy,
-                        singleLine=k!="details"&&k!="description",modifier=Modifier.fillMaxWidth())
+                        singleLine=k!="details"&&k!="description",keyboardOptions=if(k in listOf("amount","base_amount"))androidx.compose.foundation.text.KeyboardOptions(keyboardType=androidx.compose.ui.text.input.KeyboardType.Decimal)else androidx.compose.foundation.text.KeyboardOptions.Default,modifier=Modifier.fillMaxWidth())
                 }
             }
+            if(quick)TextButton(onClick={showMore=!showMore},enabled=!busy){Text(if(showMore)"Meno dettagli" else "Ricevuta, prenotazione e altri dettagli")}
             if(dynamic){
                 Text("Campi specifici e personalizzati",style=MaterialTheme.typography.titleMedium)
                 Text("I dati storici restano invariati. Aggiungi i campi del modello solo quando servono.",style=MaterialTheme.typography.bodySmall)
