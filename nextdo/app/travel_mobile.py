@@ -291,6 +291,35 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   from . import personal_travel_tools as tools
   auth(req)
   return tools.exchange_rates()
+ @app.post("/api/mobile/v1/trips/{tid}/expenses/sync")
+ def sync_expenses(tid:str,req:Request,b:dict):
+  """Append only, idempotent even after an acknowledged expense is deleted."""
+  from . import personal_travel_tools as tools
+  owner=auth(req)["owner"];entries=b.get("entries")
+  if not isinstance(entries,list) or not 1<=len(entries)<=100:fail(400,"Coda spese non valida")
+  accepted=[];seen=set()
+  for entry in entries:
+   if not isinstance(entry,dict) or set(entry)!={"id","fields"}:fail(400,"Voce coda non valida")
+   key=entry["id"];fields=entry["fields"]
+   if not isinstance(key,str) or not re.fullmatch(r"[a-f0-9]{32}",key) or key in seen:fail(400,"Identificativo coda non valido")
+   seen.add(key)
+   if not isinstance(fields,dict) or set(fields)-{"title","date","amount","currency","category","status","notes","base_amount","base_currency","booking_id","doc"} or any(not isinstance(v,str) or len(v)>20000 or "\x00" in v for v in fields.values()) or not fields.get("title","").strip():fail(400,"Spesa non valida")
+   for k in ("currency","base_currency"):
+    if k in fields:fields[k]=fields[k].strip().upper()
+   for k in ("amount","base_amount"):
+    if k in fields:fields[k]=fields[k].strip().replace(",",".")
+   tools.validate_expense(fields)
+  with db() as c:
+   r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
+   ledger=m.setdefault("expense_sync_ids",[]);expenses=m.setdefault("expenses",[]);changed=False
+   for entry in entries:
+    key=entry["id"]
+    if key not in ledger:
+     if len(ledger)>=200:fail(409,"Limite sincronizzazione raggiunto; contattare assistenza")
+     expenses.append(entry["fields"]);ledger.append(key);changed=True
+    accepted.append(key)
+   revision=save(c,owner,m,state,files,r["revision"]) if changed else r["revision"]
+   return {"revision":revision,"accepted":accepted,"manifest":m,"state":state,"templates":template_catalog(c,owner)}
  @app.post("/api/mobile/v1/trips/{tid}/expenses/convert")
  def convert_expenses_mobile(tid:str,req:Request,b:dict):
   from . import personal_travel_tools as tools

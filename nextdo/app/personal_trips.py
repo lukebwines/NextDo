@@ -122,6 +122,8 @@ def validate_manifest(m,available):
    if not isinstance(e,dict) or (e.get("bid") and e["bid"] not in bids) or (e.get("gid") and e["gid"] not in gids):fail("Collegamento evento non valido")
  for d in rows("documents",160):doc(d.get("file"))
  if "budget" in m:tools.validate_budget(m["budget"])
+ sync_ids=m.get("expense_sync_ids",[])
+ if not isinstance(sync_ids,list) or len(sync_ids)>200 or any(not isinstance(x,str) or not re.fullmatch(r"[a-f0-9]{32}",x) for x in sync_ids) or len(set(sync_ids))!=len(sync_ids):fail("Registro sincronizzazione spese non valido")
  for e in rows("expenses",160):
   if not isinstance(e.get("title"),str) or not e["title"].strip():fail("Spesa non valida")
   tools.validate_expense(e)

@@ -383,7 +383,7 @@ class MainActivity : ComponentActivity() {
         locked = true; busy = false; connection = null; session = ""; trips = emptyList();travelAuthState=TravelAuthState.PIN_REQUIRED
         personalAppearance=null;appearanceError="";privateAgenda=null;privateSection="";privateProblem=""
         workConnection=null;workAgenda=null;workDetail=null;workError="";workBusy=false
-        editor = null; current = null; offlineMeta = null; offline = false; closePdf(); error = ""
+        editor = null; current = null; offlineMeta = null; offline = false; pendingExpenses=emptyList();queueProblem=""; closePdf(); error = ""
         section = "Home"; area=NextDoArea.HOME;workFilter="all";updateCaptureProtection()
     }
     private fun deviceUnlock() {
@@ -494,6 +494,7 @@ class MainActivity : ComponentActivity() {
         }) { (_, list) -> pendingZip=null; trips=list }
     }
     private fun submitEditor(e: TravelEditor, values: JSONObject) {
+        if(e.kind=="expense"&&offline){queueOfflineExpense(e,values);return}
         val cfg = connection ?: return
         val s = session
         if(s.isBlank() || offline || locked) return
@@ -521,7 +522,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun edit(kind:String, data:JSONObject, target:JSONObject=JSONObject()) {
         val t=current ?: return
-        if(!canEdit())return
+        if(!canEdit()&&!(kind=="expense"&&offline&&!locked&&!target.has("index")))return
         if(kind!="booking"){
             val choices=if(kind=="expense")mapOf(
                 "status" to listOf("Da verificare" to "Da verificare","Pagata" to "Pagata","Da sostenere" to "Da sostenere"),
@@ -548,6 +549,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun openTrip(t: TripPackage, cached: Boolean) {
         area=NextDoArea.TRIPS; current = t; offline = cached; section = "Home"; updateCaptureProtection()
+        loadExpenseQueue(t.id)
         selectedDay = t.days.firstOrNull { it.str("date") >= LocalDate.now().toString() }?.str("date")
             ?: t.days.firstOrNull()?.str("date").orEmpty()
     }
@@ -621,7 +623,7 @@ class MainActivity : ComponentActivity() {
         if(offlineSyncBusy)return
         PrivateAlerts.disable(this);privateAlertsEnabled=false
         timelineFile=null;timelineTrip="";timelineScope=""
-        pendingZip=null;zipScope=""
+        pendingZip=null;zipScope="";receiptTarget=null;receiptUri=null;pendingExpenses=emptyList()
         task({ synchronized(offlineGuard){vault.clear()} }) { lockLocal() }
     }
     private fun viewPdf(name: String) {
@@ -804,12 +806,16 @@ class MainActivity : ComponentActivity() {
                 while(true){
                     if(!busy&&!offlineSyncBusy&&editor==null&&pdf==null){
                         val id=offlineMeta?.str("id").orEmpty()
-                        if(session.isNotBlank()&&id.isNotBlank())syncOffline(id)
+                        if(session.isNotBlank()&&current!=null&&pendingExpenses.isNotEmpty())current?.let{syncExpenseQueue(it)}
+                        else if(session.isNotBlank()&&id.isNotBlank())syncOffline(id)
                         else if(travelAuthState==TravelAuthState.RETRY&&connection?.str("remember_token").orEmpty().isNotBlank())retryServer()
                     }
                     kotlinx.coroutines.delay(60000)
                 }
             }
+        }
+        LaunchedEffect(locked,foreground,session,current?.id){
+            if(!locked&&foreground&&session.isNotBlank()&&pendingExpenses.isNotEmpty())current?.let{syncExpenseQueue(it)}
         }
         LaunchedEffect(locked,area,session){
             if(!locked&&area==NextDoArea.PERSONAL&&session.isNotBlank()){
@@ -1428,6 +1434,79 @@ class MainActivity : ComponentActivity() {
         t.docs.keys.forEach{docs.putIfAbsent(it,it)}
         return docs
     }
+    private var pendingExpenses by mutableStateOf<List<JSONObject>>(emptyList())
+    private var queueProblem by mutableStateOf("")
+    private fun readExpenseQueue():List<JSONObject>{
+        if(!vault.exists("expense_queue"))return emptyList()
+        return JSONObject(String(vault.read("expense_queue"),Charsets.UTF_8)).arr("entries")
+    }
+    private fun writeExpenseQueue(rows:List<JSONObject>){
+        if(rows.isEmpty())vault.remove("expense_queue")
+        else vault.write("expense_queue",JSONObject().put("entries",org.json.JSONArray().apply{rows.forEach{put(it)}}).toString().toByteArray(Charsets.UTF_8))
+    }
+    private fun loadExpenseQueue(id:String){
+        val cfg=connection?:return
+        try{
+            val owner=timelineOwner(cfg)
+            pendingExpenses=synchronized(offlineGuard){readExpenseQueue()}.filter{it.str("owner")==owner&&it.str("trip")==id}
+            queueProblem=""
+        }catch(e:Exception){pendingExpenses=emptyList();queueProblem="Coda cifrata non leggibile. Nessun dato è stato cancellato."}
+    }
+    private fun queueOfflineExpense(e:TravelEditor,values:JSONObject){
+        val cfg=connection?:return
+        val t=current?:return
+        if(locked||!offline||busy||t.id!=e.tripId||e.target.has("index")||queueProblem.isNotBlank())return
+        val owner=timelineOwner(cfg);val started=epoch
+        val normalized=JSONObject(values.toString())
+        for(k in listOf("currency","base_currency"))normalized.put(k,normalized.str(k).trim().uppercase(java.util.Locale.ROOT))
+        for(k in listOf("amount","base_amount"))normalized.put(k,normalized.str(k).trim().replace(',','.'))
+        val amount=normalized.str("amount").toBigDecimalOrNull()
+        val base=normalized.str("base_amount").toBigDecimalOrNull()
+        fun valid(n:java.math.BigDecimal?)=n!=null&&n.signum()>=0&&n<=java.math.BigDecimal("10000000")&&n.scale()<=2
+        if(normalized.str("title").isBlank()||!valid(amount)||!Regex("[A-Z]{3}").matches(normalized.str("currency"))||
+            (normalized.str("base_amount").isNotBlank()||normalized.str("base_currency").isNotBlank())&&(!valid(base)||!Regex("[A-Z]{3}").matches(normalized.str("base_currency")))){
+            error="Importo, valuta o descrizione non validi";return
+        }
+        // References are chosen from the cached trip; unresolved references never overwrite server data.
+        task({
+            synchronized(offlineGuard){
+                require(started==epoch){"Sessione scaduta"}
+                val rows=readExpenseQueue()
+                require(rows.size<100){"Coda locale piena: sincronizzare prima di aggiungere altre spese"}
+                val entry=JSONObject().put("owner",owner).put("trip",t.id).put("id",java.util.UUID.randomUUID().toString().replace("-","")).put("fields",normalized)
+                writeExpenseQueue(rows+entry)
+            }
+        }){loadExpenseQueue(t.id);editor=null}
+    }
+    private fun syncExpenseQueue(t:TripPackage){
+        val cfg=connection?:return
+        val s=session
+        if(locked||!foreground||s.isBlank()||busy||offlineSyncBusy||editor!=null||pdf!=null||pendingExpenses.isEmpty())return
+        val owner=timelineOwner(cfg);val started=epoch
+        val rows=pendingExpenses.toList()
+        val payload=JSONObject().put("entries",org.json.JSONArray().apply{rows.forEach{put(JSONObject().put("id",it.str("id")).put("fields",it.getJSONObject("fields")))}})
+        task({
+            val r=TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/expenses/sync",s,payload)
+            val a=r.getJSONArray("accepted")
+            val accepted=(0 until a.length()).map{a.getString(it)}.toSet()
+            require(accepted==rows.map{it.str("id")}.toSet()){"Conferma sincronizzazione incompleta"}
+            synchronized(offlineGuard){
+                require(started==epoch){"Sessione scaduta"}
+                writeExpenseQueue(readExpenseQueue().filterNot{it.str("owner")==owner&&it.str("trip")==t.id&&it.str("id") in accepted})
+            }
+            TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision"),templates=bookingCatalog(r.optJSONArray("templates")))
+        }){updated->
+            if(current?.id==t.id){
+                // Switch to the fresh authoritative server view rather than mixing revisions and cached PDFs.
+                current=updated;offline=false;loadExpenseQueue(t.id)
+            }
+        }
+    }
+    private fun discardExpenseQueueEntry(t:TripPackage,id:String){
+        val cfg=connection?:return;val owner=timelineOwner(cfg);val started=epoch
+        if(locked||busy)return
+        task({synchronized(offlineGuard){require(started==epoch){"Sessione scaduta"};writeExpenseQueue(readExpenseQueue().filterNot{it.str("owner")==owner&&it.str("trip")==t.id&&it.str("id")==id})}}){loadExpenseQueue(t.id)}
+    }
     private fun budgetOperation(t:TripPackage,action:String,body:JSONObject) {
         val cfg=connection?:return
         val s=session
@@ -1469,6 +1548,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun BudgetScreen(t:TripPackage) {
         Text("Budget e spese",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
         var deleteIndex by remember(t.id,t.revision){mutableStateOf<Int?>(null)}
+        var discardId by remember(t.id){mutableStateOf<String?>(null)}
         var convertConfirm by remember(t.id,t.revision){mutableStateOf(false)}
         val cfg=connection
         val b=t.manifest.optJSONObject("budget")
@@ -1509,8 +1589,21 @@ class MainActivity : ComponentActivity() {
                 Action("Aggiungi spesa / ricevuta",!busy){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Da verificare"))}
                 Action("Spesa rapida pagata",!busy){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Pagata").put("date",LocalDate.now().toString()))}
             }
-            if(offline)Text("Copia offline in sola lettura",color=Muted)
+            if(offline){
+                Text("Archivio offline in sola lettura; puoi accodare nuove spese cifrate sul telefono.",color=Muted)
+                Action("Registra spesa offline",!busy&&queueProblem.isBlank()){edit("expense",JSONObject().put("currency",currency.ifBlank{"EUR"}).put("status","Pagata").put("date",LocalDate.now().toString()))}
+            }
         }
+        if(queueProblem.isNotBlank())Text(queueProblem,color=Sand)
+        if(pendingExpenses.isNotEmpty())TravelCard("Spese da sincronizzare",pendingExpenses.size.toString()+" voci locali · non ancora incluse nei totali del server"){
+            for(row in pendingExpenses){
+                val fields=row.getJSONObject("fields")
+                Text(fields.str("title")+" · "+fields.str("currency")+" "+fields.str("amount"))
+                TextButton(onClick={discardId=row.str("id")},enabled=!busy){Text("Scarta voce locale",color=Sand)}
+            }
+            Action("Sincronizza ora",session.isNotBlank()&&!busy&&!offlineSyncBusy){syncExpenseQueue(t)}
+        }
+        discardId?.let{id->AlertDialog(onDismissRequest={discardId=null},title={Text("Scartare la voce locale?")},text={Text("Se era già stata ricevuta dal server, la spesa registrata non sarà cancellata.")},confirmButton={TextButton(onClick={discardId=null;discardExpenseQueueEntry(t,id)}){Text("Scarta")}},dismissButton={TextButton(onClick={discardId=null}){Text("Annulla")}})}
         if(limit!=null&&committed.signum()>0)TravelCard("Ripartizione per categoria",if(missing>0)"Importi convertiti · parziale" else currency){
             val categories=expenses.mapIndexedNotNull{index,e->converted[index]?.let{e.str("category").ifBlank{"Altro"} to it}}.groupBy({it.first},{it.second}).mapValues{(_,list)->list.fold(java.math.BigDecimal.ZERO){acc,n->acc+n}}.entries.sortedByDescending{it.value}
             for((name,value) in categories){

@@ -258,3 +258,21 @@ def test_budget_delete_conversion_and_receipt(tmp_path,monkeypatch):
  assert r.json()["manifest"]["expenses"]==[]
  assert c.get(url+"/documents/"+name,headers=s).status_code==200
  c.close()
+
+def test_offline_expense_queue_idempotency(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ s={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers={"Authorization":"Bearer "+d["device_token"]},json={"pin":"123456"}).json()["session_token"]}
+ raw,m=sample()
+ assert c.post(mobile+"/trips/import",headers={**s,"Content-Type":"application/zip"},content=raw).status_code==200
+ url=mobile+"/trips/"+m["trip"]["id"]
+ body={"entries":[{"id":"a"*32,"fields":{"title":"Taxi","amount":"12,50","currency":"usd","status":"Pagata"}}]}
+ r=c.post(url+"/expenses/sync",headers=s,json=body);assert r.status_code==200,r.text
+ assert r.json()["revision"]==1 and len(r.json()["manifest"]["expenses"])==1
+ r=c.post(url+"/expenses/sync",headers=s,json=body);assert r.json()["revision"]==1
+ assert c.post(url+"/expenses/delete",headers=s,json={"revision":1,"index":0}).status_code==200
+ r=c.post(url+"/expenses/sync",headers=s,json=body);assert r.json()["revision"]==2 and r.json()["manifest"]["expenses"]==[]
+ assert c.post(url+"/expenses/sync",headers=s,json={"entries":[{"id":"b"*32,"fields":{"title":"Bad","amount":"-1","currency":"EUR"}}]}).status_code==400
+ c.close()

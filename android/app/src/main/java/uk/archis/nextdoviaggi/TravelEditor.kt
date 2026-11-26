@@ -41,6 +41,7 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
         ChronoUnit.DAYS.between(LocalDate.parse(values["start"].orEmpty()),LocalDate.parse(values["end"].orEmpty())) in 0L..179L
     } catch(_:Exception) { false }
     val titleOk=editor.kind=="day" || editor.kind=="budget" || !values["title"].isNullOrBlank()
+    val amountOk=if(editor.kind !in listOf("expense","budget"))true else values["amount"].orEmpty().trim().replace(',','.').toBigDecimalOrNull()?.let{it.signum()>=0&&it<=java.math.BigDecimal("10000000")&&it.scale()<=2}==true
     AlertDialog(onDismissRequest={if(!busy)onCancel()},title={Text(when(editor.kind) {
         "new" -> "Nuovo viaggio"; "trip" -> "Dati viaggio"; "day" -> "Modifica giornata"; "event" -> "Evento"; "budget" -> "Budget"; "expense" -> "Spesa / ricevuta"; else -> "Prenotazione"
     })},text={
@@ -106,7 +107,7 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
             if(existing&&selected==initial.id&&!editor.initial.has("type")&&b.str("type").isBlank())b.remove("type")
         }
         onSave(b)
-    },enabled=!busy&&datesOk&&titleOk&&(!dynamic||specific.size<=200&&retainedBookingFields(specific).all{row->row.label.isNotBlank()||bookingFields(editor.initial).any{it.label==row.label&&it.value==row.value}})){Text("Salva")}},
+    },enabled=!busy&&datesOk&&titleOk&&amountOk&&(!dynamic||specific.size<=200&&retainedBookingFields(specific).all{row->row.label.isNotBlank()||bookingFields(editor.initial).any{it.label==row.label&&it.value==row.value}})){Text("Salva")}},
       dismissButton={TextButton(onClick=onCancel,enabled=!busy){Text("Annulla")}})
 }
 
