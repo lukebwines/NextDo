@@ -177,7 +177,7 @@ class Vault(private val context: Context, private val background:Boolean=false) 
     }
     fun remove(name: String) = AtomicFile(file(name)).delete()
     fun clear() {
-        remove("connection"); remove("offline"); remove("offline_meta"); remove("offline_snapshot")
+        remove("connection"); remove("offline"); remove("offline_meta"); remove("offline_snapshot"); remove("expense_queue")
         if (!exists("work_connection") && store.containsAlias(alias)) store.deleteEntry(alias)
     }
 }

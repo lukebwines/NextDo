@@ -186,7 +186,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   rev=b.get("revision");kind=b.get("kind");fields=b.get("fields")
   if type(rev)!=int or not isinstance(fields,dict):fail(400,"Modifica non valida")
   if kind!="booking" and ("template_id" in b or "specific_fields" in b):fail(400,"Campi riservati alle prenotazioni")
-  allowed_fields={"trip":{"title","subtitle"},"day":{"place","headline","description"},"event":{"time","title","details"},"booking":{"title","type","date","place","status","ref","price"}}
+  allowed_fields={"trip":{"title","subtitle"},"day":{"place","headline","description"},"event":{"time","title","details"},"booking":{"title","type","date","place","status","ref","price"},"budget":{"amount","currency"},"expense":{"title","date","amount","currency","category","status","base_amount","base_currency","booking_id","doc","notes"}}
   if not isinstance(kind,str) or kind not in allowed_fields or not fields or set(fields)-allowed_fields[kind]:fail(400,"Campi non modificabili")
   if any(not isinstance(v,str) or len(v)>20000 or "\x00" in v for v in fields.values()):fail(400,"Testo non valido")
   with db() as c:
@@ -194,6 +194,13 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
    if r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
    m,state,files=read_archive(r["archive"])
    if kind=="trip":target=m["trip"]
+   elif kind=="budget":target=m.setdefault("budget",{})
+   elif kind=="expense":
+    expenses=m.setdefault("expenses",[]);idx=b.get("index")
+    if idx is None:
+     target={};expenses.append(target)
+    elif type(idx)==int and 0<=idx<len(expenses):target=expenses[idx]
+    else:fail(404,"Spesa non trovata")
    elif kind in ("day","event"):
     day=next((d for d in m.get("days",[]) if d["date"]==b.get("date")),None)
     if day is None:fail(404,"Giornata non trovata")
@@ -227,8 +234,15 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
       if not isinstance(pair,list) or len(pair)!=2 or any(not isinstance(x,str) or len(x)>20000 or "\x00" in x for x in pair):fail(400,"Campo specifico non valido")
       if not pair[0].strip() and pair not in target.get("fields",[]):fail(400,"Nome campo obbligatorio")
      target["fields"]=pairs
+   if kind in ("budget","expense"):
+    for key in ("currency","base_currency"):
+     if key in fields:fields[key]=fields[key].strip().upper()
+    for key in ("amount","base_amount"):
+     if key in fields:fields[key]=fields[key].strip().replace(",",".")
+   if kind=="expense" and any(k in fields and str(target.get(k,""))!=fields[k] for k in ("amount","currency","base_amount","base_currency")):
+    target.pop("fx_date",None);target.pop("fx_source",None)
    target.update(fields)
-   if kind in ("trip","event","booking") and not str(target.get("title","")).strip():fail(400,"Titolo obbligatorio")
+   if kind in ("trip","event","booking","expense") and not str(target.get("title","")).strip():fail(400,"Titolo obbligatorio")
    revision=save(c,owner,m,state,files,rev)
    catalog=template_catalog(c,owner)
   return {"revision":revision,"manifest":m,"state":state,"templates":catalog}
@@ -272,6 +286,83 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
     raw=out.getvalue()
     if len(raw)>limit:fail(413,"Archivio offline oltre 32 MB")
    return Response(raw,media_type="application/zip",headers={"Cache-Control":"no-store","X-NextDo-Revision":str(r["revision"]),"X-NextDo-Snapshot":snapshot(c,owner,r,include_timeline,catalog),"X-NextDo-Archive-SHA256":hashlib.sha256(raw).hexdigest()})
+ @app.get("/api/mobile/v1/exchange-rates")
+ def exchange_rates_mobile(req:Request):
+  from . import personal_travel_tools as tools
+  auth(req)
+  return tools.exchange_rates()
+ @app.post("/api/mobile/v1/trips/{tid}/expenses/sync")
+ def sync_expenses(tid:str,req:Request,b:dict):
+  """Append only, idempotent even after an acknowledged expense is deleted."""
+  from . import personal_travel_tools as tools
+  owner=auth(req)["owner"];entries=b.get("entries")
+  if not isinstance(entries,list) or not 1<=len(entries)<=100:fail(400,"Coda spese non valida")
+  accepted=[];seen=set()
+  for entry in entries:
+   if not isinstance(entry,dict) or set(entry)!={"id","fields"}:fail(400,"Voce coda non valida")
+   key=entry["id"];fields=entry["fields"]
+   if not isinstance(key,str) or not re.fullmatch(r"[a-f0-9]{32}",key) or key in seen:fail(400,"Identificativo coda non valido")
+   seen.add(key)
+   if not isinstance(fields,dict) or set(fields)-{"title","date","amount","currency","category","status","notes","base_amount","base_currency","booking_id","doc"} or any(not isinstance(v,str) or len(v)>20000 or "\x00" in v for v in fields.values()) or not fields.get("title","").strip():fail(400,"Spesa non valida")
+   for k in ("currency","base_currency"):
+    if k in fields:fields[k]=fields[k].strip().upper()
+   for k in ("amount","base_amount"):
+    if k in fields:fields[k]=fields[k].strip().replace(",",".")
+   tools.validate_expense(fields)
+  with db() as c:
+   r=load(c,owner,tid);m,state,files=read_archive(r["archive"])
+   ledger=m.setdefault("expense_sync_ids",[]);expenses=m.setdefault("expenses",[]);changed=False
+   for entry in entries:
+    key=entry["id"]
+    if key not in ledger:
+     if len(ledger)>=200:fail(409,"Limite sincronizzazione raggiunto; contattare assistenza")
+     expenses.append(entry["fields"]);ledger.append(key);changed=True
+    accepted.append(key)
+   revision=save(c,owner,m,state,files,r["revision"]) if changed else r["revision"]
+   return {"revision":revision,"accepted":accepted,"manifest":m,"state":state,"templates":template_catalog(c,owner)}
+ @app.post("/api/mobile/v1/trips/{tid}/expenses/convert")
+ def convert_expenses_mobile(tid:str,req:Request,b:dict):
+  from . import personal_travel_tools as tools
+  owner=auth(req)["owner"];rev=b.get("revision")
+  quote=tools.exchange_rates()
+  with db() as c:
+   r=load(c,owner,tid)
+   if type(rev)!=int or r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
+   m,state,files=read_archive(r["archive"])
+   count=tools.apply_exchange_rates(m,quote)
+   revision=save(c,owner,m,state,files,rev) if count else rev
+   return {"revision":revision,"manifest":m,"state":state,"templates":template_catalog(c,owner),"converted":count}
+ @app.post("/api/mobile/v1/trips/{tid}/expenses/delete")
+ def delete_expense_mobile(tid:str,req:Request,b:dict):
+  from . import personal_travel_tools as tools
+  owner=auth(req)["owner"]
+  with db() as c:
+   r=load(c,owner,tid);rev=b.get("revision")
+   if type(rev)!=int or r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
+   m,state,files=read_archive(r["archive"])
+   tools.remove_expense(m,b.get("index"),files)
+   revision=save(c,owner,m,state,files,rev)
+   return {"revision":revision,"manifest":m,"state":state,"templates":template_catalog(c,owner)}
+ @app.post("/api/mobile/v1/trips/{tid}/expenses/receipt")
+ def receipt_mobile(tid:str,req:Request,b:dict):
+  from . import personal_travel_tools as tools
+  owner=auth(req)["owner"];rev=b.get("revision");idx=b.get("index")
+  if type(rev)!=int or type(idx)!=int:fail(400,"Spesa non valida")
+  raw=tools.receipt_pdf(b.get("content"))
+  with db() as c:
+   r=load(c,owner,tid)
+   if r["revision"]!=rev:fail(409,"Il viaggio è stato modificato: ricaricare")
+   m,state,files=read_archive(r["archive"]);expenses=m.get("expenses",[])
+   if not 0<=idx<len(expenses):fail(404,"Spesa non trovata")
+   name="ricevuta-"+secrets.token_hex(12)+".pdf"
+   if name in files:fail(409,"Nome ricevuta già presente")
+   old=expenses[idx].get("doc")
+   if old and old in files and not any(d.get("file")==old for d in m.get("documents",[])):
+    m.setdefault("documents",[]).append({"file":old,"title":old})
+   files[name]=raw;m.setdefault("documents",[]).append({"file":name,"title":expenses[idx]["title"]+" - ricevuta"})
+   expenses[idx]["doc"]=name
+   revision=save(c,owner,m,state,files,rev)
+   return {"revision":revision,"manifest":m,"state":state,"templates":template_catalog(c,owner)}
  @app.get("/api/mobile/v1/trips/{tid}/documents/{name}")
  def document(tid:str,name:str,req:Request):
   owner=auth(req)["owner"]

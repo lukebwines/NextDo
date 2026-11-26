@@ -125,6 +125,10 @@ def analyze_booking(data_path,text):
  # Every nonempty value must appear literally in the user-approved excerpt.
  return {k:v.strip() if isinstance(v:=parsed.get(k),str) and 0<len(v)<=500 and v.strip() in text else "" for k in ("title","type","ref","date","place","price","status")}
 
+def validate_budget(b):
+ if not isinstance(b,dict) or set(b)!={"amount","currency"}:fail("Budget non valido")
+ validate_expense(b)
+
 def validate_expense(e):
  try:
   amount=Decimal(str(e.get("amount","")))
@@ -133,7 +137,13 @@ def validate_expense(e):
   if e.get("date"):
    d=date.fromisoformat(e["date"])
    if d.isoformat()!=e["date"]:raise ValueError()
- except (ValueError,InvalidOperation,TypeError):fail("Importo, valuta o data non validi")
+  if e.get("status","") not in ("","Pagata","Da sostenere","Da verificare"):raise ValueError()
+  equivalent=e.get("base_amount","");equivalent_currency=e.get("base_currency","")
+  if equivalent!="" or equivalent_currency!="":
+   if not re.fullmatch(r"[A-Z]{3}",str(equivalent_currency)):raise ValueError()
+   n=Decimal(str(equivalent))
+   if not n.is_finite() or n<0 or n>10000000 or n.as_tuple().exponent < -2:raise ValueError()
+ except (ValueError,InvalidOperation,TypeError):fail("Importo, valuta, stato o data non validi")
 
 
 def diary_tile(z,x,y,key):
@@ -161,3 +171,65 @@ def diary_tile(z,x,y,key):
    if pic is not None:im.paste(pic,((dx+1)*256,(dy+1)*256))
  out=io.BytesIO();im.save(out,format="PNG")
  return out.getvalue()
+
+def exchange_rates():
+ """Latest public ECB fixing. No user or trip data is sent."""
+ from xml.etree import ElementTree
+ raw=fetch("https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",limit=65536)
+ try:
+  if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():raise ValueError()
+  root=ElementTree.fromstring(raw)
+  day=next(x for x in root.iter() if "time" in x.attrib)
+  stamp=date.fromisoformat(day.attrib["time"]).isoformat()
+  rates={"EUR":"1"}
+  for x in day:
+   cur=x.attrib["currency"];value=Decimal(x.attrib["rate"])
+   if not re.fullmatch(r"[A-Z]{3}",cur) or not value.is_finite() or not 0<value<100000000:raise ValueError()
+   rates[cur]=str(value)
+  if len(rates)<2:raise ValueError()
+  return {"date":stamp,"rates":rates,"source":"BCE"}
+ except (ValueError,KeyError,StopIteration,InvalidOperation,ElementTree.ParseError):fail("Tassi BCE non disponibili",502)
+
+def remove_expense(m,index,files):
+ expenses=m.get("expenses",[])
+ if type(index)!=int or not 0<=index<len(expenses):fail("Spesa non trovata",404)
+ name=expenses[index].get("doc")
+ # Keep the original receipt in the private document library, even if it had no other reference.
+ if name and name in files and not any(d.get("file")==name for d in m.get("documents",[])):
+  m.setdefault("documents",[]).append({"file":name,"title":name})
+ del expenses[index]
+
+def receipt_pdf(encoded):
+ if not isinstance(encoded,str) or len(encoded)>14*1024*1024:fail("Ricevuta oltre 10 MB")
+ try:raw=base64.b64decode(encoded,validate=True)
+ except (ValueError,TypeError):fail("Ricevuta non valida")
+ if not raw or len(raw)>10*1024*1024:fail("Ricevuta oltre 10 MB")
+ if raw.startswith(b"%PDF-"):
+  try:
+   from pypdf import PdfReader
+   reader=PdfReader(io.BytesIO(raw))
+   if reader.is_encrypted or not 0<len(reader.pages)<=100:raise ValueError()
+  except Exception:fail("PDF non valido o protetto")
+  return raw
+ try:
+  from PIL import Image,ImageOps
+  with Image.open(io.BytesIO(raw)) as im:
+   if im.format not in ("JPEG","PNG","WEBP") or im.width*im.height>25000000:raise ValueError()
+   image=ImageOps.exif_transpose(im).convert("RGB")
+   image.thumbnail((2200,2200))
+   out=io.BytesIO();image.save(out,format="PDF",resolution=150)
+   return out.getvalue()
+ except Exception:fail("Ricevuta non valida: usare PDF, JPEG, PNG o WebP")
+
+def apply_exchange_rates(m,quote):
+ """Fill only absent countervalues. Decimal rounding is shared by Web and APK."""
+ from decimal import ROUND_HALF_UP
+ budget=m.get("budget")
+ if not budget:fail("Impostare prima il budget")
+ cur=budget["currency"];rates=quote["rates"];count=0
+ for e in m.get("expenses",[]):
+  if e["currency"]==cur or e.get("base_amount","")!="" or e["currency"] not in rates or cur not in rates:continue
+  value=(Decimal(str(e["amount"]))/Decimal(rates[e["currency"]])*Decimal(rates[cur])).quantize(Decimal("0.01"),rounding=ROUND_HALF_UP)
+  if value>10000000:continue
+  e.update(base_amount=str(value),base_currency=cur,fx_date=quote["date"],fx_source="BCE (indicativo)");count+=1
+ return count

@@ -13,7 +13,7 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
-data class TravelEditor(val kind:String,val tripId:String="",val revision:Int=-1,val initial:JSONObject=JSONObject(),val target:JSONObject=JSONObject(),val templates:List<BookingTemplate> = emptyList())
+data class TravelEditor(val kind:String,val tripId:String="",val revision:Int=-1,val initial:JSONObject=JSONObject(),val target:JSONObject=JSONObject(),val templates:List<BookingTemplate> = emptyList(),val choices:Map<String,List<Pair<String,String>>> = emptyMap())
 
 @Composable
 fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->Unit,onSave:(JSONObject)->Unit) {
@@ -27,20 +27,25 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
     val model=models.firstOrNull{it.id==selected}?:initial
     fun suggest(t:BookingTemplate){missingTemplateFields(specific.map{it.label},t.fields).take((200-specific.size).coerceAtLeast(0)).forEach{specific.add(BookingField(it,"",false,true))}}
     LaunchedEffect(editor){if(dynamic&&!existing)suggest(model)}
+    val quick=editor.kind=="expense"&&editor.initial.optBoolean("_quick")
+    var showMore by remember(editor){mutableStateOf(!quick)}
     val labels=when(editor.kind) {
         "new" -> listOf("title" to "Titolo", "subtitle" to "Sottotitolo", "start" to "Inizio", "end" to "Fine")
         "trip" -> listOf("title" to "Titolo","subtitle" to "Sottotitolo")
         "day" -> listOf("place" to "Località","headline" to "Titolo giornata","description" to "Descrizione")
         "event" -> listOf("time" to "Orario","title" to "Titolo","details" to "Dettagli")
+        "budget" -> listOf("amount" to "Budget complessivo","currency" to "Valuta ISO")
+        "expense" -> listOf("title" to "Descrizione","date" to "Data","amount" to "Importo originale","currency" to "Valuta ISO","status" to "Stato","category" to "Categoria","base_amount" to "Controvalore manuale (facoltativo)","base_currency" to "Valuta del controvalore","booking_id" to "Prenotazione","doc" to "Ricevuta in archivio","notes" to "Note")
         else -> listOf("title" to "Titolo","type" to "Tipologia","date" to "Data / periodo","place" to "Località","status" to "Stato","ref" to "Riferimento","price" to "Prezzo")
     }
     val values=remember(editor) { mutableStateMapOf<String,String>().apply { labels.forEach { (k,_) -> put(k,editor.initial.str(k).ifBlank{if(editor.kind=="new"&&(k=="start"||k=="end"))LocalDate.now().toString() else ""}) } } }
     val datesOk=if(editor.kind!="new") true else try {
         ChronoUnit.DAYS.between(LocalDate.parse(values["start"].orEmpty()),LocalDate.parse(values["end"].orEmpty())) in 0L..179L
     } catch(_:Exception) { false }
-    val titleOk=editor.kind=="day" || !values["title"].isNullOrBlank()
+    val titleOk=editor.kind=="day" || editor.kind=="budget" || !values["title"].isNullOrBlank()
+    val amountOk=if(editor.kind !in listOf("expense","budget"))true else values["amount"].orEmpty().trim().replace(',','.').toBigDecimalOrNull()?.let{it.signum()>=0&&it<=java.math.BigDecimal("10000000")&&it.scale()<=2}==true
     AlertDialog(onDismissRequest={if(!busy)onCancel()},title={Text(when(editor.kind) {
-        "new" -> "Nuovo viaggio"; "trip" -> "Dati viaggio"; "day" -> "Modifica giornata"; "event" -> "Evento"; else -> "Prenotazione"
+        "new" -> "Nuovo viaggio"; "trip" -> "Dati viaggio"; "day" -> "Modifica giornata"; "event" -> "Evento"; "budget" -> "Budget"; "expense" -> "Spesa / ricevuta"; else -> "Prenotazione"
     })},text={
         Column(Modifier.heightIn(max=460.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             if(dynamic){
@@ -57,15 +62,28 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
                 if(model.roles.isNotEmpty())Text("Ruoli dei luoghi: "+model.roles.joinToString(" · "),style=MaterialTheme.typography.bodySmall)
             }
             for((k,label) in labels) {
+                if(quick&&!showMore&&k !in setOf("title","amount","currency","category","date","status"))continue
                 val value=values[k].orEmpty()
                 when {
                     k=="start"||k=="end" -> DateField(label,value,{values[k]=it},enabled=!busy)
                     k=="time" -> TravelTimeInput(value,{values[k]=it},!busy)
+                    k=="date"&&editor.kind=="expense" -> DateField(label,value,{values[k]=it},enabled=!busy,clearable=true)
                     k=="date" -> BookingDateInput(value,{values[k]=it},!busy)
+                    editor.choices.containsKey(k) -> {
+                        var expanded by remember(editor,k){mutableStateOf(false)}
+                        val options=editor.choices[k].orEmpty()
+                        Box {
+                            OutlinedButton(onClick={expanded=true},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text(label+": "+(options.firstOrNull{it.first==value}?.second?:value))}
+                            DropdownMenu(expanded=expanded,onDismissRequest={expanded=false}){
+                                options.forEach{(key,name)->DropdownMenuItem(text={Text(name)},onClick={values[k]=key;expanded=false})}
+                            }
+                        }
+                    }
                     else -> OutlinedTextField(value,{values[k]=it.take(20000)},label={Text(if(k=="type"&&dynamic)"Categoria originale (facoltativa)" else label)},enabled=!busy,
-                        singleLine=k!="details"&&k!="description",modifier=Modifier.fillMaxWidth())
+                        singleLine=k!="details"&&k!="description",keyboardOptions=if(k in listOf("amount","base_amount"))androidx.compose.foundation.text.KeyboardOptions(keyboardType=androidx.compose.ui.text.input.KeyboardType.Decimal)else androidx.compose.foundation.text.KeyboardOptions.Default,modifier=Modifier.fillMaxWidth())
                 }
             }
+            if(quick)TextButton(onClick={showMore=!showMore},enabled=!busy){Text(if(showMore)"Meno dettagli" else "Ricevuta, prenotazione e altri dettagli")}
             if(dynamic){
                 Text("Campi specifici e personalizzati",style=MaterialTheme.typography.titleMedium)
                 Text("I dati storici restano invariati. Aggiungi i campi del modello solo quando servono.",style=MaterialTheme.typography.bodySmall)
@@ -93,7 +111,7 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
             if(existing&&selected==initial.id&&!editor.initial.has("type")&&b.str("type").isBlank())b.remove("type")
         }
         onSave(b)
-    },enabled=!busy&&datesOk&&titleOk&&(!dynamic||specific.size<=200&&retainedBookingFields(specific).all{row->row.label.isNotBlank()||bookingFields(editor.initial).any{it.label==row.label&&it.value==row.value}})){Text("Salva")}},
+    },enabled=!busy&&datesOk&&titleOk&&amountOk&&(!dynamic||specific.size<=200&&retainedBookingFields(specific).all{row->row.label.isNotBlank()||bookingFields(editor.initial).any{it.label==row.label&&it.value==row.value}})){Text("Salva")}},
       dismissButton={TextButton(onClick=onCancel,enabled=!busy){Text("Annulla")}})
 }
 

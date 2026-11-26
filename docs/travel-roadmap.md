@@ -41,3 +41,10 @@ Consultazione diario web/Android, confronto visivo previsto/effettivo, mappa Geo
 
 ## Priorità sospesa — app NextDo generale
 La roadmap Viaggi è temporaneamente sospesa: prima consolidare NextDo Android con home modulare, area professionale e personale, agenda e notifiche professionali. Viaggi resta modulo personale; il collaudo reale della versione Diario rimane necessario. Vedi [roadmap Android](android-roadmap.md).
+
+## Budget e spese – sviluppo in PR 70 (26 novembre 2026)
+- Budget per viaggio e importi originali per valuta; pagato/da sostenere/da verificare, ripartizione per categoria e residuo parziale se manca un controvalore. Nessuna somma automatica dei prezzi delle prenotazioni.
+- Cambi indicativi BCE più recenti, applicati su richiesta solo ai controvalori assenti; data di riferimento conservata; commissioni bancarie escluse.
+- APK: spesa rapida, acquisizione PDF/immagine e fotocamera con conferma; immagini convertite in PDF sul server. L’eliminazione della spesa conserva il documento.
+- Nuove spese offline accodate nel vault cifrato, separate per associazione/viaggio, sincronizzazione in primo piano e invio manuale; registro idempotente contro doppi invii; limite locale 100 voci, registro 200, spese 160. Nessuna modifica offline di spese esistenti o caricamento offline ricevute. Il cambio richiede connessione.
+- Collaudo fisico Android, permessi fotocamera, riconnessione e installazione firmata ancora necessari. Versioni candidate: Web 0.2.16-test / Android 0.2.11-test (versionCode 26). Nessun rilascio da questo ramo finché la PR precedente e i test non sono consolidati. Aggiornare il server prima dell’APK, senza disinstallare. Collaudo: registrare una spesa in modalità aereo; riaprire l’app e verificare la persistenza; riconnettere e verificare un solo inserimento anche dopo un nuovo invio; verificare ricevuta e cambio BCE online, e residuo parziale senza cambio.

@@ -121,9 +121,13 @@ def validate_manifest(m,available):
   for e in events:
    if not isinstance(e,dict) or (e.get("bid") and e["bid"] not in bids) or (e.get("gid") and e["gid"] not in gids):fail("Collegamento evento non valido")
  for d in rows("documents",160):doc(d.get("file"))
+ if "budget" in m:tools.validate_budget(m["budget"])
+ sync_ids=m.get("expense_sync_ids",[])
+ if not isinstance(sync_ids,list) or len(sync_ids)>200 or any(not isinstance(x,str) or not re.fullmatch(r"[a-f0-9]{32}",x) for x in sync_ids) or len(set(sync_ids))!=len(sync_ids):fail("Registro sincronizzazione spese non valido")
  for e in rows("expenses",160):
   if not isinstance(e.get("title"),str) or not e["title"].strip():fail("Spesa non valida")
   tools.validate_expense(e)
+  if e.get("booking_id") and (not isinstance(e["booking_id"],str) or e["booking_id"] not in bids):fail("Prenotazione della spesa non trovata")
   doc(e.get("doc"))
  if any(k not in {"day:"+d["date"] for d in m.get("days",[])}|{"booking:"+i for i in bids} for k in m.get("travel_photos",{})):fail("Foto associata a una tappa inesistente")
  if refs!=set(available):fail("PDF mancanti o non dichiarati")
@@ -565,6 +569,30 @@ def register_routes(app,*,user,csrf,conn,data_path,ph):
   if not isinstance(m,dict) or not isinstance(m.get("trip"),dict) or m["trip"].get("id")!=tid or type(rev)!=int:fail("Modifica non valida")
   with db() as c:
    r=load(c,owner,tid);_,_,files=read_archive(r["archive"])
+   return {"revision":save(c,owner,m,state,files,rev)}
+ @app.get("/api/personal/exchange-rates")
+ def personal_exchange_rates(req:Request):
+  allowed(req)
+  return tools.exchange_rates()
+ @app.post("/api/personal/trips/{tid}/expenses/convert")
+ def convert_expenses(tid:str,req:Request,b:dict):
+  owner=allowed(req,True);rev=b.get("revision")
+  quote=tools.exchange_rates()
+  with db() as c:
+   r=load(c,owner,tid)
+   if type(rev)!=int or r["revision"]!=rev:fail("Il viaggio è stato modificato: ricaricare",409)
+   m,state,files=read_archive(r["archive"])
+   count=tools.apply_exchange_rates(m,quote)
+   revision=save(c,owner,m,state,files,rev) if count else rev
+   return {"revision":revision,"converted":count,"date":quote["date"]}
+ @app.post("/api/personal/trips/{tid}/expenses/delete")
+ def delete_expense(tid:str,req:Request,b:dict):
+  owner=allowed(req,True)
+  with db() as c:
+   r=load(c,owner,tid);rev=b.get("revision")
+   if type(rev)!=int or r["revision"]!=rev:fail("Il viaggio è stato modificato: ricaricare",409)
+   m,state,files=read_archive(r["archive"])
+   tools.remove_expense(m,b.get("index"),files)
    return {"revision":save(c,owner,m,state,files,rev)}
  @app.post("/api/personal/trips/{tid}/documents")
  def upload_doc(tid:str,req:Request,file:UploadFile=File(...)):

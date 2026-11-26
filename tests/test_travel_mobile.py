@@ -204,3 +204,75 @@ def test_mobile_dynamic_templates_and_offline_catalog(tmp_path):
  assert historical["kind"]==ident and historical["template_label"]==saved["template_label"] and historical["fields"]==saved["fields"]
  assert c.post(url+"/edit",headers=s,json={"revision":2,"kind":"booking","id":"hotel-test","fields":{"title":"Bad"},"specific_fields":[["","new"]]}).status_code==400
  c.close()
+
+def test_mobile_budget_and_expenses(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ s={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers={"Authorization":"Bearer "+d["device_token"]},json={"pin":"123456"}).json()["session_token"]}
+ raw,m=sample()
+ assert c.post(mobile+"/trips/import",headers={**s,"Content-Type":"application/zip"},content=raw).status_code==200
+ url=mobile+"/trips/"+m["trip"]["id"]
+ def edit(rev,kind,fields,**kw):return c.post(url+"/edit",headers=s,json={"revision":rev,"kind":kind,"fields":fields,**kw})
+ assert edit(0,"budget",{"amount":"3000,00","currency":"eur"}).status_code==200
+ assert edit(1,"expense",{"title":"Hotel","amount":"200.00","currency":"USD","status":"Pagata","base_amount":"185.00","base_currency":"EUR","booking_id":"hotel-test","doc":"test.pdf"}).status_code==200
+ assert edit(2,"expense",{"title":"Invalid","amount":"-1","currency":"USD"}).status_code==400
+ assert edit(2,"expense",{"title":"Invalid","amount":"10","currency":"USD","booking_id":"absent"}).status_code==400
+ assert edit(1,"expense",{"status":"Da sostenere"},index=0).status_code==409
+ assert edit(2,"expense",{"status":"Da sostenere"},index=0).status_code==200
+ result=c.get(url,headers=s).json()["manifest"]
+ assert result["budget"]=={"amount":"3000.00","currency":"EUR"}
+ assert result["expenses"][0]["status"]=="Da sostenere"
+ assert result["expenses"][0]["doc"]=="test.pdf"
+ assert c.get(p+"/trips/"+m["trip"]["id"],headers=h).json()["manifest"]==result
+ assert c.get(url+"/offline",headers=s).status_code==200
+ c.close()
+
+def test_budget_delete_conversion_and_receipt(tmp_path,monkeypatch):
+ from app import personal_travel_tools as tools
+ import base64,io
+ from PIL import Image
+ monkeypatch.setattr(tools,"exchange_rates",lambda:{"date":"2026-11-25","rates":{"EUR":"1","USD":"1.25"},"source":"BCE"})
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ s={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers={"Authorization":"Bearer "+d["device_token"]},json={"pin":"123456"}).json()["session_token"]}
+ raw,m=sample()
+ assert c.post(mobile+"/trips/import",headers={**s,"Content-Type":"application/zip"},content=raw).status_code==200
+ url=mobile+"/trips/"+m["trip"]["id"]
+ def edit(rev,kind,fields):return c.post(url+"/edit",headers=s,json={"revision":rev,"kind":kind,"fields":fields})
+ assert edit(0,"budget",{"amount":"1000","currency":"EUR"}).status_code==200
+ assert edit(1,"expense",{"title":"Test","amount":"25","currency":"USD"}).status_code==200
+ r=c.post(url+"/expenses/convert",headers=s,json={"revision":2});assert r.status_code==200,r.text
+ assert r.json()["manifest"]["expenses"][0]["base_amount"]=="20.00"
+ assert r.json()["manifest"]["expenses"][0]["fx_date"]=="2026-11-25"
+ assert c.post(url+"/expenses/convert",headers=s,json={"revision":3}).json()["revision"]==3
+ img=io.BytesIO();Image.new("RGB",(20,30),"white").save(img,format="PNG")
+ r=c.post(url+"/expenses/receipt",headers=s,json={"revision":3,"index":0,"content":base64.b64encode(img.getvalue()).decode()});assert r.status_code==200,r.text
+ name=r.json()["manifest"]["expenses"][0]["doc"]
+ assert c.get(url+"/documents/"+name,headers=s).content.startswith(b"%PDF-")
+ assert c.post(url+"/expenses/delete",headers=s,json={"revision":3,"index":0}).status_code==409
+ r=c.post(url+"/expenses/delete",headers=s,json={"revision":4,"index":0});assert r.status_code==200,r.text
+ assert r.json()["manifest"]["expenses"]==[]
+ assert c.get(url+"/documents/"+name,headers=s).status_code==200
+ c.close()
+
+def test_offline_expense_queue_idempotency(tmp_path):
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ s={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers={"Authorization":"Bearer "+d["device_token"]},json={"pin":"123456"}).json()["session_token"]}
+ raw,m=sample()
+ assert c.post(mobile+"/trips/import",headers={**s,"Content-Type":"application/zip"},content=raw).status_code==200
+ url=mobile+"/trips/"+m["trip"]["id"]
+ body={"entries":[{"id":"a"*32,"fields":{"title":"Taxi","amount":"12,50","currency":"usd","status":"Pagata"}}]}
+ r=c.post(url+"/expenses/sync",headers=s,json=body);assert r.status_code==200,r.text
+ assert r.json()["revision"]==1 and len(r.json()["manifest"]["expenses"])==1
+ r=c.post(url+"/expenses/sync",headers=s,json=body);assert r.json()["revision"]==1
+ assert c.post(url+"/expenses/delete",headers=s,json={"revision":1,"index":0}).status_code==200
+ r=c.post(url+"/expenses/sync",headers=s,json=body);assert r.json()["revision"]==2 and r.json()["manifest"]["expenses"]==[]
+ assert c.post(url+"/expenses/sync",headers=s,json={"entries":[{"id":"b"*32,"fields":{"title":"Bad","amount":"-1","currency":"EUR"}}]}).status_code==400
+ c.close()
