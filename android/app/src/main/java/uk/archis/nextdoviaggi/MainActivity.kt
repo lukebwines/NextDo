@@ -507,24 +507,36 @@ class MainActivity : ComponentActivity() {
             val t=current ?: return
             if(t.revision != e.revision || t.id != e.tripId) { error="Ricarica il viaggio";return }
             val payload=JSONObject().put("revision",e.revision).put("kind",e.kind).put("fields",values)
+            if(e.kind=="booking"){
+                values.remove("_template_id")?.let{payload.put("template_id",it)}
+                values.remove("_specific_fields")?.let{payload.put("specific_fields",it)}
+            }
             e.target.keys().forEach { k -> payload.put(k,e.target.get(k)) }
             task({
                 val api=TravelApi(cfg.getString("url"))
                 val r=api.obj("/trips/"+segment(t.id)+"/edit",s,payload)
-                TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision")) to api.trips(s)
+                TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision"),templates=bookingCatalog(r.optJSONArray("templates"))) to api.trips(s)
             }) { (updated,list) -> current=updated;trips=list;editor=null }
         }
     }
     private fun edit(kind:String, data:JSONObject, target:JSONObject=JSONObject()) {
         val t=current ?: return
-        if(canEdit()) editor=TravelEditor(kind,t.id,t.revision,data,target)
+        if(!canEdit())return
+        if(kind!="booking"){editor=TravelEditor(kind,t.id,t.revision,data,target);return}
+        val cfg=connection?:return;val s=session
+        task({
+            try{bookingCatalog(TravelApi(cfg.str("url")).obj("/booking-templates",s).optJSONArray("templates"))}
+            catch(e:TravelHttpException){if(e.status==404)emptyList() else throw e}
+        }){catalog->
+            if(current?.id==t.id){current=current?.copy(templates=catalog);editor=TravelEditor(kind,t.id,t.revision,data,target,catalog)}
+        }
     }
     private fun selectTrip(id: String) {
         val cfg = connection ?: return
         val s = session
         task({
             val r = TravelApi(cfg.getString("url")).obj("/trips/" + segment(id), s)
-            TripPackage(r.getJSONObject("manifest"), r.optJSONObject("state") ?: JSONObject(), emptyMap(), r.getInt("revision"))
+            TripPackage(r.getJSONObject("manifest"), r.optJSONObject("state") ?: JSONObject(), emptyMap(), r.getInt("revision"),templates=bookingCatalog(r.optJSONArray("templates")))
         }) { openTrip(it, false) }
     }
     private fun openTrip(t: TripPackage, cached: Boolean) {
@@ -547,7 +559,7 @@ class MainActivity : ComponentActivity() {
                 val result=withContext(Dispatchers.IO){
                     val api=TravelApi(cfg.str("url"))
                     if(!manual){
-                        val remote=api.obj("/trips/"+segment(id)+"/offline-state",s)
+                        val remote=api.obj("/trips/"+segment(id)+"/offline-state?include_catalog=true",s)
                         require(remote.str("id")==id&&remote.optInt("revision",-1)>=0){"Versione server non valida"}
                         if(!requiresOfflineDownload(previous?.str("snapshot").orEmpty(),remote.str("snapshot")))return@withContext null
                     }
@@ -1245,6 +1257,21 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun Home(t: TripPackage) {
         Hero(t)
+        val policies=t.bookings.filter{b->bookingModel(b,t.templates).id=="insurance"||((b.str("kind").isBlank()||b.str("kind")=="other")&&inferBookingKind("",b.str("type"),emptyList())=="insurance")}
+        if(policies.isNotEmpty())TravelCard("Assicurazione ed emergenze",if(offline)"Dati e documenti della copia offline" else "Polizze e recapiti salvati nel viaggio"){
+            for(b in policies){
+                Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){Icon(Icons.Default.Shield,null,tint=Teal);Text(b.str("title"),fontWeight=FontWeight.Bold)}
+                if(b.str("ref").isNotBlank())Text("Riferimento: "+b.str("ref"),color=Sand)
+                if(b.str("date").isNotBlank())Text(ItalianDateTime.temporalText(b.str("date")),color=Muted)
+                for(key in listOf("lines","fields")){
+                    val a=b.optJSONArray(key)?:continue
+                    for(i in 0 until a.length())a.optJSONArray(i)?.let{pair->if(pair.optString(1).isNotBlank())Text(pair.optString(0)+": "+pair.optString(1),color=White,fontSize=13.sp)}
+                }
+                bookingDocuments(b).forEach{(name,label)->Action(label,!busy){viewPdf(name)}}
+            }
+            Text("Verifica i recapiti e la procedura nella polizza. NextDo mostra solo le informazioni salvate.",color=Muted,fontSize=12.sp)
+            Action("Tutte le prenotazioni"){section="Prenota"}
+        }
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
             Metric(t.days.size.toString(),"Giornate",Modifier.weight(1f)){section="Oggi"}
             Metric(t.bookings.size.toString(),"Prenotazioni",Modifier.weight(1f)){section="Prenota"}
@@ -1357,6 +1384,10 @@ class MainActivity : ComponentActivity() {
         Text("Le tue prenotazioni",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
         if(canEdit()) Action("Aggiungi prenotazione",!busy){edit("booking",JSONObject())}
         for(b in t.bookings)TravelCard(b.str("title"),listOf(b.str("type"),ItalianDateTime.temporalText(b.str("date")),b.str("place")).filter{it.isNotBlank()}.joinToString(" · ")) {
+            val model=bookingModel(b,t.templates)
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                Icon(bookingIcon(model.icon),null,tint=Teal);Text(model.label,color=Teal,fontWeight=FontWeight.SemiBold)
+            }
             if(canEdit()) TextButton(onClick={edit("booking",b,JSONObject().put("id",b.str("id")))},enabled=!busy){Text("Modifica prenotazione")}
             Photo(t.manifest.optJSONObject("travel_photos")?.optJSONObject("booking:"+b.str("id")))
             if(b.str("status").isNotBlank())Pill(b.str("status"))

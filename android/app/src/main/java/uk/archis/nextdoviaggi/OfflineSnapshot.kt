@@ -41,7 +41,7 @@ internal data class OfflineSnapshot(val meta:JSONObject,val raw:ByteArray) {
         }
         fun download(api:TravelApi,token:String,id:String,owner:String,requireVersion:Boolean):OfflineSnapshot {
             var revision=-1;var stamp="";var digest=""
-            val raw=api.call("/trips/"+segment(id)+"/offline?include_timeline=true",token,responseHeaders={c->
+            val raw=api.call("/trips/"+segment(id)+"/offline?include_timeline=true&include_catalog=true",token,responseHeaders={c->
                 revision=c.getHeaderField("X-NextDo-Revision")?.toIntOrNull()?:-1
                 stamp=c.getHeaderField("X-NextDo-Snapshot").orEmpty()
                 digest=c.getHeaderField("X-NextDo-Archive-SHA256").orEmpty()
