@@ -1,3 +1,5 @@
+# NextDo — Home Assistant add-on
+
 ## 0.2.13-test — Conferma e completa
 Le voci professionali in stato Da verificare possono essere confermate oppure confermate e completate in un solo passaggio, anche dal dettaglio Android 0.2.8-test. Permessi esistenti, controllo revisione e completamento per singolo CdS preservati. La presa visione è separata. Nell'Area personale si può chiudere una voce già risolta senza inventare una data mancante; confermare un appuntamento o scadenza aperti richiede ancora la data. Nessuna migrazione o modifica alle regole di notifica. Backup e collaudo sul dispositivo richiesti.
 

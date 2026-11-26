@@ -156,3 +156,24 @@ def test_review_actions_web_mobile_permissions_and_stale_revision(tmp_path):
  assert c.post(m+"/agenda/"+str(shared)+"/review",headers=reader,json={"revision":row["revision"],"action":"complete"}).status_code==403
  assert c.post(m+"/agenda/"+str(tid)+"/review",headers=reader,json=body).status_code==404
  c.close()
+
+def test_review_complete_requires_explicit_form_confirmation_and_respects_per_course(tmp_path):
+ c,h=init(tmp_path)
+ def create(**kw):
+  r=c.post("/api/tasks",headers=h,json={"title":"Synthetic review","status":"review",**kw})
+  assert r.status_code==200,r.text
+  return r.json()["id"]
+ tid=create()
+ url="/api/tasks/"+str(tid)
+ row=c.get(url).json()
+ payload={"title":"Synthetic review","status":"done","scope":"personal"}
+ assert c.put(url,headers=h,json=payload).status_code==400
+ assert c.put(url,headers=h,json={**payload,"confirm_review":True,"review_revision":"old"}).status_code==409
+ assert c.put(url,headers=h,json={**payload,"confirm_review":True,"review_revision":row["work_revision"]}).status_code==200
+ assert c.get(url).json()["status"]=="done"
+ shared=create(scope="common",completion_mode="per_course")
+ row=c.get("/api/tasks/"+str(shared)).json()
+ assert row["can_confirm_review"] and not row["can_complete_review"]
+ assert c.post("/api/work-mobile/review/"+str(shared),headers=h,json={"revision":row["work_revision"],"action":"complete"}).status_code==403
+ assert c.get("/api/tasks/"+str(shared)).json()["status"]=="review"
+ c.close()

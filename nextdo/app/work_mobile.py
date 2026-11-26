@@ -33,7 +33,7 @@ def day_info(value,tz):
   return dt.date().isoformat(),dt.isoformat()
  except (ValueError,OverflowError,TypeError):return None,None
 def review_options(c,u,t):
- reviewing=t["status"]=="review" and workspace.can_read(c,u,t)
+ reviewing=t["status"]=="review" and t["kind"] in ("task","appointment") and workspace.can_read(c,u,t)
  confirm=bool(reviewing and workspace.can_write(c,u,t))
  complete=bool(confirm and workspace.can_finish(c,u,t) and t["completion_mode"]=="global")
  return {"can_confirm_review":confirm,"can_complete_review":complete}
@@ -240,7 +240,7 @@ def register(app,*,conn,user,csrf,accessible,tz,record,data_path,iso):
     elif day:when=datetime.combine(date.fromisoformat(day),datetime.min.time().replace(hour=9),tzinfo=tz)
     # Opaque per-device, per-revision key; never send title, description, person, or source.
     key=key_for(d,t)
-    rows.append((t["id"],{"key":key,"kind":t["kind"],"priority":t["priority"],"review":t["status"]=="review","when":int(when.timestamp()) if when else None,"date_only":bool(day and not instant),"acknowledged":seen(c,u,t) is not None,**review_options(c,u,t)}))
+    rows.append((t["id"],{"key":key,"kind":t["kind"],"priority":t["priority"],"review":t["status"]=="review","when":int(when.timestamp()) if when else None,"date_only":bool(day and not instant),"acknowledged":seen(c,u,t) is not None}))
     if len(rows)>200:break
    more=len(rows)>200;rows=rows[:200]
    return {"items":[a for _,a in rows],"next_after":rows[-1][0] if more else None,"expires":d["expires"]}
