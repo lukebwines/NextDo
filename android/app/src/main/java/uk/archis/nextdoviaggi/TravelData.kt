@@ -59,7 +59,7 @@ class TravelApi(base: String) {
         }
         root = u.toASCIIString().trimEnd('/') + "/api/mobile/v1"
     }
-    fun call(path: String, token: String? = null, data: JSONObject? = null, limit: Int = MAX, zip: ByteArray? = null): ByteArray {
+    fun call(path: String, token: String? = null, data: JSONObject? = null, limit: Int = MAX, zip: ByteArray? = null, responseHeaders: ((HttpURLConnection)->Unit)? = null): ByteArray {
         val c = URL(root + path).openConnection() as HttpURLConnection
         try {
             c.instanceFollowRedirects = false
@@ -88,6 +88,7 @@ class TravelApi(base: String) {
                 } catch (_: Exception) { null }
                 throw TravelHttpException(status,detail)
             }
+            responseHeaders?.invoke(c)
             return c.inputStream.use { readLimited(it, limit) }
         } finally { c.disconnect() }
     }
@@ -175,7 +176,7 @@ class Vault(private val context: Context, private val background:Boolean=false) 
     }
     fun remove(name: String) = AtomicFile(file(name)).delete()
     fun clear() {
-        remove("connection"); remove("offline"); remove("offline_meta")
+        remove("connection"); remove("offline"); remove("offline_meta"); remove("offline_snapshot")
         if (!exists("work_connection") && store.containsAlias(alias)) store.deleteEntry(alias)
     }
 }

@@ -115,3 +115,40 @@ def test_mobile_pin_accepts_custom_four_digit_pin(tmp_path):
  unlocked=c.post(mobile+"/unlock",headers=device,json={"pin":"4321"})
  assert unlocked.status_code==200,unlocked.text
  c.close()
+
+def test_offline_snapshot_tracks_pdf_and_timeline_and_auth(tmp_path):
+ import hashlib,io,zipfile
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ raw,m=sample()
+ assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
+ code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+ d=c.post(mobile+"/pair",json={"code":code}).json()
+ device={"Authorization":"Bearer "+d["device_token"]}
+ s={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers=device,json={"pin":"123456"}).json()["session_token"]}
+ tid=m["trip"]["id"];url=mobile+"/trips/"+tid;web=p+"/trips/"+tid
+ assert c.get(url+"/offline-state",headers=device).status_code==401
+ def state():return c.get(url+"/offline-state",headers=s).json()
+ def download(expected):
+  r=c.get(url+"/offline?include_timeline=true",headers=s)
+  assert r.status_code==200,r.text
+  assert r.headers["X-NextDo-Snapshot"]==expected["snapshot"]
+  assert r.headers["X-NextDo-Archive-SHA256"]==hashlib.sha256(r.content).hexdigest()
+  assert int(r.headers["X-NextDo-Revision"])==expected["revision"]
+  return zipfile.ZipFile(io.BytesIO(r.content))
+ initial=state();assert initial==state()
+ with download(initial) as z:assert z.read("documenti/test.pdf")==b"%PDF-synthetic"
+ r=c.post(web+"/documents/test.pdf/replace?revision="+str(initial["revision"])+"&confirm_shared=true",headers=h,files={"file":("test.pdf",b"%PDF-updated","application/pdf")})
+ assert r.status_code==200,r.text
+ changed=state()
+ assert changed["snapshot"]!=initial["snapshot"] and changed["revision"]>initial["revision"]
+ with download(changed) as z:assert z.read("documenti/test.pdf")==b"%PDF-updated"
+ timeline={"from":"2027-01-01","to":"2027-01-01","visits":[{"startTime":"2027-01-01T10:00:00+01:00","endTime":"2027-01-01T10:01:00+01:00","location":{"lat":1,"lon":2}}],"activities":[],"paths":[]}
+ assert c.post(url+"/timeline",headers=s,json=timeline).status_code==200
+ diary=state();assert diary["snapshot"]!=changed["snapshot"] and diary["revision"]==changed["revision"]
+ with download(diary) as z:assert "timeline.json" in z.namelist()
+ assert c.post(web+"/timeline/clear",headers=h).status_code==200
+ assert state()==changed
+ assert c.post(p+"/mobile/devices/"+d["device_id"]+"/revoke",headers=h).status_code==200
+ assert c.get(url+"/offline-state",headers=s).status_code==401
+ c.close()

@@ -217,10 +217,28 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   with db() as c:
    r=load(c,owner,tid);m,state,_=read_archive(r["archive"])
    return {"manifest":m,"state":state,"revision":r["revision"]}
+ def snapshot(c,owner,r,include_timeline):
+  # Hash canonical stored content, not the re-generated ZIP (ZIP timestamps vary).
+  h=hashlib.sha256()
+  h.update(str(r["revision"]).encode()+b"\n")
+  h.update(hashlib.sha256(r["archive"]).digest())
+  if include_timeline:
+   row=c.execute("SELECT data FROM trip_timeline WHERE owner=? AND trip_id=?",(owner,r["id"])).fetchone()
+   h.update(b"timeline\n"+hashlib.sha256(row["data"].encode()).digest() if row else b"no-timeline")
+  return h.hexdigest()
+ @app.get("/api/mobile/v1/trips/{tid}/offline-state")
+ def offline_state(tid:str,req:Request):
+  owner=auth(req)["owner"]
+  with db() as c:
+   r=load(c,owner,tid)
+   return {"id":tid,"revision":r["revision"],"snapshot":snapshot(c,owner,r,True)}
  @app.get("/api/mobile/v1/trips/{tid}/offline")
  def offline(tid:str,req:Request,include_timeline:bool=False):
   owner=auth(req)["owner"]
-  with db() as c:r=load(c,owner,tid);return Response(export_bundle(c,owner,r,include_timeline),media_type="application/zip",headers={"X-NextDo-Revision":str(r["revision"])})
+  with db() as c:
+   r=load(c,owner,tid)
+   raw=export_bundle(c,owner,r,include_timeline)
+   return Response(raw,media_type="application/zip",headers={"Cache-Control":"no-store","X-NextDo-Revision":str(r["revision"]),"X-NextDo-Snapshot":snapshot(c,owner,r,include_timeline),"X-NextDo-Archive-SHA256":hashlib.sha256(raw).hexdigest()})
  @app.get("/api/mobile/v1/trips/{tid}/documents/{name}")
  def document(tid:str,name:str,req:Request):
   owner=auth(req)["owner"]
