@@ -152,3 +152,55 @@ def test_offline_snapshot_tracks_pdf_and_timeline_and_auth(tmp_path):
  assert c.post(p+"/mobile/devices/"+d["device_id"]+"/revoke",headers=h).status_code==200
  assert c.get(url+"/offline-state",headers=s).status_code==401
  c.close()
+
+def test_mobile_dynamic_templates_and_offline_catalog(tmp_path):
+ import io,json,zipfile
+ c,h=init(tmp_path);p="/api/personal";mobile="/api/mobile/v1"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ raw,m=sample()
+ assert c.post(p+"/trips/import",headers=h,files={"file":("test.zip",raw,"application/zip")}).status_code==200
+ def pair(pin):
+  code=c.post(p+"/mobile/pair",headers=h).json()["code"]
+  d=c.post(mobile+"/pair",json={"code":code}).json()
+  device={"Authorization":"Bearer "+d["device_token"]}
+  s={"Authorization":"Bearer "+c.post(mobile+"/unlock",headers=device,json={"pin":pin}).json()["session_token"]}
+  return device,s
+ device,s=pair("123456")
+ assert c.get(mobile+"/booking-templates",headers=device).status_code==401
+ url=mobile+"/trips/"+m["trip"]["id"]
+ old=c.get(url+"/offline-state",headers=s).json()
+ start=c.get(url+"/offline-state?include_catalog=true",headers=s).json()
+ model={"label":"Synthetic shuttle","icon":"car","fields":["Pick-up","Code"],"roles":["Terminal"]}
+ r=c.post(p+"/booking-templates",headers=h,json=model);assert r.status_code==200,r.text
+ custom=next(t for t in r.json() if t["label"]==model["label"]);ident=custom["id"]
+ assert custom in c.get(mobile+"/booking-templates",headers=s).json()["templates"]
+ assert custom in c.get(url,headers=s).json()["templates"]
+ changed=c.get(url+"/offline-state?include_catalog=true",headers=s).json()
+ assert changed["snapshot"]!=start["snapshot"] and changed["revision"]==start["revision"]
+ assert c.get(url+"/offline-state",headers=s).json()==old
+ r=c.get(url+"/offline?include_timeline=true&include_catalog=true",headers=s)
+ assert r.status_code==200 and r.headers["X-NextDo-Snapshot"]==changed["snapshot"]
+ with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+  assert custom in json.loads(z.read("booking-templates.json"))
+  assert z.read("documenti/test.pdf")==b"%PDF-synthetic"
+ with zipfile.ZipFile(io.BytesIO(c.get(url+"/offline?include_timeline=true",headers=s).content)) as z:
+  assert "booking-templates.json" not in z.namelist()
+ payload={"revision":0,"kind":"booking","id":"hotel-test","fields":{"title":"Synthetic shuttle booking"},"template_id":ident,"specific_fields":[["Pick-up","Terminal A"],["Code","X"],["Legacy field","Keep"]]}
+ r=c.post(url+"/edit",headers=s,json=payload);assert r.status_code==200,r.text
+ saved=r.json()["manifest"]["bookings"][0]
+ assert saved["kind"]==ident and saved["template_icon"]=="car" and saved["template_label"]==model["label"]
+ assert saved["doc"]=="test.pdf" and saved["lines"]==m["bookings"][0]["lines"] and saved["fields"]==payload["specific_fields"]
+ create_user(c,h,"catalog_other");sign_in(c,h,"catalog_other")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"654321","confirm":"654321"}).status_code==200
+ _,other=pair("654321")
+ assert ident not in [t["id"] for t in c.get(mobile+"/booking-templates",headers=other).json()["templates"]]
+ assert c.get(url+"/offline?include_catalog=true",headers=other).status_code==404
+ sign_in(c,h,"admin")
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456"}).status_code==200
+ assert c.delete(p+"/booking-templates/"+ident,headers=h).status_code==200
+ assert c.post(url+"/edit",headers=s,json={**payload,"revision":1}).status_code==409
+ r=c.post(url+"/edit",headers=s,json={"revision":1,"kind":"booking","id":"hotel-test","fields":{"title":"Historical booking"},"specific_fields":saved["fields"]});assert r.status_code==200,r.text
+ historical=r.json()["manifest"]["bookings"][0]
+ assert historical["kind"]==ident and historical["template_label"]==saved["template_label"] and historical["fields"]==saved["fields"]
+ assert c.post(url+"/edit",headers=s,json={"revision":2,"kind":"booking","id":"hotel-test","fields":{"title":"Bad"},"specific_fields":[["","new"]]}).status_code==400
+ c.close()

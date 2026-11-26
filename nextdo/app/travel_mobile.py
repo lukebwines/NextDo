@@ -1,6 +1,6 @@
 """Device-scoped travel API. Pairing requires an unlocked web account."""
 from . import travel_timeline
-import hashlib,secrets,re,time
+import hashlib,secrets,re,time,json,io,zipfile
 from datetime import date
 from fastapi import Request,HTTPException
 from fastapi.responses import Response,JSONResponse
@@ -13,7 +13,7 @@ def raw_token(value):
  if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}",value):fail(401,"Credenziale non valida")
  return digest(value)
 
-def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit,import_bundle,export_bundle,map_tile,data_path):
+def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,limit,import_bundle,export_bundle,template_catalog,map_tile,data_path):
  with db() as c:
   c.executescript("""CREATE TABLE IF NOT EXISTS mobile_pairings(code_hash TEXT PRIMARY KEY,owner TEXT NOT NULL,expires REAL NOT NULL);
   CREATE TABLE IF NOT EXISTS mobile_devices(id TEXT PRIMARY KEY,owner TEXT NOT NULL,label TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,expires REAL NOT NULL,created REAL NOT NULL,revoked INTEGER DEFAULT 0);
@@ -177,10 +177,15 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
    owner=auth(req)["owner"]
    rev=save(c,owner,m,{"notes":{},"checks":{}},{})
   return {"id":m["trip"]["id"],"revision":rev}
+ @app.get("/api/mobile/v1/booking-templates")
+ def mobile_templates(req:Request):
+  owner=auth(req)["owner"]
+  with db() as c:return {"templates":template_catalog(c,owner)}
  @app.post("/api/mobile/v1/trips/{tid}/edit")
  def edit_mobile(tid:str,req:Request,b:dict):
   rev=b.get("revision");kind=b.get("kind");fields=b.get("fields")
   if type(rev)!=int or not isinstance(fields,dict):fail(400,"Modifica non valida")
+  if kind!="booking" and ("template_id" in b or "specific_fields" in b):fail(400,"Campi riservati alle prenotazioni")
   allowed_fields={"trip":{"title","subtitle"},"day":{"place","headline","description"},"event":{"time","title","details"},"booking":{"title","type","date","place","status","ref","price"}}
   if not isinstance(kind,str) or kind not in allowed_fields or not fields or set(fields)-allowed_fields[kind]:fail(400,"Campi non modificabili")
   if any(not isinstance(v,str) or len(v)>20000 or "\x00" in v for v in fields.values()):fail(400,"Testo non valido")
@@ -207,17 +212,36 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
     else:
      target=next((x for x in bookings if x["id"]==ident),None)
      if target is None:fail(404,"Prenotazione non trovata")
+   if kind=="booking":
+    if "template_id" in b:
+     selected=b["template_id"]
+     if not isinstance(selected,str):fail(400,"Tipologia non valida")
+     model=next((x for x in template_catalog(c,owner) if x["id"]==selected),None)
+     if model is None:fail(409,"Tipologia non più disponibile: riaprire la prenotazione")
+     target.update(kind=model["id"],template_label=model["label"],template_icon=model["icon"])
+     if not fields.get("type") and not target.get("type"):fields["type"]=model["label"]
+    if "specific_fields" in b:
+     pairs=b["specific_fields"]
+     if not isinstance(pairs,list) or len(pairs)>200:fail(400,"Campi specifici non validi")
+     for pair in pairs:
+      if not isinstance(pair,list) or len(pair)!=2 or any(not isinstance(x,str) or len(x)>20000 or "\x00" in x for x in pair):fail(400,"Campo specifico non valido")
+      if not pair[0].strip() and pair not in target.get("fields",[]):fail(400,"Nome campo obbligatorio")
+     target["fields"]=pairs
    target.update(fields)
    if kind in ("trip","event","booking") and not str(target.get("title","")).strip():fail(400,"Titolo obbligatorio")
    revision=save(c,owner,m,state,files,rev)
-  return {"revision":revision,"manifest":m,"state":state}
+   catalog=template_catalog(c,owner)
+  return {"revision":revision,"manifest":m,"state":state,"templates":catalog}
+
  @app.get("/api/mobile/v1/trips/{tid}")
  def trip(tid:str,req:Request):
   owner=auth(req)["owner"]
   with db() as c:
    r=load(c,owner,tid);m,state,_=read_archive(r["archive"])
-   return {"manifest":m,"state":state,"revision":r["revision"]}
- def snapshot(c,owner,r,include_timeline):
+   return {"manifest":m,"state":state,"revision":r["revision"],"templates":template_catalog(c,owner)}
+ def catalog_bytes(c,owner):
+  return json.dumps(template_catalog(c,owner),ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8")
+ def snapshot(c,owner,r,include_timeline,catalog=None):
   # Hash canonical stored content, not the re-generated ZIP (ZIP timestamps vary).
   h=hashlib.sha256()
   h.update(str(r["revision"]).encode()+b"\n")
@@ -225,20 +249,29 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   if include_timeline:
    row=c.execute("SELECT data FROM trip_timeline WHERE owner=? AND trip_id=?",(owner,r["id"])).fetchone()
    h.update(b"timeline\n"+hashlib.sha256(row["data"].encode()).digest() if row else b"no-timeline")
+  if catalog is not None:h.update(b"catalog\n"+hashlib.sha256(catalog).digest())
   return h.hexdigest()
  @app.get("/api/mobile/v1/trips/{tid}/offline-state")
- def offline_state(tid:str,req:Request):
+ def offline_state(tid:str,req:Request,include_catalog:bool=False):
   owner=auth(req)["owner"]
   with db() as c:
    r=load(c,owner,tid)
-   return JSONResponse({"id":tid,"revision":r["revision"],"snapshot":snapshot(c,owner,r,True)},headers={"Cache-Control":"no-store"})
+   return JSONResponse({"id":tid,"revision":r["revision"],"snapshot":snapshot(c,owner,r,True,catalog_bytes(c,owner) if include_catalog else None)},headers={"Cache-Control":"no-store"})
  @app.get("/api/mobile/v1/trips/{tid}/offline")
- def offline(tid:str,req:Request,include_timeline:bool=False):
+ def offline(tid:str,req:Request,include_timeline:bool=False,include_catalog:bool=False):
   owner=auth(req)["owner"]
   with db() as c:
    r=load(c,owner,tid)
    raw=export_bundle(c,owner,r,include_timeline)
-   return Response(raw,media_type="application/zip",headers={"Cache-Control":"no-store","X-NextDo-Revision":str(r["revision"]),"X-NextDo-Snapshot":snapshot(c,owner,r,include_timeline),"X-NextDo-Archive-SHA256":hashlib.sha256(raw).hexdigest()})
+   catalog=catalog_bytes(c,owner) if include_catalog else None
+   if catalog is not None:
+    out=io.BytesIO(raw)
+    with zipfile.ZipFile(out,"a",zipfile.ZIP_DEFLATED) as z:
+     if len(z.infolist())>=180 or sum(i.file_size for i in z.infolist())+len(catalog)>120*1024*1024:fail(413,"Archivio offline troppo grande")
+     z.writestr("booking-templates.json",catalog)
+    raw=out.getvalue()
+    if len(raw)>limit:fail(413,"Archivio offline oltre 32 MB")
+   return Response(raw,media_type="application/zip",headers={"Cache-Control":"no-store","X-NextDo-Revision":str(r["revision"]),"X-NextDo-Snapshot":snapshot(c,owner,r,include_timeline,catalog),"X-NextDo-Archive-SHA256":hashlib.sha256(raw).hexdigest()})
  @app.get("/api/mobile/v1/trips/{tid}/documents/{name}")
  def document(tid:str,name:str,req:Request):
   owner=auth(req)["owner"]
