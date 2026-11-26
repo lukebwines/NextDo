@@ -50,7 +50,7 @@ internal object ItalianDateTime {
     fun temporalText(raw:String):String {
         val timestamps=Regex("""(?<!\d)\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})?(?!\d)""")
         val dates=Regex("""(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)""")
-        val times=Regex("""(?i)(?<![\d:+-])\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM)\b)?(?!\d)""")
+        val times=Regex("""(?i)(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM)\b)?(?!\d)""")
         // Format times before introducing display dates. Preserve offset-bearing timestamps as a whole.
         val segments=timestamps.findAll(raw).toList()
         fun plain(s:String)=dates.replace(times.replace(s){time(it.value)}){date(it.value)}
@@ -65,6 +65,16 @@ internal object ItalianDateTime {
         parseDate(raw)?.let{return it}
         val candidate=Regex("""(?<!\d)(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})(?!\d)""").find(raw)
         return candidate?.value?.let{parseDate(it)}
+    }
+    fun period(raw:String):Pair<LocalDate,LocalDate>? {
+        val m=Regex("""(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})\s*(?:—|–|-|al)\s*(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})""").matchEntire(raw.trim())?:return null
+        val start=parseDate(m.groupValues[1])?:return null
+        val end=parseDate(m.groupValues[2])?:return null
+        return if(end>=start)start to end else null
+    }
+    fun fieldValue(label:String,raw:String):String {
+        val temporal=Regex("""(?i)\b(data|ora|orario|check.in|check.out|partenza|arrivo|ritiro|riconsegna|validità|periodo|date|time|departure|arrival|dal|al|scadenza)\b""")
+        return if(temporal.containsMatchIn(label))temporalText(raw) else raw
     }
     fun storedDue(original:String,day:String,clock:String):String? {
         if(day.isBlank())return null

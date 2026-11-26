@@ -30,6 +30,13 @@ class ItalianDateTimeTest {
         assertEquals("orario da definire",ItalianDateTime.temporalText("orario da definire"))
         assertEquals("04/12/2026 20:05 (-08:00)",ItalianDateTime.temporalText("2026-12-04T20:05:45-08:00"))
     }
+    @Test fun rangesAndOriginalText(){
+        assertEquals(LocalDate.of(2026,12,4) to LocalDate.of(2026,12,13),ItalianDateTime.period("04/12/2026 – 13/12/2026"))
+        assertNull(ItalianDateTime.period("2026-12-13 — 2026-12-04"))
+        assertEquals("09:00-21:00",ItalianDateTime.temporalText("9:00 AM-9:00 PM"))
+        assertEquals("04/12/2026 20:30 (-08:00)",ItalianDateTime.fieldValue("Check-in","2026-12-04T20:30:00-08:00"))
+        assertEquals("2026-12-04",ItalianDateTime.fieldValue("Riferimento","2026-12-04"))
+    }
     @Test fun optionalValuesAndPrecisionStayIntact(){
         assertNull(ItalianDateTime.storedDue("2026-11-26T08:30:00","",""))
         assertEquals("2026-11-26",ItalianDateTime.storedDue("","2026-11-26",""))

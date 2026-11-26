@@ -1252,7 +1252,7 @@ class MainActivity : ComponentActivity() {
             if(b.str("price").isNotBlank())Text(b.str("price"),color=Teal,fontWeight=FontWeight.Bold)
             for(key in listOf("lines","fields")) {
                 val a=b.optJSONArray(key)?:continue
-                for(i in 0 until a.length())a.optJSONArray(i)?.let{Text(it.optString(0)+": "+if(it.optString(0).contains(Regex("(?i)\\b(data|ora|orario|check.in|check.out|partenza|arrivo|ritiro|riconsegna|validità|periodo|date|time|departure|arrival)\\b"))) ItalianDateTime.temporalText(it.optString(1)) else it.optString(1),fontSize=13.sp,color=Muted)}
+                for(i in 0 until a.length())a.optJSONArray(i)?.let{Text(it.optString(0)+": "+ItalianDateTime.fieldValue(it.optString(0),it.optString(1)),fontSize=13.sp,color=Muted)}
             }
             BookingActions(b)
         }

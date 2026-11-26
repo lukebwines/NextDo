@@ -54,6 +54,7 @@ fun TravelEditDialog(editor:TravelEditor,busy:Boolean,error:String,onCancel:()->
 private fun TravelTimeInput(value:String,change:(String)->Unit,enabled:Boolean){
     var freeText by remember{mutableStateOf(false)}
     TimeField("Orario locale",value,change,enabled=enabled)
+    if(value.isNotBlank()&&ItalianDateTime.parseTime(value)==null)Text("L’orario originale contiene indicazioni complesse. La scelta di un’ora lo sostituisce; puoi conservarlo come testo libero.",style=MaterialTheme.typography.bodySmall)
     TextButton(onClick={freeText=!freeText},enabled=enabled){Text(if(freeText)"Nascondi testo libero" else "Orario complesso / testo libero")}
     if(freeText)OutlinedTextField(value,{change(it.take(20000))},label={Text("Orario originale / intervallo")},enabled=enabled,modifier=Modifier.fillMaxWidth())
 }
@@ -61,9 +62,12 @@ private fun TravelTimeInput(value:String,change:(String)->Unit,enabled:Boolean){
 private fun BookingDateInput(value:String,change:(String)->Unit,enabled:Boolean){
     var freeText by remember{mutableStateOf(false)}
     val first=ItalianDateTime.firstDate(value)
-    val canonical=Regex("""(\d{4}-\d{2}-\d{2}) — (\d{4}-\d{2}-\d{2})""").matchEntire(value)
-    val end=canonical?.groupValues?.get(2).orEmpty()
-    DateField("Data / periodo",value,change,enabled=enabled,clearable=true)
+    val period=ItalianDateTime.period(value)
+    val end=period?.second?.toString().orEmpty()
+    DateField("Data / periodo",value,{start->
+        val selected=ItalianDateTime.parseDate(start)
+        change(if(selected!=null&&period!=null&&selected<=period.second)start+" — "+period.second.toString() else start)
+    },enabled=enabled,clearable=true)
     if(first!=null){
         DateField("Fine periodo (facoltativa)",end,{last->
             change(if(last.isBlank())first.toString() else first.toString()+" — "+last)

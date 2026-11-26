@@ -1,42 +1,26 @@
 <resources>
     <style name="NextDoPickerLightOcean" parent="android:style/Theme.Material.Light.Dialog.Alert">
         <item name="android:colorAccent">#176E71</item>
-        <item name="android:datePickerDialogTheme">@style/NextDoPickerLightOcean</item>
-        <item name="android:timePickerDialogTheme">@style/NextDoPickerLightOcean</item>
     </style>
     <style name="NextDoPickerDarkOcean" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:colorAccent">#69E0D2</item>
-        <item name="android:datePickerDialogTheme">@style/NextDoPickerDarkOcean</item>
-        <item name="android:timePickerDialogTheme">@style/NextDoPickerDarkOcean</item>
     </style>
     <style name="NextDoPickerLightForest" parent="android:style/Theme.Material.Light.Dialog.Alert">
         <item name="android:colorAccent">#275C39</item>
-        <item name="android:datePickerDialogTheme">@style/NextDoPickerLightForest</item>
-        <item name="android:timePickerDialogTheme">@style/NextDoPickerLightForest</item>
     </style>
     <style name="NextDoPickerDarkForest" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:colorAccent">#9EE0A3</item>
-        <item name="android:datePickerDialogTheme">@style/NextDoPickerDarkForest</item>
-        <item name="android:timePickerDialogTheme">@style/NextDoPickerDarkForest</item>
     </style>
     <style name="NextDoPickerLightSunset" parent="android:style/Theme.Material.Light.Dialog.Alert">
         <item name="android:colorAccent">#914A35</item>
-        <item name="android:datePickerDialogTheme">@style/NextDoPickerLightSunset</item>
-        <item name="android:timePickerDialogTheme">@style/NextDoPickerLightSunset</item>
     </style>
     <style name="NextDoPickerDarkSunset" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:colorAccent">#FFD49A</item>
-        <item name="android:datePickerDialogTheme">@style/NextDoPickerDarkSunset</item>
-        <item name="android:timePickerDialogTheme">@style/NextDoPickerDarkSunset</item>
     </style>
     <style name="NextDoPickerLightLavender" parent="android:style/Theme.Material.Light.Dialog.Alert">
         <item name="android:colorAccent">#514383</item>
-        <item name="android:datePickerDialogTheme">@style/NextDoPickerLightLavender</item>
-        <item name="android:timePickerDialogTheme">@style/NextDoPickerLightLavender</item>
     </style>
     <style name="NextDoPickerDarkLavender" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:colorAccent">#CBBAFF</item>
-        <item name="android:datePickerDialogTheme">@style/NextDoPickerDarkLavender</item>
-        <item name="android:timePickerDialogTheme">@style/NextDoPickerDarkLavender</item>
     </style>
 </resources>

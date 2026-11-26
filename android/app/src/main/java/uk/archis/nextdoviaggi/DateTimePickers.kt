@@ -86,8 +86,8 @@ internal fun DateField(label:String,value:String,onChange:(String)->Unit,enabled
         min?.let{dialog.datePicker.minDate=millis(it)}
         max?.let{dialog.datePicker.maxDate=millis(it)}
         dialog.setOnDismissListener{open=false}
-        dialog.show()
         if(secure)dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.show()
         onDispose{dialog.setOnDismissListener(null);dialog.dismiss()}
     }
 }
@@ -116,8 +116,8 @@ internal fun TimeField(label:String,value:String,onChange:(String)->Unit,enabled
         val dialog=TimePickerDialog(italianContext(context,appearance),appearance.style(),
             {_,h,m->callback(ItalianDateTime.time(LocalTime.of(h,m)))},initial.hour,initial.minute,true)
         dialog.setOnDismissListener{open=false}
-        dialog.show()
         if(secure)dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.show()
         onDispose{dialog.setOnDismissListener(null);dialog.dismiss()}
     }
 }
