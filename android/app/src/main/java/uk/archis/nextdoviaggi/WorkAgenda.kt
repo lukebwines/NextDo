@@ -23,7 +23,7 @@ import java.util.Locale
 
 internal data class WorkItem(val id:Long,val title:String,val kind:String,val priority:String,val status:String,val day:String,val instant:String,val overdue:Boolean,val revision:String,val acknowledged:Boolean) {
     val urgent get()=priority=="high"||priority=="critical"
-    val timeLabel get()=if(day.isBlank())"Data da definire" else day+(if(instant.isNotBlank())" · "+instant.drop(11).take(5) else if(kind=="appointment")" · orario da definire" else "")
+    val timeLabel get()=if(day.isBlank())"Data da definire" else ItalianDateTime.date(day)+(if(instant.isNotBlank())" · "+ItalianDateTime.dateTime(instant).substringAfter(" ",instant) else if(kind=="appointment")" · orario da definire" else "")
 }
 internal data class WorkAgenda(val items:List<WorkItem>,val today:String,val weekStart:String,val timezone:String,val updated:String,val name:String)
 internal class WorkApi(private val base:String){
@@ -108,7 +108,7 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
     if(confirm)AlertDialog(onDismissRequest={confirm=false},title={Text("Disassociare Professionale?")},text={Text("L’associazione professionale verrà rimossa. Viaggi resta invariato.")},confirmButton={TextButton(onClick={confirm=false;onDisconnect()}){Text("Disassocia")}},dismissButton={TextButton(onClick={confirm=false}){Text("Annulla")}})
     if(agenda==null){Text("Agenda non disponibile: non significa che non ci siano scadenze.",color=MutedWork);return}
     Text(agenda.name+" · "+agenda.timezone,color=MutedWork,fontSize=13.sp)
-    Text("Aggiornata: "+agenda.updated.take(16).replace('T',' '),color=MutedWork,fontSize=12.sp)
+    Text("Aggiornata: "+ItalianDateTime.dateTime(agenda.updated),color=MutedWork,fontSize=12.sp)
     val monday=LocalDate.parse(agenda.weekStart).plusWeeks(offset.toLong())
     val sunday=monday.plusDays(6)
     val items=agenda.items
@@ -126,7 +126,7 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
     WorkCard("Settimana"){
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){
             TextButton(onClick={offset--;chosen="";filter="week"}){Text("‹")}
-            Text(monday.format(DateTimeFormatter.ofPattern("dd/MM"))+" – "+sunday.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),fontSize=13.sp)
+            Text(ItalianDateTime.date(monday)+" – "+ItalianDateTime.date(sunday),fontSize=13.sp)
             TextButton(onClick={offset++;chosen="";filter="week"}){Text("›")}
         }
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(3.dp)){
@@ -141,6 +141,7 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
                 }
             }
         }
+        DateField("Vai a una data",chosen,{value->chosen=value;filter="week";if(value.isNotBlank())offset=java.time.temporal.ChronoUnit.WEEKS.between(LocalDate.parse(agenda.weekStart),LocalDate.parse(value).with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))).toInt()},clearable=true,fallback=monday)
         TextButton(onClick={offset=0;chosen="";filter="week"}){Text("Torna alla settimana corrente")}
     }
     WorkCard("Sempre in evidenza"){
@@ -161,7 +162,7 @@ internal fun WorkScreen(connected:Boolean,agenda:WorkAgenda?,busy:Boolean,error:
             OutlinedButton(onClick={filter="undated";chosen=""},modifier=Modifier.weight(1f)){Text("Senza data "+items.count{it.day.isBlank()},fontSize=12.sp)}
         }
     }
-    val label=when(filter){"tasks"->"Scadenze e attività";"appointments"->"Appuntamenti";"todo"->"Da fare";"urgent"->"Urgenti";"review"->"Da verificare";"late"->"Scadute";"past"->"Appuntamenti trascorsi";"all"->"Tutte le voci aperte";"undated"->"Senza data";else->chosen.ifBlank{"Scadenze e appuntamenti della settimana"}}
+    val label=when(filter){"tasks"->"Scadenze e attività";"appointments"->"Appuntamenti";"todo"->"Da fare";"urgent"->"Urgenti";"review"->"Da verificare";"late"->"Scadute";"past"->"Appuntamenti trascorsi";"all"->"Tutte le voci aperte";"undated"->"Senza data";else->ItalianDateTime.date(chosen).ifBlank{"Scadenze e appuntamenti della settimana"}}
     val shown=orderedWork(items.filter{t->if(filter=="week")inWeek(t)&&(chosen.isBlank()||t.day==chosen) else workMatches(t,filter)})
     Text(label+" · "+shown.size,fontSize=18.sp,fontWeight=FontWeight.Bold)
     if(shown.isEmpty())Text("Nessuna voce in questo filtro.",color=MutedWork)
@@ -184,7 +185,7 @@ internal fun WorkDetailDialog(detail:JSONObject,onMap:(Boolean)->Unit,close:()->
     AlertDialog(onDismissRequest=close,title={Text(detail.str("title"))},text={
         Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text(statusName(detail.str("status"))+" · "+priorityName(detail.str("priority")))
-            Text(detail.str("due_at").ifBlank{"Data da definire"},color=MutedWork)
+            Text(ItalianDateTime.dateTime(detail.str("due_at"),true).ifBlank{"Data da definire"},color=MutedWork)
             if(detail.str("kind")=="appointment"&&detail.str("address").isNotBlank()){
                 Text(detail.str("address"),color=MutedWork)
                 Row{TextButton(onClick={onMap(false)}){Text("Apri in Maps")};TextButton(onClick={onMap(true)}){Text("Naviga")}}
