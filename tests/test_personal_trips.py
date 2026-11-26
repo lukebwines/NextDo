@@ -345,3 +345,15 @@ def test_home_assistant_indicator(tmp_path):
  assert c.post(settings,headers=h,json={"action":"revoke"}).status_code==200
  assert c.get(url,headers=credential).status_code==401
  c.close()
+
+def test_private_upcoming_notice_metadata_and_key():
+ from app.private_alerts import upcoming_notices,due_notices,TZ
+ from datetime import datetime
+ now=datetime(2027,1,1,10,tzinfo=TZ)
+ item={"id":1,"title":"Synthetic secret","description":"Private","status":"todo","priority":"normal","kind":"task","due_at":"2027-01-01T10:30:00","snoozed_until":None}
+ result=upcoming_notices([item],now,"synthetic",now.timestamp()+86400)
+ assert len(result)==1 and set(result[0])=={"key","at"}
+ later=datetime(2027,1,1,10,30,tzinfo=TZ)
+ assert result[0]["key"] in [x["key"] for x in due_notices([item],later,"synthetic")]
+ assert upcoming_notices([dict(item,status="done")],now,"synthetic",now.timestamp()+86400)==[]
+ assert upcoming_notices([item],now,"synthetic",now.timestamp()+60)==[]
