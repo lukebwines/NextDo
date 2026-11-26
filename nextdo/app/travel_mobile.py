@@ -3,7 +3,7 @@ from . import travel_timeline
 import hashlib,secrets,re,time
 from datetime import date
 from fastapi import Request,HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response,JSONResponse
 from argon2.exceptions import VerificationError
 
 def fail(code,message):raise HTTPException(code,message)
@@ -231,7 +231,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   owner=auth(req)["owner"]
   with db() as c:
    r=load(c,owner,tid)
-   return {"id":tid,"revision":r["revision"],"snapshot":snapshot(c,owner,r,True)}
+   return JSONResponse({"id":tid,"revision":r["revision"],"snapshot":snapshot(c,owner,r,True)},headers={"Cache-Control":"no-store"})
  @app.get("/api/mobile/v1/trips/{tid}/offline")
  def offline(tid:str,req:Request,include_timeline:bool=False):
   owner=auth(req)["owner"]

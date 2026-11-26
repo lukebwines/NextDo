@@ -304,15 +304,17 @@ class MainActivity : ComponentActivity() {
         val cfg=connection ?: return
         task({resumeServer(cfg)}) { r -> session=r.token;trips=r.trips;error=r.error;travelAuthState=r.authState }
     }
-    private data class DeviceUnlockData(val cfg:JSONObject?,val meta:JSONObject?,val resumed:ResumeResult,val work:JSONObject?)
+    private data class DeviceUnlockData(val cfg:JSONObject?,val meta:JSONObject?,val resumed:ResumeResult,val work:JSONObject?,val offlineProblem:String="")
     private fun finishDeviceUnlock() {
         task({
             val cfg = if (vault.exists("connection")) JSONObject(String(vault.read("connection"), Charsets.UTF_8)) else null
-            val meta = readOfflineMeta(cfg)
+            val metaResult=runCatching{readOfflineMeta(cfg)}
+            val meta=metaResult.getOrNull()
             val work=if(vault.exists("work_connection")) JSONObject(String(vault.read("work_connection"),Charsets.UTF_8)) else null
-            DeviceUnlockData(cfg,meta,if(cfg!=null)resumeServer(cfg) else ResumeResult(),work)
-        }) { (cfg, meta, resumed, work) ->
+            DeviceUnlockData(cfg,meta,if(cfg!=null)resumeServer(cfg) else ResumeResult(),work,if(metaResult.isFailure)"Copia offline non leggibile. Nessun file è stato cancellato; scarica una nuova copia." else "")
+        }) { (cfg, meta, resumed, work, offlineProblem) ->
             workConnection=work
+            offlineSyncStatus=offlineProblem
             connection = cfg; offlineMeta = meta; locked = false; session=resumed.token; trips=resumed.trips; error=resumed.error;travelAuthState=resumed.authState
             updateCaptureProtection()
             authHandler.removeCallbacks(autoLock)
@@ -550,13 +552,14 @@ class MainActivity : ComponentActivity() {
                         if(!requiresOfflineDownload(previous?.str("snapshot").orEmpty(),remote.str("snapshot")))return@withContext null
                     }
                     val downloaded=OfflineSnapshot.download(api,s,id,owner,requireVersion=!manual)
+                    val encoded=downloaded.encode()
                     synchronized(offlineGuard){
                         // Reject a late result after app lock, logout or a new device association.
                         require(started==epoch){"Sessione locale scaduta"}
                         val storedCfg=JSONObject(String(vault.read("connection"),Charsets.UTF_8))
                         require(timelineOwner(storedCfg)==owner){"Associazione cambiata"}
                         // Archive and metadata are one encrypted AtomicFile, never two independent writes.
-                        vault.write(OFFLINE_FILE,downloaded.encode())
+                        vault.write(OFFLINE_FILE,encoded)
                         // Keep legacy files until the new atomic write has fully succeeded.
                         vault.remove("offline");vault.remove("offline_meta")
                     }
@@ -584,13 +587,15 @@ class MainActivity : ComponentActivity() {
     }
     private fun openOffline() {
         val cfg=connection?:return
+        val legacySaved=offlineMeta?.str("saved").orEmpty()
         task({
-            synchronized(offlineGuard){
-                if(vault.exists(OFFLINE_FILE)){
-                    val snapshot=OfflineSnapshot.decode(vault.read(OFFLINE_FILE),timelineOwner(cfg))
-                    snapshot.trip() to snapshot.meta.str("saved")
-                }else TripPackage.parse(vault.read("offline")) to offlineMeta?.str("saved").orEmpty()
+            val (modern,raw)=synchronized(offlineGuard){
+                if(vault.exists(OFFLINE_FILE))true to vault.read(OFFLINE_FILE) else false to vault.read("offline")
             }
+            if(modern){
+                val snapshot=OfflineSnapshot.decode(raw,timelineOwner(cfg))
+                snapshot.trip() to snapshot.meta.str("saved")
+            }else TripPackage.parse(raw) to legacySaved
         }) { (trip,saved) -> offlineOpenedStamp=saved;openTrip(trip,true) }
     }
     private fun forget() {
@@ -1209,6 +1214,7 @@ class MainActivity : ComponentActivity() {
                 Action("Apri copia offline") { openOffline() }
             }
         }
+        if(offlineMeta==null&&offlineSyncStatus.isNotBlank())Text(offlineSyncStatus,color=Sand,fontSize=12.sp)
         if(cfg!=null || offlineMeta!=null) TextButton(onClick={erase=true},enabled=!busy&&!offlineSyncBusy) { Text("Disassocia e cancella dati locali",color=Sand) }
         if(erase) AlertDialog(onDismissRequest={erase=false},title={Text("Cancellare i dati locali?")},text={Text("La copia offline e l’associazione verranno eliminate. I viaggi su NextDo non saranno modificati. Revoca il dispositivo anche dal web.")},
             confirmButton={TextButton(onClick={erase=false;forget()}){Text("Cancella")}},dismissButton={TextButton(onClick={erase=false}){Text("Annulla")}})
@@ -1253,8 +1259,8 @@ class MainActivity : ComponentActivity() {
             if(offlineMeta?.str("id")==t.id){
                 Pill("COPIA OFFLINE PRESENTE")
                 Text("Ultimo download: "+ItalianDateTime.dateTime(offlineMeta?.str("saved").orEmpty()),color=Muted,fontSize=12.sp)
-                OfflineSyncInfo()
             }
+            OfflineSyncInfo()
             Action("Scarica / aggiorna offline",!busy&&!offlineSyncBusy) {
                 if(offlineMeta!=null&&offlineMeta?.str("id")!=t.id)replace=true else downloadTrip()
             }
