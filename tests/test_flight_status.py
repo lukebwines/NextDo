@@ -61,3 +61,33 @@ def test_multiple_segments_are_explicit_and_distinct():
  with pytest.raises(HTTPException):select_case({"flight_segments":normalized},None)
  with pytest.raises(HTTPException):select_case({"flight_segments":[]},0)
  with pytest.raises(HTTPException):segment_cases([dict(rows[0],date="tomorrow")])
+
+
+def test_auto_import_summary_preserves_unknown_connections():
+ from app.flight_import import suggest
+ trip={"start":"2027-01-03","end":"2027-01-12"}
+ b={"lines":[["Andata","Dom 3 gennaio · Test AAA 11:45 → Test CCC 18:30; 1 scalo; XY123 + XY124"],["Ritorno","11 gennaio · Test CCC 18:25 → Test AAA 19:40; XY125 + XY126"],["Bagaglio","XY987"]]}
+ result=suggest(b,trip,{})["segments"]
+ assert result==[
+  {"number":"XY123","date":"2027-01-03","from":"AAA","to":""},
+  {"number":"XY124","date":"","from":"","to":"CCC"},
+  {"number":"XY125","date":"2027-01-11","from":"CCC","to":""},
+  {"number":"XY126","date":"","from":"","to":"AAA"}]
+
+def test_auto_import_local_pdf_adds_only_explicit_data(monkeypatch):
+ from app import flight_import
+ monkeypatch.setattr(flight_import,"pdf_text",lambda raw:"XY123 03 Jan 2027 AAA → BBB\nXY124 03 Jan 2027 BBB → CCC")
+ b={"lines":[["Andata","3 gennaio · Test AAA 11:45 → Test CCC 18:30; XY123 + XY124"]],"doc":"synthetic.pdf"}
+ trip={"start":"2027-01-03","end":"2027-01-12"}
+ result=flight_import.suggest(b,trip,{"synthetic.pdf":b"synthetic"})
+ assert result["pdf_read"]==1
+ assert result["segments"]==[
+ {"number":"XY123","date":"2027-01-03","from":"AAA","to":"BBB"},
+ {"number":"XY124","date":"2027-01-03","from":"BBB","to":"CCC"}]
+
+def test_auto_import_conflict_does_not_guess(monkeypatch):
+ from app import flight_import
+ monkeypatch.setattr(flight_import,"pdf_text",lambda raw:"XY123 03 Jan 2027 AAA → CCC")
+ b={"lines":[["Volo","XY123 03 Jan 2027 AAA → BBB"]],"doc":"synthetic.pdf"}
+ rows=flight_import.suggest(b,{"start":"2027-01-03","end":"2027-01-12"},{"synthetic.pdf":b"x"})["segments"]
+ assert rows[0]["to"]==""
