@@ -248,7 +248,7 @@ def register(app,*,db,mutex,conn,allowed,ph,load,read_archive,save,new_manifest,
   return {"revision":revision,"manifest":m,"state":state,"templates":catalog}
 
  from . import flight_status
- flight_status.register(app,db,load,read_archive,lambda req:allowed(req,True),lambda req:auth(req)["owner"])
+ flight_status.register(app,db,load,read_archive,save,template_catalog,lambda req:allowed(req,True),lambda req:auth(req)["owner"])
  @app.get("/api/mobile/v1/trips/{tid}")
  def trip(tid:str,req:Request):
   owner=auth(req)["owner"]
