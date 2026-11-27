@@ -147,7 +147,9 @@ class Lookup:
  def __init__(self):
   self.lock=threading.Lock()
   self.cache={}
-  self.last_call=0
+  self.last_call=-1000
+  self.inflight=False
+  self.block_until=0
  def check(self,owner,case,force=False):
   key=(owner,case)
   now=time.monotonic()
@@ -155,11 +157,16 @@ class Lookup:
    self.cache={k:v for k,v in self.cache.items() if now-v[0]<600}
    hit=self.cache.get(key)
    if hit and (not force or now-hit[0]<60):return {**hit[1],"cached":True}
-   if now-self.last_call<10:return {"state":"Attendere prima di un nuovo controllo","source":None,"cached":False}
-   self.last_call=now
+   if self.inflight or now<self.block_until or now-self.last_call<10:return {"state":"Attendere prima di un nuovo controllo","source":None,"cached":False}
+   self.last_call=now;self.inflight=True
   # Network I/O is outside the trip database lock. No retry on errors/rate limits.
   try:result=evaluate(case,Client().call)
-  except (OSError,ValueError,KeyError,TypeError,AttributeError,OverflowError):result={"state":"Servizio temporaneamente non disponibile","source":None}
+  except (OSError,ValueError,KeyError,TypeError,AttributeError,OverflowError) as exc:
+   result={"state":"Servizio temporaneamente non disponibile","source":None}
+   if getattr(exc,"code",None)==429:
+    with self.lock:self.block_until=time.monotonic()+300
+  finally:
+   with self.lock:self.inflight=False
   result.update(checked_at=datetime.now(UTC).isoformat(),cached=False)
   with self.lock:
    if len(self.cache)>=256:self.cache.pop(next(iter(self.cache)))

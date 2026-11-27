@@ -1409,6 +1409,58 @@ class MainActivity : ComponentActivity() {
         if(b.arr("locations").isNotEmpty())b.arr("locations").forEach{Location(it)}
         else MapActions(b)
     }
+    @Composable private fun FlightStatusCard(t:TripPackage,b:JSONObject) {
+        var opened by remember(t.id,b.str("id")){mutableStateOf(false)}
+        var refresh by remember(t.id,b.str("id")){mutableStateOf(0)}
+        var result by remember(t.id,b.str("id"),t.revision){mutableStateOf<JSONObject?>(null)}
+        var loading by remember(t.id,b.str("id")){mutableStateOf(false)}
+        var problem by remember(t.id,b.str("id")){mutableStateOf("")}
+        val online=!offline&&session.isNotBlank()&&connection!=null&&!locked
+        Action(if(opened)"Chiudi stato volo" else "Apri prenotazione · Stato volo",!busy){opened=!opened}
+        LaunchedEffect(opened,refresh,online,t.id,b.str("id"),t.revision,session){
+            if(!opened||!online)return@LaunchedEffect
+            val cfg=connection?:return@LaunchedEffect
+            val s=session
+            val started=epoch
+            loading=true;problem="";result=null
+            try{
+                val data=withContext(Dispatchers.IO){
+                    TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/bookings/"+segment(b.str("id"))+"/flight-status",s,JSONObject().put("force",refresh>0))
+                }
+                if(started==epoch&&!locked&&session==s)result=data
+            }catch(e:CancellationException){throw e}
+            catch(_:Exception){if(started==epoch)problem="Verifica non riuscita. Consulta la compagnia."}
+            finally{loading=false}
+        }
+        if(opened){
+            Text("Stato volo · Sperimentale",fontWeight=FontWeight.Bold,color=Teal)
+            if(!online)Text("Stato non disponibile offline.",color=Muted)
+            else if(loading)Text("Consultazione Airportia in corso…",color=Muted)
+            else if(problem.isNotBlank())Text(problem,color=Sand)
+            else result?.let{r->
+                Text(r.str("state"),fontWeight=FontWeight.SemiBold,color=White)
+                if(r.str("arrival_state").isNotBlank())Text(r.str("arrival_state"),color=White)
+                if(r.optBoolean("needs_identity"))Text("Completa Numero volo, Data partenza (AAAA-MM-GG), Aeroporto partenza (IATA), Aeroporto arrivo (IATA). Una sola tratta per prenotazione.",color=Sand)
+                for((label,k) in listOf("Partenza" to "departure","Arrivo" to "arrival")){
+                    val x=r.optJSONObject(k)?:continue
+                    val times=listOf("Programmato" to "scheduled","Stimato" to "estimated","Effettivo" to "actual").mapNotNull{(l,key)->
+                        x.str(key).takeIf{it.length>=16}?.let{l+" "+it.substring(8,10)+"/"+it.substring(5,7)+"/"+it.substring(0,4)+" "+it.substring(11,16)}
+                    }
+                    if(times.isNotEmpty())Text(label+" · "+times.joinToString(" · "),color=Muted,fontSize=13.sp)
+                    val gate=listOf(x.str("terminal").takeIf{it.isNotBlank()}?.let{"Terminal "+it},x.str("gate").takeIf{it.isNotBlank()}?.let{"Gate "+it}).filterNotNull()
+                    if(gate.isNotEmpty())Text(gate.joinToString(" · "),color=Muted,fontSize=13.sp)
+                }
+                val at=r.str("checked_at")
+                if(at.isNotBlank()){
+                    val formatted=runCatching{java.time.OffsetDateTime.parse(at).atZoneSameInstant(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))}.getOrDefault(at)
+                    Text("Consultato "+formatted+if(r.optBoolean("cached"))" · Cache" else "",color=Muted,fontSize=12.sp)
+                }
+            }
+            Action("Controlla volo",online&&!loading&&!busy){refresh++}
+            TextButton(onClick={launchExternal("https://www.airportia.com/")}){Text("Fonte: Airportia")}
+            Text("Dato indicativo: verifica con la compagnia o l’aeroporto. Nessun controllo in background.",color=Muted,fontSize=12.sp)
+        }
+    }
     @Composable private fun BookingScreen(t:TripPackage) {
         Text("Le tue prenotazioni",fontSize=26.sp,fontWeight=FontWeight.ExtraBold)
         if(canEdit()) Action("Aggiungi prenotazione",!busy){edit("booking",JSONObject())}
@@ -1426,6 +1478,7 @@ class MainActivity : ComponentActivity() {
                 val a=b.optJSONArray(key)?:continue
                 for(i in 0 until a.length())a.optJSONArray(i)?.let{Text(it.optString(0)+": "+ItalianDateTime.fieldValue(it.optString(0),it.optString(1)),fontSize=13.sp,color=Muted)}
             }
+            if(model.id=="flight")FlightStatusCard(t,b)
             BookingActions(b)
         }
     }

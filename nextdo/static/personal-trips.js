@@ -409,6 +409,37 @@ const NextDoPersonal=(()=>{
    paragraph('Le copie offline Android e i PDF già esportati non cambiano automaticamente. Aggiorna il viaggio offline dopo la sostituzione.'),
    toolbar(btn('Annulla',()=>{if(!busy)back.remove()},'small'),submit));refresh();
  }
+ function flightDetail(b){
+  const {box,back}=modal(b.title||'Prenotazione volo');back.setAttribute('data-personal-modal','');
+  const token=generation,target=tripURL()+'/bookings/'+encodeURIComponent(b.id)+'/flight-status';
+  const display=el('div',{class:'travel-card'}),button=btn('Controlla volo',()=>check(true),'primary');
+  let running=false;
+  async function check(force){
+   if(running||!back.isConnected||token!==generation)return;
+   running=true;button.disabled=true;display.replaceChildren(paragraph('Consultazione Airportia in corso…'));
+   try{
+    const r=await api(target,{method:'POST',body:JSON.stringify({force})});
+    if(!back.isConnected||token!==generation)return;
+    const items=[node('strong','',r.state||'Stato non disponibile')];
+    if(r.arrival_state)items.push(paragraph(r.arrival_state));
+    if(r.needs_identity)items.push(paragraph('Completa i campi specifici: Numero volo, Data partenza (AAAA-MM-GG), Aeroporto partenza (IATA), Aeroporto arrivo (IATA). Oppure usa i codici dei luoghi di partenza e arrivo già salvati. Una sola tratta per prenotazione.'));
+    for(const [label,k] of [['Partenza','departure'],['Arrivo','arrival']]){
+     const x=r[k];if(!x)continue;
+     const fmt=s=>typeof s==='string'&&s.length>=16?s.slice(0,10).split('-').reverse().join('/')+' '+s.slice(11,16):'';
+     items.push(paragraph(label+' · '+[['Programmato',x.scheduled],['Stimato',x.estimated],['Effettivo',x.actual]].filter(([,v])=>v).map(([l,v])=>l+' '+fmt(v)).join(' · ')));
+     if(x.terminal||x.gate)items.push(paragraph([x.terminal?'Terminal '+x.terminal:'',x.gate?'Gate '+x.gate:''].filter(Boolean).join(' · ')));
+    }
+    if(r.checked_at)items.push(paragraph('Consultato '+new Date(r.checked_at).toLocaleString('it-IT')+(r.cached?' · Risultato in cache':'')));
+    display.replaceChildren(...items);
+   }catch(e){if(token===generation&&back.isConnected)display.replaceChildren(paragraph('Verifica non riuscita. Riprova o consulta la compagnia.'))}
+   finally{running=false;if(back.isConnected)button.disabled=false}
+  }
+  box.append(paragraph([b.type,b.date,b.place].filter(Boolean).join(' · ')),lines(b.lines),lines(b.fields),
+   toolbar(...bookingDocs(b).map(a=>doc(a.file,a.label)),safeLink(b.source,'Fonte prenotazione')),
+   paragraph('Stato del volo · Sperimentale'),display,button,safeLink('https://www.airportia.com/','Fonte: Airportia'),
+   paragraph('Dati indicativi; conferma sempre con la compagnia o l’aeroporto. Nessun controllo in background. La consultazione invia solo numero del volo, data e, se necessario, aeroporto.'));
+  check(false);
+ }
  function bookingEdit(b,index){
   const {box,back}=modal('Prenotazione');back.setAttribute('data-personal-modal','');
   const initial=bookingTemplate(b),choices=templates.map(t=>[t.id,t.label]);
@@ -663,7 +694,7 @@ const NextDoPersonal=(()=>{
    for(const [i,e] of (m.expenses||[]).entries())root.append(card(e.title,paragraph([e.date?dayFmt(e.date):'',e.category,e.currency+' '+e.amount,e.status||'Da verificare',e.notes].filter(Boolean).join(' · ')),paragraph(m.bookings.find(b=>b.id===e.booking_id)?.title||''),paragraph(e.fx_source?e.fx_source+' · '+e.fx_date:''),toolbar(doc(e.doc),btn('Modifica',()=>expenseEditor(e,i),'small'),btn('Elimina',()=>deleteExpense(i),'small'))));
   }else if(tab==='prenotazioni'){
    root.append(toolbar(btn('+ Prenotazione',()=>bookingEdit({},-1),'primary'),btn('Acquisisci con AI',aiEditor,'primary'),btn('Gestisci tipologie',templateManager,'small')));
-   for(const [i,b] of m.bookings.entries()){const item=card(b.title,spotPhoto(m.travel_photos?.['booking:'+b.id]),paragraph([b.type,b.date,b.status,b.ref,b.place,b.price].filter(Boolean).join(' · ')),lines(b.lines),lines(b.template_label?(b.fields||[]).filter(([,v])=>String(v).trim()):b.fields),...(b.locations||[]).map(locationLine),toolbar(...bookingDocs(b).map(a=>doc(a.file,a.label)),btn('Gestisci PDF ('+bookingDocs(b).length+')',()=>manageBookingDocs(b),'small'),navLink(b),safeLink(b.source,'Fonte'),safeLink(b.extraLink,b.extraLabel||'Link'),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'),btn('Foto della tappa',()=>coverEditor('booking:'+b.id,b.place||b.title),'small'),btn('Modifica',()=>bookingEdit(b,i),'small')));root.append(item);if(focusBooking===b.id){focusBooking='';requestAnimationFrame(()=>{if(item.isConnected)item.scrollIntoView({block:'start'})})}}
+   for(const [i,b] of m.bookings.entries()){const item=card(b.title,spotPhoto(m.travel_photos?.['booking:'+b.id]),paragraph([b.type,b.date,b.status,b.ref,b.place,b.price].filter(Boolean).join(' · ')),lines(b.lines),lines(b.template_label?(b.fields||[]).filter(([,v])=>String(v).trim()):b.fields),...(b.locations||[]).map(locationLine),toolbar(...bookingDocs(b).map(a=>doc(a.file,a.label)),btn('Gestisci PDF ('+bookingDocs(b).length+')',()=>manageBookingDocs(b),'small'),navLink(b),safeLink(b.source,'Fonte'),safeLink(b.extraLink,b.extraLabel||'Link'),btn('Gestisci luoghi',()=>geoEditor(b,i),'small'),btn('Foto della tappa',()=>coverEditor('booking:'+b.id,b.place||b.title),'small'),btn('Modifica',()=>bookingEdit(b,i),'small')));if(bookingKind(b)==='flight')item.append(btn('Apri prenotazione · Stato volo',()=>flightDetail(b),'primary'));root.append(item);if(focusBooking===b.id){focusBooking='';requestAnimationFrame(()=>{if(item.isConnected)item.scrollIntoView({block:'start'})})}}
   }else if(tab==='guide'){
    root.append(toolbar(btn('+ Guida',()=>guideEdit({},-1),'primary')));
    for(const [i,g] of m.guides.entries())root.append(card(g.title,paragraph([g.category,g.severity,g.summary].filter(Boolean).join(' · ')),lines(g.items),toolbar(doc(g.doc),...(g.links||[]).map(l=>safeLink(l.url,l.label)),btn('Modifica',()=>guideEdit(g,i),'small'))));
