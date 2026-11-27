@@ -196,12 +196,12 @@ internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Bo
                 Text("Promemoria personali",Modifier.weight(1f),color=textColor,fontWeight=FontWeight.Bold)
                 Switch(checked=alertsEnabled,onCheckedChange={toggleAlerts()},enabled=enabled&&(connected||alertsEnabled))
             }
-            Text("Avvisi riservati anche in background. Controllo indicativo ogni 15 minuti.",color=muted,fontSize=12.sp)
+            Text("Avvisi riservati anche offline dopo la sincronizzazione. Gli orari sono indicativi e dipendono da Android.",color=muted,fontSize=12.sp)
         }
     }
     TextButton(onClick=openTransfers,enabled=enabled&&connected){Text("Sposta / riclassifica impegni sul web",color=PrivateTeal)}
     for((key,title,icon) in listOf(
-        Triple("task","Attività",Icons.Default.Checklist),
+        Triple("task","Attività e promemoria",Icons.Default.Checklist),
         Triple("deadline","Scadenze",Icons.Default.Event),
         Triple("appointment","Appuntamenti",Icons.Default.CalendarToday),
         Triple("trips","Viaggi",Icons.Default.Flight))){
@@ -218,8 +218,8 @@ internal fun PersonalLanding(enabled:Boolean,appearance:JSONObject?,connected:Bo
 }
 
 @Composable
-internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:JSONObject?,enabled:Boolean,problem:String,back:()->Unit,refresh:()->Unit,save:(String,JSONObject)->Unit,delete:(String)->Unit){
-    val names=mapOf("task" to "Attività","deadline" to "Scadenze","appointment" to "Appuntamenti")
+internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:JSONObject?,enabled:Boolean,problem:String,back:()->Unit,refresh:()->Unit,save:(String,JSONObject)->Unit,delete:(String)->Unit,snooze:(String,Int)->Unit){
+    val names=mapOf("task" to "Attività e promemoria","deadline" to "Scadenze","appointment" to "Appuntamenti")
     val light=appearance?.optString("theme")=="light"
     val panel=if(light)Color.White else ShellPanel
     val ink=if(light)Color(0xFF172B3D) else ShellWhite
@@ -246,7 +246,12 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
                         Text(item.str("title"),color=ink,fontWeight=FontWeight.Bold,fontSize=17.sp)
                         Text(ItalianDateTime.dateTime(item.str("due_at")).takeIf{it.isNotBlank()&&it!="null"}?:"Senza data",color=muted,fontSize=13.sp)
                         Text(status,color=accent,fontSize=12.sp)
+                        if(item.str("recurrence") !in listOf("","none"))Text("Ricorrente",color=muted,fontSize=12.sp)
+                        if(item.str("snoozed_until").let{it.isNotBlank()&&it!="null"})Text("Rinviato: "+ItalianDateTime.dateTime(item.str("snoozed_until")),color=muted,fontSize=12.sp)
                     }
+                    if(item.str("status")!="done"&&item.str("id").isNotBlank())IconButton(onClick={
+                        save(item.str("id"),JSONObject().put("status","done").put("expected_due",item.opt("due_at")?:JSONObject.NULL))
+                    },enabled=enabled){Icon(Icons.Default.Check,"Completa",tint=accent)}
                     Icon(Icons.Default.ChevronRight,"Apri",tint=accent)
                 }
             }
@@ -261,6 +266,7 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
         var time by remember(item){mutableStateOf(item.str("due_at").takeIf{it.length>=16}.orEmpty().drop(11).take(5))}
         var status by remember(item){mutableStateOf(item.str("status").ifBlank{"todo"})}
         var priority by remember(item){mutableStateOf(item.str("priority").ifBlank{"normal"})}
+        var recurrence by remember(item){mutableStateOf(item.str("recurrence").ifBlank{"none"})}
         val reviewedUndated=id.isNotBlank()&&item.str("status") in listOf("review","done")&&item.str("due_at").let{it.isBlank()||it=="null"}
         val validDate=day.isBlank()||runCatching{LocalDate.parse(day);true}.getOrDefault(false)
         val validTime=time.isBlank()||(day.isNotBlank()&&runCatching{java.time.LocalTime.parse(time);time.length==5}.getOrDefault(false))
@@ -270,14 +276,22 @@ internal fun PrivateAgendaScreen(kind:String,items:List<JSONObject>?,appearance:
                 for((k,label) in names)FilterChip(selected=type==k,onClick={type=k},label={Text(label)})
                 DateField("Data",day,{day=it;if(it.isBlank())time=""},enabled=enabled,clearable=type=="task"||status=="review"||(status=="done"&&reviewedUndated),appearance=PickerAppearance(light,appearance?.optString("palette").orEmpty()))
                 TimeField("Ora facoltativa",time,{time=it},enabled=enabled&&day.isNotBlank(),appearance=PickerAppearance(light,appearance?.optString("palette").orEmpty()))
+                if(type=="task"&&day.isNotBlank()){
+                    Text("Ripetizione")
+                    for((k,label) in listOf("none" to "Mai","daily" to "Ogni giorno","weekly" to "Ogni settimana","monthly" to "Ogni mese","yearly" to "Ogni anno"))FilterChip(selected=recurrence==k,onClick={recurrence=k},label={Text(label)})
+                }
                 for((k,label) in listOf("review" to "Da verificare","todo" to "Da fare","done" to "Completato"))FilterChip(selected=status==k,onClick={status=k},label={Text(if(item.str("status")=="review"&&k=="todo")"Conferma" else if(item.str("status")=="review"&&k=="done")"Conferma e completa" else label)})
                 for((k,label) in listOf("low" to "Bassa","normal" to "Normale","high" to "Alta","urgent" to "Urgente"))FilterChip(selected=priority==k,onClick={priority=k},label={Text(label)})
                 OutlinedTextField(desc,{desc=it},label={Text("Descrizione / email originale")},minLines=3)
+                if(id.isNotBlank()&&item.str("kind")=="task"&&item.str("status")!="done"){
+                    Text("Rinvia promemoria")
+                    for((minutes,label) in listOf(10 to "10 minuti",30 to "30 minuti",60 to "1 ora",1440 to "24 ore",0 to "Annulla rinvio"))TextButton(onClick={snooze(id,minutes);editing=null},enabled=enabled){Text(label)}
+                }
                 if(id.isNotBlank())TextButton(onClick={remove=true},enabled=enabled){Text("Elimina")}
             }
         },confirmButton={TextButton(enabled=enabled&&title.isNotBlank()&&validDate&&validTime&&(type=="task"||status=="review"||day.isNotBlank()||(status=="done"&&reviewedUndated)),onClick={
             val due=ItalianDateTime.storedDue(item.str("due_at"),day,time)?:JSONObject.NULL
-            save(id,JSONObject().put("title",title).put("description",desc).put("kind",type).put("due_at",due).put("status",status).put("priority",priority))
+            save(id,JSONObject().put("title",title).put("description",desc).put("kind",type).put("due_at",due).put("status",status).put("priority",priority).put("recurrence",if(type=="task"&&day.isNotBlank())recurrence else "none").put("expected_due",item.opt("due_at")?:JSONObject.NULL))
             editing=null
         }){Text(if(item.str("status")=="review"&&status=="done")"Conferma e completa" else if(item.str("status")=="review"&&status=="todo")"Conferma" else "Salva")}},dismissButton={TextButton(onClick={editing=null}){Text("Annulla")}})
         if(remove)AlertDialog(onDismissRequest={remove=false},title={Text("Eliminare l'impegno?")},confirmButton={TextButton(onClick={remove=false;delete(id);editing=null},enabled=enabled){Text("Elimina")}},dismissButton={TextButton(onClick={remove=false}){Text("Annulla")}})

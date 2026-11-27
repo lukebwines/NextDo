@@ -307,3 +307,53 @@ def test_private_review_can_be_closed_without_inventing_date(tmp_path):
  assert row["status"]=="done" and row["due_at"] is None
  assert c.post(url,headers=h,json={"title":"New","kind":"deadline","status":"done"}).status_code==400
  c.close()
+
+def test_private_recurring_and_snooze(tmp_path):
+ from app.private_items import next_due
+ from datetime import datetime
+ assert next_due("2027-01-31","2027-01-31","monthly",datetime(2027,1,31))=="2027-02-28"
+ assert next_due("2027-02-28","2027-01-31","monthly",datetime(2027,2,28))=="2027-03-31"
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ u=p+"/items"
+ assert c.post(u,headers=h,json={"title":"Invalid","recurrence":"daily"}).status_code==400
+ r=c.post(u,headers=h,json={"title":"Synthetic recurring","due_at":"2090-01-31","recurrence":"monthly"})
+ assert r.status_code==200,r.text
+ i=r.json()["id"];url=u+"/"+str(i)
+ assert c.post(url+"/snooze",headers=h,json={"minutes":30}).status_code==200
+ assert c.post(url+"/snooze",headers=h,json={"minutes":7}).status_code==400
+ assert c.post(url,headers=h,json={"status":"done","expected_due":"2090-01-31"}).status_code==200
+ row=c.get(u).json()["items"][0]
+ assert row["due_at"]=="2090-02-28" and row["status"]=="todo" and row["snoozed_until"] is None
+ assert c.post(url,headers=h,json={"status":"done","expected_due":"2090-01-31"}).status_code==409
+ c.close()
+
+def test_home_assistant_indicator(tmp_path):
+ c,h=init(tmp_path);p="/api/personal"
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ settings=p+"/ha-indicator/settings";url=p+"/ha-indicator"
+ assert c.get(url).status_code==401
+ r=c.post(settings,headers=h,json={"action":"generate"});assert r.status_code==200,r.text
+ credential={"Authorization":"Bearer "+r.json()["credential"]}
+ assert c.get(url,headers=credential).json()=={"active":False}
+ assert c.post(p+"/items",headers=h,json={"title":"Synthetic item","status":"review"}).status_code==200
+ assert c.get(url,headers=credential).json()=={"active":True}
+ assert c.post(p+"/lock",headers=h).status_code==200
+ assert c.get(p+"/items",headers=credential).status_code==423
+ assert c.get(url,headers=credential).json()=={"active":True}
+ assert c.post(p+"/unlock",headers=h,json={"pin":"123456","confirm":"123456"}).status_code==200
+ assert c.post(settings,headers=h,json={"action":"revoke"}).status_code==200
+ assert c.get(url,headers=credential).status_code==401
+ c.close()
+
+def test_private_upcoming_notice_metadata_and_key():
+ from app.private_alerts import upcoming_notices,due_notices,TZ
+ from datetime import datetime
+ now=datetime(2027,1,1,10,tzinfo=TZ)
+ item={"id":1,"title":"Synthetic secret","description":"Private","status":"todo","priority":"normal","kind":"task","due_at":"2027-01-01T10:30:00","snoozed_until":None}
+ result=upcoming_notices([item],now,"synthetic",now.timestamp()+86400)
+ assert len(result)==1 and set(result[0])=={"key","at"}
+ later=datetime(2027,1,1,10,30,tzinfo=TZ)
+ assert result[0]["key"] in [x["key"] for x in due_notices([item],later,"synthetic")]
+ assert upcoming_notices([dict(item,status="done")],now,"synthetic",now.timestamp()+86400)==[]
+ assert upcoming_notices([item],now,"synthetic",now.timestamp()+60)==[]
