@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.13-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.14-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.13-test"
-            RELEASE_NOTES="Flight Status sperimentale: apertura dettaglio e controllo su richiesta, confronto Airportia con data/numero/tratta, partenza e arrivo separati. Nessun monitoraggio periodico. Include le funzionalità della versione precedente. Web 0.2.18-test richiesto; aggiornare prima il server."
+            test "$ANDROID_VERSION" = "0.2.14-test"
+            RELEASE_NOTES="Flight Status: fino a otto tratte per prenotazione, gestione Web e Android, verifica individuale e sequenziale. Nessuna modifica ai documenti. Web 0.2.19-test richiesto; aggiornare prima il server."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then
