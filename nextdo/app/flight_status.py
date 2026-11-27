@@ -198,8 +198,22 @@ def select_case(booking,index):
  return tuple(rows[index][k] for k in ("number","date","from","to"))
 
 def register(app,db,load,read_archive,save,template_catalog,web_owner,mobile_owner):
+ from .flight_import import suggest
  lookup=Lookup()
  def attach(prefix,authorize):
+  @app.post(prefix+"/trips/{tid}/bookings/{bid}/flight-suggestions")
+  def suggest_segments(tid:str,bid:str,req:APIRequest,b:dict):
+   owner=authorize(req)
+   if set(b)!={"revision"} or type(b["revision"]) is not int:raise HTTPException(400,"Richiesta non valida")
+   with db() as c:
+    row=load(c,owner,tid)
+    if row["revision"]!=b["revision"]:raise HTTPException(409,"Il viaggio è stato modificato: ricaricare")
+    m,_,files=read_archive(row["archive"])
+    booking=next((x for x in m.get("bookings",[]) if x.get("id")==bid),None)
+   if booking is None:raise HTTPException(404,"Prenotazione non trovata")
+   if not is_flight(booking):raise HTTPException(400,"Prenotazione non aerea")
+   if "flight_segments" in booking:return {"segments":[],"saved":True}
+   return suggest(booking,m["trip"],files,identity(booking))
   @app.post(prefix+"/trips/{tid}/bookings/{bid}/flight-segments")
   def edit_segments(tid:str,bid:str,req:APIRequest,b:dict):
    owner=authorize(req)

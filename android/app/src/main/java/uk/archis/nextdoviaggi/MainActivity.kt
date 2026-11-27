@@ -1456,15 +1456,37 @@ class MainActivity : ComponentActivity() {
         val segments:List<JSONObject?> = if(explicit)saved else listOf(null)
         var opened by remember(t.id,bid){mutableStateOf(false)}
         var editing by remember(t.id,bid,t.revision){mutableStateOf(false)}
+        var suggestions by remember(t.id,bid,t.revision){mutableStateOf<List<JSONObject>>(emptyList())}
+        var suggestionNotice by remember(t.id,bid,t.revision){mutableStateOf("")}
+        var imported by remember(t.id,bid,t.revision){mutableStateOf(false)}
         var requested by remember(t.id,bid){mutableStateOf(-1)}
         var refresh by remember(t.id,bid){mutableStateOf(0)}
         var results by remember(t.id,bid,t.revision){mutableStateOf<Map<Int,JSONObject>>(emptyMap())}
         var loading by remember(t.id,bid){mutableStateOf(false)}
         var problem by remember(t.id,bid){mutableStateOf("")}
         val online=!offline&&session.isNotBlank()&&connection!=null&&!locked
-        Action(if(opened)"Chiudi stato volo" else "Apri prenotazione · Stato volo",!busy){opened=!opened;if(opened){requested=-1;refresh=0}}
+        Action(if(opened)"Chiudi stato volo" else "Apri prenotazione · Stato volo",!busy){opened=!opened;if(opened){requested=-1;refresh=0;imported=false}}
+        LaunchedEffect(opened,online,t.id,bid,t.revision,session){
+            if(!opened||!online||explicit||imported)return@LaunchedEffect
+            val cfg=connection?:return@LaunchedEffect
+            val auth=session
+            val started=epoch
+            loading=true;problem="";suggestionNotice=""
+            try{
+                val data=withContext(Dispatchers.IO){
+                    TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/bookings/"+segment(bid)+"/flight-suggestions",auth,JSONObject().put("revision",t.revision))
+                }
+                if(started!=epoch||locked||session!=auth)return@LaunchedEffect
+                suggestions=data.arr("segments")
+                if(data.optBoolean("pdf_skipped"))suggestionNotice="Alcuni PDF non erano leggibili o superavano il limite di estrazione."
+                else if(suggestions.isEmpty())suggestionNotice="Nessuna tratta riconosciuta con sufficiente precisione."
+                imported=true;editing=true
+            }catch(e:CancellationException){throw e}
+            catch(_:Exception){if(started==epoch&&!locked&&session==auth){suggestionNotice="Importazione automatica non riuscita. Puoi completare le tratte manualmente.";imported=true;editing=true}}
+            finally{loading=false}
+        }
         LaunchedEffect(opened,refresh,online,t.id,bid,t.revision,session,editing){
-            if(!opened||!online||editing)return@LaunchedEffect
+            if(!opened||!online||editing||!explicit)return@LaunchedEffect
             val cfg=connection?:return@LaunchedEffect
             val auth=session
             val started=epoch
@@ -1493,13 +1515,13 @@ class MainActivity : ComponentActivity() {
         if(opened){
             Text("Stato dei voli · Sperimentale",fontWeight=FontWeight.Bold,color=Teal)
             if(!online)Text("Stato non disponibile offline.",color=Muted)
-            if(loading)Text("Consultazione Airportia in corso…",color=Muted)
+            if(loading)Text(if(explicit)"Consultazione Airportia in corso…" else "Rilevamento automatico delle tratte…",color=Muted)
             if(problem.isNotBlank())Text(problem,color=Sand)
             Action("Gestisci tratte",canEdit()&&!busy&&!loading){editing=true}
             for((i,f) in segments.withIndex()){
                 TravelCard(if(f==null)"Stato volo" else f.str("number")+" · "+f.str("from")+" → "+f.str("to"),if(f==null)"" else ItalianDateTime.temporalText(f.str("date"))){
                     if(online)results[i]?.let{FlightResult(it)}?:Text("Stato non ancora consultato",color=Muted)
-                    Action("Controlla volo",online&&!loading&&!busy){requested=i;refresh++}
+                    Action(if(explicit)"Controlla volo" else "Conferma tratte",online&&!loading&&!busy){if(explicit){requested=i;refresh++}else editing=true}
                 }
             }
             if(segments.size>1)Action("Controlla tutti i voli",online&&!loading&&!busy){requested=-1;refresh++}
@@ -1509,12 +1531,15 @@ class MainActivity : ComponentActivity() {
         if(editing&&opened){
             val rows=remember(t.id,bid,t.revision){mutableStateListOf<Map<String,String>>().apply{
                 if(explicit)saved.forEach{f->add(listOf("number","date","from","to").associateWith{f.str(it)})}
+                else if(suggestions.isNotEmpty())suggestions.forEach{f->add(listOf("number","date","from","to").associateWith{f.str(it)})}
                 else add(emptyMap())
             }}
             AlertDialog(onDismissRequest={if(!busy)editing=false},
                 title={Text("Gestisci tratte aeree")},
                 text={Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
-                    Text("Inserisci una tratta per ciascun volo. Data locale di partenza e codici IATA. I PDF restano invariati.",color=Muted)
+                    Text(if(explicit)"Modifica le tratte già salvate." else "NextDo ha cercato automaticamente le tratte nella prenotazione e nei PDF collegati. Conferma o completa i dati rilevati.",color=Muted)
+                    if(!explicit&&suggestionNotice.isNotBlank())Text(suggestionNotice,color=Sand)
+                    Text("Data locale di partenza e codici IATA. I PDF restano invariati.",color=Muted)
                     for(i in rows.indices){
                         Text("Tratta "+(i+1),fontWeight=FontWeight.Bold)
                         for((k,label) in listOf("number" to "Numero volo","from" to "Partenza (IATA)","to" to "Arrivo (IATA)")){

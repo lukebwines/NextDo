@@ -427,7 +427,7 @@ const NextDoPersonal=(()=>{
   const token=generation,revision=trip.revision,base=tripURL()+'/bookings/'+encodeURIComponent(b.id);
   const explicit=Array.isArray(b.flight_segments),segments=explicit?b.flight_segments:[null];
   const cards=el('div'),controls=[],rows=[],buttons=[];
-  let running=false;
+  let running=false,suggestions=[],suggestionNotice='';
   const alive=()=>token===generation&&back.isConnected&&trip?.revision===revision;
   function setBusy(v){running=v;buttons.forEach(x=>x.disabled=v)}
   function show(display,r){
@@ -477,7 +477,7 @@ const NextDoPersonal=(()=>{
     const entry={row,fields};entries.push(entry);
     row.append(btn('Elimina tratta',()=>{if(!saving){entries.splice(entries.indexOf(entry),1);row.remove()}},'small'));editor.append(row);
    };
-   if(explicit)b.flight_segments.forEach(add);else add();
+   if(explicit)b.flight_segments.forEach(add);else if(suggestions.length)suggestions.forEach(add);else add();
    const addBtn=btn('+ Aggiungi tratta',()=>{if(!saving)add()},'small');
    const submit=btn('Salva tratte',async()=>{
     if(saving||!alive())return;
@@ -487,15 +487,16 @@ const NextDoPersonal=(()=>{
      const segments=entries.map(e=>Object.fromEntries(Object.entries(e.fields).map(([k,c])=>[k,c.value.trim()])));
      const result=await api(base+'/flight-segments',{method:'POST',body:JSON.stringify({revision,segments})});
      if(!alive()||!ex.isConnected)return;
-     trip={...trip,...result};ex.remove();back.remove();render(main);msg('Tratte salvate. Riapri la prenotazione.');
+     trip={...trip,...result};ex.remove();back.remove();render(main);msg('Tratte salvate.');
+     const updated=trip.manifest.bookings.find(x=>x.id===b.id);if(updated&&token===generation)flightDetail(updated);
     }catch(e){if(ex.isConnected)report(e)}
     finally{saving=false;submit.disabled=false}
    },'primary');
-   eb.append(paragraph('Inserisci i dati di ogni singolo volo come riportati nella conferma. La data è quella locale dell’aeroporto di partenza. I PDF originali non cambiano.'),editor,addBtn,submit);
+   eb.append(paragraph(explicit?'Modifica le tratte già salvate.':'NextDo ha cercato automaticamente i dati già presenti nella prenotazione e nei PDF collegati. Conferma o completa le informazioni rilevate.'),suggestionNotice?paragraph(suggestionNotice):null,paragraph('La data è quella locale dell’aeroporto di partenza. I PDF originali non cambiano.'),editor,addBtn,submit);
   }
   for(const [i,f] of segments.entries()){
    const display=el('div',{class:'travel-card'},[paragraph('Stato non ancora consultato')]);rows.push(display);
-   const button=btn('Controlla volo',()=>check([i],true),'small');buttons.push(button);
+   const button=btn(explicit?'Controlla volo':'Conferma tratte',()=>explicit?check([i],true):editSegments(),'small');buttons.push(button);
    cards.append(card(f?f.number+' · '+f.from+' → '+f.to:'Stato volo',f?paragraph(dayFmt(f.date)):null,display,button));
   }
   const all=btn('Controlla tutti i voli',()=>check(segments.map((_,i)=>i),true),'primary');buttons.push(all);
@@ -504,7 +505,21 @@ const NextDoPersonal=(()=>{
    toolbar(...bookingDocs(b).map(a=>doc(a.file,a.label)),safeLink(b.source,'Fonte prenotazione')),
    paragraph('Stato dei voli · Sperimentale'),manage,cards,segments.length>1?all:null,safeLink('https://www.airportia.com/','Fonte: Airportia'),
    paragraph('Dati indicativi. Verifica con la compagnia. Nessun controllo in background; le tratte vengono consultate in sequenza soltanto mentre il dettaglio è aperto.'));
-  if(segments.length)check(segments.map((_,i)=>i),false);
+  if(explicit){if(segments.length)check(segments.map((_,i)=>i),false)}
+  else{
+   setBusy(true);rows[0].replaceChildren(paragraph('Rilevamento automatico delle tratte…'));
+   (async()=>{
+    try{
+     const r=await api(base+'/flight-suggestions',{method:'POST',body:JSON.stringify({revision})});
+     if(!alive())return;
+     suggestions=Array.isArray(r.segments)?r.segments:[];
+     if(r.pdf_skipped)suggestionNotice='Alcuni PDF non erano leggibili o superavano il limite di estrazione.';
+     else if(!suggestions.length)suggestionNotice='Nessuna tratta riconosciuta con sufficiente precisione.';
+    }catch(e){if(alive())suggestionNotice='Importazione automatica non riuscita. Puoi completare le tratte manualmente.'}
+    finally{setBusy(false)}
+    if(alive()){rows[0].replaceChildren(paragraph('Conferma le tratte prima di consultare Airportia.'));editSegments()}
+   })();
+  }
  }
  function bookingEdit(b,index){
   const {box,back}=modal('Prenotazione');back.setAttribute('data-personal-modal','');
