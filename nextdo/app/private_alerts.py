@@ -14,7 +14,14 @@ def due_notices(items,now,secret):
   marks=[]
   if item["status"]=="review":marks.append("review")
   if item["priority"]=="urgent":marks.append("urgent")
-  value=item["due_at"]
+  postponed=item.get("snoozed_until")
+  if postponed:
+   try:
+    seconds=datetime.fromisoformat(postponed).replace(tzinfo=TZ).timestamp()-now.timestamp()
+    if seconds>0:continue
+    marks=["snooze"] if seconds>=-86400 else []
+   except (ValueError,TypeError,OverflowError):pass
+  value=None if postponed else item["due_at"]
   if value:
    try:
     due=datetime.fromisoformat(value)
@@ -27,6 +34,23 @@ def due_notices(items,now,secret):
    except (ValueError,TypeError,OverflowError):pass
   for mark in marks:out.append({"key":hashlib.sha256((secret+":"+revision+":"+mark).encode()).hexdigest()})
  return out[:500]
+
+def upcoming_notices(items,now,secret,expires):
+ result=[]
+ for item in items:
+  if item["status"]=="done":continue
+  value=item.get("snoozed_until") or item.get("due_at")
+  if not value:continue
+  try:
+   due=datetime.fromisoformat(value)
+   if len(value)==10:due=due.replace(hour=9)
+   stamp=int(due.replace(tzinfo=TZ).timestamp())
+   if not now.timestamp()<stamp<=expires:continue
+   mark="snooze" if item.get("snoozed_until") else "due"
+   revision=json.dumps(item,sort_keys=True,ensure_ascii=False)
+   result.append({"key":hashlib.sha256((secret+":"+revision+":"+mark).encode()).hexdigest(),"at":stamp})
+  except (ValueError,TypeError,OverflowError):pass
+ return sorted(result,key=lambda x:x["at"])[:500]
 
 def register(app,db,conn,auth,active,token,digest,raw_token):
  @app.post("/api/mobile/v1/private-alerts/enable")
@@ -42,7 +66,7 @@ def register(app,db,conn,auth,active,token,digest,raw_token):
   with db() as c:c.execute("DELETE FROM private_alert_tokens WHERE device_id=?",(dev["id"],))
   return {"ok":True}
  @app.get("/api/mobile/v1/private-alerts")
- def alerts(req:Request):
+ def alerts(req:Request,upcoming:bool=False):
   h=req.headers.get("authorization","")
   if not h.startswith("Bearer "):raise HTTPException(401,"Credenziale avvisi richiesta")
   key=raw_token(h[7:])
@@ -51,4 +75,7 @@ def register(app,db,conn,auth,active,token,digest,raw_token):
   if not dev:raise HTTPException(401,"Credenziale avvisi scaduta o revocata")
   active(dev["owner"])
   with conn() as c:items=private_items.list_items(c,private_items.owner_id(c,dev["owner"]))
-  return {"items":due_notices(items,datetime.now(TZ),key)}
+  now=datetime.now(TZ)
+  out={"items":due_notices(items,now,key)}
+  if upcoming:out["upcoming"]=upcoming_notices(items,now,key,dev["expires"])
+  return out

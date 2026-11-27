@@ -2,6 +2,7 @@
 const NextDoPersonal=(()=>{
  let generation=0,timer=null,keepAliveTimer=null,main=null,trip=null,selected='',tab='panoramica',busy=false,section='home',templates=[],focusBooking='',unlocked=false,lastActivity=0;
  const path='/personal';
+ let pendingReminderLink=new URLSearchParams(location.search).get('nextdo')==='reminders';
  const clone=x=>JSON.parse(JSON.stringify(x));
  const uid=()=>crypto.getRandomValues(new Uint32Array(2)).join('-');
  const card=(title,...children)=>el('section',{class:'card travel-card'},[node('h2','',title),...children]);
@@ -61,7 +62,7 @@ const NextDoPersonal=(()=>{
     const f=el('form',{},[paragraph(status.configured?'Inserisci il PIN personale per accedere.':'Crea un PIN personale da 4 a 12 cifre. Potrai modificarlo in Sicurezza e accesso.'),field('PIN (4–12 cifre)',pin),...(status.configured?[]:[field('Conferma PIN',confirmPin)]),el('button',{class:'btn primary',type:'submit',text:status.configured?'Sblocca':'Imposta PIN'})]);
     f.addEventListener('submit',async e=>{e.preventDefault();try{await api(path+'/unlock',{method:'POST',body:JSON.stringify({pin:pin.value,confirm:confirmPin.value})});if(token===generation)render(main)}catch(e){report(e)}});root.replaceChildren(card('Area personale protetta',f));return;
    }
-   unlocked=true;resetTimer();await overview(root,token);
+   unlocked=true;if(pendingReminderLink){section='task';pendingReminderLink=false}resetTimer();await overview(root,token);
   }catch(e){if(token===generation)root.replaceChildren(paragraph(e.message))}
  }
  async function overview(root,token){
@@ -74,7 +75,7 @@ const NextDoPersonal=(()=>{
   const openTrips=()=>{section='trips';render(main)};
   let items=null;try{items=(await api(path+'/items')).items}catch(e){if(token===generation)msg('Agenda personale non disponibile',true)}
   if(token!==generation||!root.isConnected)return;
-  const kinds=[['task','Attività','note'],['deadline','Scadenze','bell'],['appointment','Appuntamenti','calendar']];
+  const kinds=[['task','Attività e promemoria','note'],['deadline','Scadenze','bell'],['appointment','Appuntamenti','calendar']];
   const hubCard=(title,subtitle,icon,action)=>{const head=el('div',{class:'personal-hub-card-head'},[
    el('span',{class:'personal-hub-icon'},[ico(icon)]),
    el('div',{class:'personal-hub-copy'},[node('h2','',title),node('p','sub',subtitle)]),
@@ -133,7 +134,14 @@ const NextDoPersonal=(()=>{
     msg('PIN aggiornato correttamente');
    }catch(e){report(e)}
   });
-  securityPanel.append(node('h2','','Sicurezza e accesso'),pinForm);
+  securityPanel.append(node('h2','','Sicurezza e accesso'),pinForm,btn('Campanella Home Assistant',async()=>{
+   const {box,back}=modal('Campanella Home Assistant');back.setAttribute('data-personal-modal','');
+   const state=el('div'),credential=el('textarea',{class:'field',rows:'3',readonly:true});credential.hidden=true;
+   box.append(paragraph('Condivide solo la presenza di un avviso, senza dati personali. La credenziale è revocabile.'),state,credential);
+   try{const x=await api(path+'/ha-indicator/settings');if(!back.isConnected)return;state.textContent=x.enabled?'Indicatore attivo':'Indicatore disattivato'}catch(e){report(e)}
+   async function configure(action){if(busy||token!==generation||!confirm(action==='generate'?'Generare una nuova credenziale? La precedente verrà revocata.':'Disattivare la campanella?'))return;busy=true;try{const x=await api(path+'/ha-indicator/settings',{method:'POST',body:JSON.stringify({action})});if(!back.isConnected)return;state.textContent=x.enabled?'Indicatore attivo':'Indicatore disattivato';credential.value=x.credential?'Bearer '+x.credential:'';credential.hidden=!x.credential;if(x.credential)credential.select()}catch(e){report(e)}finally{busy=false}}
+   box.append(toolbar(btn('Genera credenziale',()=>configure('generate'),'primary'),btn('Disattiva',()=>configure('revoke'),'small')),paragraph('Conserva la credenziale in secrets.yaml di Home Assistant; non inserirla nella card.'));
+  },'small'));
   const securitySettings=el('details',{class:'personal-appearance-details'},[node('summary','','Sicurezza e accesso'),securityPanel]);
   const agenda=el('section',{class:'personal-agenda'});
   function editItem(kind,item={}){
@@ -143,13 +151,18 @@ const NextDoPersonal=(()=>{
    const type=select('kind',kinds.map(([k,l])=>[k,l]),item.kind||kind);
    const status=select('status',[['review','Da verificare'],['todo',item.status==='review'?'Conferma · Da fare':'Da fare'],['done',item.status==='review'?'Conferma e completa':'Completato']],item.status||'todo');
    const priority=select('priority',[['low','Bassa'],['normal','Normale'],['high','Alta'],['urgent','Urgente']],item.priority||'normal');
+   const repeat=select('recurrence',[['none','Mai'],['daily','Ogni giorno'],['weekly','Ogni settimana'],['monthly','Ogni mese'],['yearly','Ogni anno']],item.recurrence||'none');
    const commit=btn('Salva',async()=>{if(busy||token!==generation)return;if(item.status==='review'&&status.value==='done'&&!confirm('Confermare e completare questo impegno?'))return;busy=true;try{
     const due=day.value?(day.value+(clock.value?'T'+clock.value+':00':'')):null;
     if(clock.value&&!day.value)throw Error('Inserisci anche la data');
-    await api(path+'/items'+(item.id?'/'+item.id:''),{method:'POST',body:JSON.stringify({title:title.value,description:desc.value,kind:type.value,due_at:due,status:status.value,priority:priority.value})});
+    await api(path+'/items'+(item.id?'/'+item.id:''),{method:'POST',body:JSON.stringify({title:title.value,description:desc.value,kind:type.value,due_at:due,status:status.value,priority:priority.value,recurrence:type.value==='task'&&due?repeat.value:'none',expected_due:item.due_at??null})});
     back.remove();if(token===generation){section=type.value;render(main)}
    }catch(e){if(token===generation)report(e)}finally{busy=false}},'primary');
-   box.append(field('Titolo',title),field('Tipo',type),field('Data',day),field('Ora (facoltativa)',clock),field('Stato',status),field('Priorità',priority),field('Descrizione / email originale',desc),toolbar(commit,btn('Annulla',()=>back.remove(),'small')));
+   box.append(field('Titolo',title),field('Tipo',type),field('Data',day),field('Ora (facoltativa)',clock),field('Ripetizione (solo attività con data)',repeat),field('Stato',status),field('Priorità',priority),field('Descrizione / email originale',desc),toolbar(commit,btn('Annulla',()=>back.remove(),'small')));
+   if(item.id&&item.kind==='task'&&item.status!=='done'){
+    const postpone=async minutes=>{if(busy||token!==generation)return;busy=true;try{await api(path+'/items/'+item.id+'/snooze',{method:'POST',body:JSON.stringify({minutes})});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}};
+    box.append(card('Rinvia promemoria',paragraph(item.snoozed_until?'Rinviato fino al '+fmt(item.snoozed_until):'Non cambia la data originaria.'),toolbar(...[[10,'10 min'],[30,'30 min'],[60,'1 ora'],[1440,'24 ore'],[0,'Annulla rinvio']].map(([n,l])=>btn(l,()=>postpone(n),'small')))));
+   }
    if(item.status==='review')box.append(toolbar(btn('Conferma',()=>{status.value='todo';commit.click()},'small'),btn('Conferma e completa',()=>{status.value='done';commit.click()},'primary')));
    if(item.id)box.append(btn('Sposta in Professionale',async()=>{if(busy||!confirm('Spostare nell’area Professionale? Titolo e descrizione saranno gestiti come dati professionali.'))return;busy=true;try{await api(path+'/transfers',{method:'POST',body:JSON.stringify({action:'to_work',id:item.id,confirm:true})});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}},'small'));
    if(item.id)box.append(btn('Elimina',async()=>{if(busy||!confirm('Eliminare questo impegno personale?'))return;busy=true;try{await api(path+'/items/'+item.id,{method:'DELETE'});back.remove();if(token===generation)render(main)}catch(e){report(e)}finally{busy=false}},'small'));
@@ -186,7 +199,7 @@ const NextDoPersonal=(()=>{
     for(const x of rows){
      const statusLabel={review:'Da verificare',todo:'Da fare',done:'Completato'}[x.status];
      agenda.append(el('button',{class:'personal-item-row',type:'button',onclick:()=>editItem(section,x)},[
-       el('div',{},[node('strong','',x.title),node('p','sub',[x.due_at?fmt(x.due_at):'Senza data',statusLabel,x.priority==='urgent'?'Urgente':''].filter(Boolean).join(' · '))]),ico('chevron')]));
+       el('div',{},[node('strong','',x.title),node('p','sub',[x.due_at?fmt(x.due_at):'Senza data',statusLabel,x.recurrence&&x.recurrence!=='none'?'Ricorrente':'',x.snoozed_until?'Rinviato: '+fmt(x.snoozed_until):'',x.priority==='urgent'?'Urgente':''].filter(Boolean).join(' · '))]),ico('chevron')]));
     }
    }
    shell.append(hero,agenda);

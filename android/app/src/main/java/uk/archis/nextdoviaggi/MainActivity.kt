@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
     private var privateSection by mutableStateOf("")
     private var privateProblem by mutableStateOf("")
     private var privateAlertsEnabled by mutableStateOf(false)
+    private var openPersonalNotice by mutableStateOf(false)
     private fun togglePrivateAlerts(){
         val cfg=connection
         val s=session
@@ -93,7 +94,7 @@ class MainActivity : ComponentActivity() {
         val cfg=connection?:return
         val s=session
         if(locked||s.isBlank())return
-        task({TravelApi(cfg.getString("url")).obj("/items",s).arr("items")}){privateAgenda=it;privateProblem=""}
+        task({TravelApi(cfg.getString("url")).obj("/items",s).arr("items")}){privateAgenda=it;privateProblem="";PrivateAlerts.kick(this)}
     }
     private fun savePrivateItem(id:String,body:JSONObject){
         val cfg=connection?:return
@@ -103,7 +104,17 @@ class MainActivity : ComponentActivity() {
             val api=TravelApi(cfg.getString("url"))
             api.obj("/items"+if(id.isBlank())"" else "/"+segment(id),s,body)
             api.obj("/items",s).arr("items")
-        }){privateAgenda=it;privateProblem=""}
+        }){privateAgenda=it;privateProblem="";PrivateAlerts.kick(this)}
+    }
+    private fun snoozePrivateItem(id:String,minutes:Int){
+        val cfg=connection?:return
+        val s=session
+        if(locked||s.isBlank()||id.isBlank())return
+        task({
+            val api=TravelApi(cfg.getString("url"))
+            api.obj("/items/"+segment(id)+"/snooze",s,JSONObject().put("minutes",minutes))
+            api.obj("/items",s).arr("items")
+        }){privateAgenda=it;privateProblem="";PrivateAlerts.kick(this)}
     }
     private fun deletePrivateItem(id:String){
         val cfg=connection?:return
@@ -113,7 +124,7 @@ class MainActivity : ComponentActivity() {
             val api=TravelApi(cfg.getString("url"))
             api.obj("/items/"+segment(id)+"/delete",s,JSONObject())
             api.obj("/items",s).arr("items")
-        }){privateAgenda=it;privateProblem=""}
+        }){privateAgenda=it;privateProblem="";PrivateAlerts.kick(this)}
     }
     private var appearancePhoto by mutableStateOf<Uri?>(null)
     private var appearancePhotoOwner=""
@@ -323,6 +334,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openPersonalNotice=intent.getBooleanExtra("personal_notice",false)
         java.io.File(cacheDir,"receipt-capture").deleteRecursively()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -347,6 +359,10 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = Navy) { App() }
             }
         }
+    }
+    override fun onNewIntent(intent:Intent){
+        super.onNewIntent(intent)
+        if(intent.getBooleanExtra("personal_notice",false))openPersonalNotice=true
     }
     override fun onResume() {
         super.onResume()
@@ -821,6 +837,11 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(locked,foreground,session,current?.id){
             if(!locked&&foreground&&session.isNotBlank()&&pendingExpenses.isNotEmpty())current?.let{syncExpenseQueue(it)}
         }
+        LaunchedEffect(locked,busy,openPersonalNotice){
+            if(!locked&&!busy&&openPersonalNotice){
+                openArea(NextDoArea.PERSONAL);openPersonalNotice=false
+            }
+        }
         LaunchedEffect(locked,area,session){
             if(!locked&&area==NextDoArea.PERSONAL&&session.isNotBlank()){
                 val cfg=connection
@@ -932,7 +953,7 @@ class MainActivity : ComponentActivity() {
                             appearancePhoto!=null&&connection?.let{timelineOwner(it)==appearancePhotoOwner}==true,
                             {savePersonalAppearance(it)},{chooseAppearancePhoto()},{uploadAppearancePhoto()},
                             privateAgenda,{privateSection=it},privateAlertsEnabled,{togglePrivateAlerts()}, {connection?.str("url")?.takeIf{it.isNotBlank()}?.let{launchExternal(it)}}){openArea(NextDoArea.TRIPS)}
-                        else PrivateAgendaScreen(privateSection,privateAgenda,personalAppearance,session.isNotBlank()&&!busy,privateProblem,{privateSection=""},{refreshPrivateAgenda()},{id,body->savePrivateItem(id,body)},{id->deletePrivateItem(id)})
+                        else PrivateAgendaScreen(privateSection,privateAgenda,personalAppearance,session.isNotBlank()&&!busy,privateProblem,{privateSection=""},{refreshPrivateAgenda()},{id,body->savePrivateItem(id,body)},{id->deletePrivateItem(id)},{id,minutes->snoozePrivateItem(id,minutes)})
                     }
                     area==NextDoArea.SETTINGS -> SettingsLanding()
                     else -> NextDoDashboard(!busy,session.isNotBlank(),offlineMeta!=null,workAgenda,workConnection!=null,workBusy,workError,{filter->openArea(NextDoArea.WORK);workFilter=filter},{id->loadWorkDetail(id)},{refreshWork()}){openArea(it)}

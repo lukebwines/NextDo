@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.11-test:'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Publish Android 0.2.12-test:'))
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$ANDROID_VERSION" = "0.2.11-test"
-            RELEASE_NOTES="Budget Viaggi, spese multivaluta, conversioni indicative BCE, ricevute PDF e foto, inserimento rapido, coda cifrata per nuove spese offline e sincronizzazione antiduplicazione. Richiede NextDo Web 0.2.16-test per le nuove azioni. Aggiornare il server prima dell’APK e non disinstallare. Collaudo Samsung necessario; modifiche e ricevute offline non supportate."
+            test "$ANDROID_VERSION" = "0.2.12-test"
+            RELEASE_NOTES="Attività e promemoria personali ricorrenti, rinvio, completamento rapido dopo sblocco, avvisi locali offline indicativi e campanella Home Assistant opzionale. Richiede NextDo Web 0.2.17-test. Aggiornare prima il server; collaudo Samsung richiesto."
           fi
           tag="android-v$ANDROID_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then
