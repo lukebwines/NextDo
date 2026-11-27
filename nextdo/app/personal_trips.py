@@ -193,6 +193,9 @@ BOOKING_TEMPLATES=[
   "fields": [
    "Compagnia",
    "Numero volo",
+   "Data partenza",
+   "Aeroporto partenza (IATA)",
+   "Aeroporto arrivo (IATA)",
    "Terminal",
    "Check-in"
   ],
