@@ -186,6 +186,9 @@ def register(app,db,load,read_archive,web_owner,mobile_owner):
    case=identity(booking)
    if not case:return {"state":"Dati volo da completare","source":None,"needs_identity":True}
    if set(b)-{"force"} or type(b.get("force",False)) is not bool:raise HTTPException(400,"Richiesta non valida")
+   # Avoid remote requests well outside the advertised -7 days / tomorrow window.
+   offset=(date.fromisoformat(case[1])-datetime.now(UTC).date()).days
+   if offset>2 or offset< -8:return {"state":"Stato non disponibile per questa data","source":None}
    return lookup.check(owner,case,b.get("force",False))
  attach("/api/personal",web_owner)
  attach("/api/mobile/v1",mobile_owner)

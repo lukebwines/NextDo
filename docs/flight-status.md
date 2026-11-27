@@ -6,3 +6,5 @@
 - Web e APK consultano il medesimo endpoint logico con sessione privata valida e CSRF Web. Offline non mostra dati come aggiornati.
 - Fonti: https://www.airportia.com/about/ai/ e https://www.airportia.com/about/ . MCP gratuito per consultazioni personali, vietato utilizzo massivo/automatizzato sistematico, nessuna garanzia sui dati; prima di attivare l'integrazione pubblicamente o oltre l'uso personale interattivo, confermare i diritti con il fornitore. Nessuna raccolta periodica prevista. Confermare sempre con compagnia/aeroporto.
 - Sviluppo separato in PR sperimentale; test automatici con dati sintetici, nessuna chiamata Airportia in CI. Verifica fisica Web/APK e condizioni di utilizzo prima del rilascio.
+
+Versione candidata: Web 0.2.18-test, APK 0.2.13-test. Connettore MCP ufficiale previsto per consultazioni personali interattive; nessuna interrogazione periodica. Non si presume autorizzato un uso sistematico, massivo o commerciale. Verificare i termini prima dell'uso, e confermare la compatibilità sul dispositivo reale.
