@@ -47,3 +47,17 @@ def test_cache_no_repeat(monkeypatch):
  assert not lookup.check("synthetic-owner",CASE)["cached"]
  assert lookup.check("synthetic-owner",CASE)["cached"]
  assert lookup.check("synthetic-owner",CASE,True)["cached"]
+
+
+def test_multiple_segments_are_explicit_and_distinct():
+ from app.flight_status import segment_cases,select_case
+ from fastapi import HTTPException
+ import pytest
+ rows=[{"number":"xy 123","date":"03/01/2027","from":"aaa","to":"bbb"},{"number":"XY124","date":"2027-01-04","from":"BBB","to":"CCC"}]
+ normalized=segment_cases(rows)
+ assert select_case({"flight_segments":normalized},0)==CASE
+ assert select_case({"flight_segments":normalized},1)==("XY124","2027-01-04","BBB","CCC")
+ with pytest.raises(HTTPException):segment_cases([rows[0],rows[0]])
+ with pytest.raises(HTTPException):select_case({"flight_segments":normalized},None)
+ with pytest.raises(HTTPException):select_case({"flight_segments":[]},0)
+ with pytest.raises(HTTPException):segment_cases([dict(rows[0],date="tomorrow")])

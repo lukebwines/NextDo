@@ -1430,56 +1430,115 @@ class MainActivity : ComponentActivity() {
         if(b.arr("locations").isNotEmpty())b.arr("locations").forEach{Location(it)}
         else MapActions(b)
     }
+    @Composable private fun FlightResult(r:JSONObject) {
+        Text(r.str("state"),fontWeight=FontWeight.SemiBold,color=White)
+        if(r.str("arrival_state").isNotBlank())Text(r.str("arrival_state"),color=White)
+        if(r.optBoolean("needs_identity"))Text("Aggiungi le singole tratte tramite Gestisci tratte.",color=Sand)
+        for((label,k) in listOf("Partenza" to "departure","Arrivo" to "arrival")){
+            val x=r.optJSONObject(k)?:continue
+            val times=listOf("Programmato" to "scheduled","Stimato" to "estimated","Effettivo" to "actual").mapNotNull{(l,key)->
+                x.str(key).takeIf{it.length>=16}?.let{l+" "+it.substring(8,10)+"/"+it.substring(5,7)+"/"+it.substring(0,4)+" "+it.substring(11,16)}
+            }
+            if(times.isNotEmpty())Text(label+" · "+times.joinToString(" · "),color=Muted,fontSize=13.sp)
+            val gate=listOf(x.str("terminal").takeIf{it.isNotBlank()}?.let{"Terminal "+it},x.str("gate").takeIf{it.isNotBlank()}?.let{"Gate "+it}).filterNotNull()
+            if(gate.isNotEmpty())Text(gate.joinToString(" · "),color=Muted,fontSize=13.sp)
+        }
+        val at=r.str("checked_at")
+        if(at.isNotBlank()){
+            val formatted=runCatching{java.time.OffsetDateTime.parse(at).atZoneSameInstant(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))}.getOrDefault(at)
+            Text("Consultato "+formatted+if(r.optBoolean("cached"))" · Cache" else "",color=Muted,fontSize=12.sp)
+        }
+    }
     @Composable private fun FlightStatusCard(t:TripPackage,b:JSONObject) {
-        var opened by remember(t.id,b.str("id")){mutableStateOf(false)}
-        var refresh by remember(t.id,b.str("id")){mutableStateOf(0)}
-        var result by remember(t.id,b.str("id"),t.revision){mutableStateOf<JSONObject?>(null)}
-        var loading by remember(t.id,b.str("id")){mutableStateOf(false)}
-        var problem by remember(t.id,b.str("id")){mutableStateOf("")}
+        val bid=b.str("id")
+        val explicit=b.has("flight_segments")
+        val saved=b.arr("flight_segments")
+        val segments:List<JSONObject?> = if(explicit)saved else listOf(null)
+        var opened by remember(t.id,bid){mutableStateOf(false)}
+        var editing by remember(t.id,bid,t.revision){mutableStateOf(false)}
+        var requested by remember(t.id,bid){mutableStateOf(-1)}
+        var refresh by remember(t.id,bid){mutableStateOf(0)}
+        var results by remember(t.id,bid,t.revision){mutableStateOf<Map<Int,JSONObject>>(emptyMap())}
+        var loading by remember(t.id,bid){mutableStateOf(false)}
+        var problem by remember(t.id,bid){mutableStateOf("")}
         val online=!offline&&session.isNotBlank()&&connection!=null&&!locked
-        Action(if(opened)"Chiudi stato volo" else "Apri prenotazione · Stato volo",!busy){opened=!opened}
-        LaunchedEffect(opened,refresh,online,t.id,b.str("id"),t.revision,session){
-            if(!opened||!online)return@LaunchedEffect
+        Action(if(opened)"Chiudi stato volo" else "Apri prenotazione · Stato volo",!busy){opened=!opened;if(opened){requested=-1;refresh=0}}
+        LaunchedEffect(opened,refresh,online,t.id,bid,t.revision,session,editing){
+            if(!opened||!online||editing)return@LaunchedEffect
             val cfg=connection?:return@LaunchedEffect
-            val s=session
+            val auth=session
             val started=epoch
-            loading=true;problem="";result=null
+            loading=true;problem=""
             try{
-                val data=withContext(Dispatchers.IO){
-                    TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/bookings/"+segment(b.str("id"))+"/flight-status",s,JSONObject().put("force",refresh>0))
+                val indices=if(requested>=0)listOf(requested) else segments.indices.toList()
+                var delayNext=false
+                for(i in indices){
+                    if(i !in segments.indices||started!=epoch||locked||session!=auth)break
+                    if(delayNext)kotlinx.coroutines.delay(10000L)
+                    if(started!=epoch||locked||session!=auth)break
+                    val payload=JSONObject().put("force",refresh>0)
+                    if(explicit)payload.put("segment",i).put("revision",t.revision)
+                    val data=withContext(Dispatchers.IO){
+                        TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/bookings/"+segment(bid)+"/flight-status",auth,payload)
+                    }
+                    if(started!=epoch||locked||session!=auth)break
+                    results=results+(i to data)
+                    delayNext=data.str("checked_at").isNotBlank()&&!data.optBoolean("cached")
+                    if(data.str("state") in setOf("Servizio temporaneamente non disponibile","Attendere prima di un nuovo controllo"))break
                 }
-                if(started==epoch&&!locked&&session==s)result=data
             }catch(e:CancellationException){throw e}
-            catch(_:Exception){if(started==epoch)problem="Verifica non riuscita. Consulta la compagnia."}
+            catch(_:Exception){if(started==epoch)problem="Verifica non riuscita. Ricarica le tratte o consulta la compagnia."}
             finally{loading=false}
         }
         if(opened){
-            Text("Stato volo · Sperimentale",fontWeight=FontWeight.Bold,color=Teal)
+            Text("Stato dei voli · Sperimentale",fontWeight=FontWeight.Bold,color=Teal)
             if(!online)Text("Stato non disponibile offline.",color=Muted)
-            else if(loading)Text("Consultazione Airportia in corso…",color=Muted)
-            else if(problem.isNotBlank())Text(problem,color=Sand)
-            else result?.let{r->
-                Text(r.str("state"),fontWeight=FontWeight.SemiBold,color=White)
-                if(r.str("arrival_state").isNotBlank())Text(r.str("arrival_state"),color=White)
-                if(r.optBoolean("needs_identity"))Text("Completa Numero volo, Data partenza (AAAA-MM-GG), Aeroporto partenza (IATA), Aeroporto arrivo (IATA). Una sola tratta per prenotazione.",color=Sand)
-                for((label,k) in listOf("Partenza" to "departure","Arrivo" to "arrival")){
-                    val x=r.optJSONObject(k)?:continue
-                    val times=listOf("Programmato" to "scheduled","Stimato" to "estimated","Effettivo" to "actual").mapNotNull{(l,key)->
-                        x.str(key).takeIf{it.length>=16}?.let{l+" "+it.substring(8,10)+"/"+it.substring(5,7)+"/"+it.substring(0,4)+" "+it.substring(11,16)}
-                    }
-                    if(times.isNotEmpty())Text(label+" · "+times.joinToString(" · "),color=Muted,fontSize=13.sp)
-                    val gate=listOf(x.str("terminal").takeIf{it.isNotBlank()}?.let{"Terminal "+it},x.str("gate").takeIf{it.isNotBlank()}?.let{"Gate "+it}).filterNotNull()
-                    if(gate.isNotEmpty())Text(gate.joinToString(" · "),color=Muted,fontSize=13.sp)
-                }
-                val at=r.str("checked_at")
-                if(at.isNotBlank()){
-                    val formatted=runCatching{java.time.OffsetDateTime.parse(at).atZoneSameInstant(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))}.getOrDefault(at)
-                    Text("Consultato "+formatted+if(r.optBoolean("cached"))" · Cache" else "",color=Muted,fontSize=12.sp)
+            if(loading)Text("Consultazione Airportia in corso…",color=Muted)
+            if(problem.isNotBlank())Text(problem,color=Sand)
+            Action("Gestisci tratte",canEdit()&&!busy&&!loading){editing=true}
+            for((i,f) in segments.withIndex()){
+                TravelCard(if(f==null)"Stato volo" else f.str("number")+" · "+f.str("from")+" → "+f.str("to"),if(f==null)"" else ItalianDateTime.temporalText(f.str("date"))){
+                    if(online)results[i]?.let{FlightResult(it)}?:Text("Stato non ancora consultato",color=Muted)
+                    Action("Controlla volo",online&&!loading&&!busy){requested=i;refresh++}
                 }
             }
-            Action("Controlla volo",online&&!loading&&!busy){refresh++}
+            if(segments.size>1)Action("Controlla tutti i voli",online&&!loading&&!busy){requested=-1;refresh++}
             TextButton(onClick={launchExternal("https://www.airportia.com/")}){Text("Fonte: Airportia")}
-            Text("Dato indicativo: verifica con la compagnia o l’aeroporto. Nessun controllo in background.",color=Muted,fontSize=12.sp)
+            Text("Dati indicativi. Verifica con la compagnia. Nessun controllo in background.",color=Muted,fontSize=12.sp)
+        }
+        if(editing&&opened){
+            val rows=remember(t.id,bid,t.revision){mutableStateListOf<Map<String,String>>().apply{
+                if(explicit)saved.forEach{f->add(listOf("number","date","from","to").associateWith{f.str(it)})}
+                else add(emptyMap())
+            }}
+            AlertDialog(onDismissRequest={if(!busy)editing=false},
+                title={Text("Gestisci tratte aeree")},
+                text={Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                    Text("Inserisci una tratta per ciascun volo. Data locale di partenza e codici IATA. I PDF restano invariati.",color=Muted)
+                    for(i in rows.indices){
+                        Text("Tratta "+(i+1),fontWeight=FontWeight.Bold)
+                        for((k,label) in listOf("number" to "Numero volo","from" to "Partenza (IATA)","to" to "Arrivo (IATA)")){
+                            OutlinedTextField(rows[i][k].orEmpty(),{v->rows[i]=rows[i]+(k to v.uppercase(java.util.Locale.ROOT))},label={Text(label)},singleLine=true,enabled=!busy,modifier=Modifier.fillMaxWidth())
+                        }
+                        DateField("Data locale di partenza",rows[i]["date"].orEmpty(),{v->rows[i]=rows[i]+("date" to v)},enabled=!busy)
+                        TextButton(onClick={rows.removeAt(i)},enabled=!busy){Text("Elimina tratta")}
+                        HorizontalDivider()
+                    }
+                    Action("+ Aggiungi tratta",rows.size<8&&!busy){rows.add(emptyMap())}
+                }},
+                confirmButton={TextButton(onClick={
+                    val cfg=connection?:return@TextButton
+                    val auth=session
+                    if(!canEdit()||busy||current?.revision!=t.revision)return@TextButton
+                    val array=JSONArray()
+                    rows.forEach{row->val f=JSONObject();listOf("number","date","from","to").forEach{k->f.put(k,row[k].orEmpty().trim())};array.put(f)}
+                    task({
+                        val payload=JSONObject().put("revision",t.revision).put("segments",array)
+                        val r=TravelApi(cfg.str("url")).obj("/trips/"+segment(t.id)+"/bookings/"+segment(bid)+"/flight-segments",auth,payload)
+                        TripPackage(r.getJSONObject("manifest"),r.getJSONObject("state"),emptyMap(),r.getInt("revision"),templates=bookingCatalog(r.optJSONArray("templates")))
+                    }){current=it;editing=false;requested=-1;refresh=0}
+                },enabled=!busy){Text("Salva tratte")}},
+                dismissButton={TextButton(onClick={editing=false},enabled=!busy){Text("Annulla")}})
         }
     }
     @Composable private fun BookingScreen(t:TripPackage) {

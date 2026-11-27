@@ -424,34 +424,87 @@ const NextDoPersonal=(()=>{
  }
  function flightDetail(b){
   const {box,back}=modal(b.title||'Prenotazione volo');back.setAttribute('data-personal-modal','');
-  const token=generation,target=tripURL()+'/bookings/'+encodeURIComponent(b.id)+'/flight-status';
-  const display=el('div',{class:'travel-card'}),button=btn('Controlla volo',()=>check(true),'primary');
+  const token=generation,revision=trip.revision,base=tripURL()+'/bookings/'+encodeURIComponent(b.id);
+  const explicit=Array.isArray(b.flight_segments),segments=explicit?b.flight_segments:[null];
+  const cards=el('div'),controls=[],rows=[],buttons=[];
   let running=false;
-  async function check(force){
-   if(running||!back.isConnected||token!==generation)return;
-   running=true;button.disabled=true;display.replaceChildren(paragraph('Consultazione Airportia in corso…'));
-   try{
-    const r=await api(target,{method:'POST',body:JSON.stringify({force})});
-    if(!back.isConnected||token!==generation)return;
-    const items=[node('strong','',r.state||'Stato non disponibile')];
-    if(r.arrival_state)items.push(paragraph(r.arrival_state));
-    if(r.needs_identity)items.push(paragraph('Completa i campi specifici: Numero volo, Data partenza (AAAA-MM-GG), Aeroporto partenza (IATA), Aeroporto arrivo (IATA). Oppure usa i codici dei luoghi di partenza e arrivo già salvati. Una sola tratta per prenotazione.'));
-    for(const [label,k] of [['Partenza','departure'],['Arrivo','arrival']]){
-     const x=r[k];if(!x)continue;
-     const fmt=s=>typeof s==='string'&&s.length>=16?s.slice(0,10).split('-').reverse().join('/')+' '+s.slice(11,16):'';
-     items.push(paragraph(label+' · '+[['Programmato',x.scheduled],['Stimato',x.estimated],['Effettivo',x.actual]].filter(([,v])=>v).map(([l,v])=>l+' '+fmt(v)).join(' · ')));
-     if(x.terminal||x.gate)items.push(paragraph([x.terminal?'Terminal '+x.terminal:'',x.gate?'Gate '+x.gate:''].filter(Boolean).join(' · ')));
-    }
-    if(r.checked_at)items.push(paragraph('Consultato '+new Date(r.checked_at).toLocaleString('it-IT')+(r.cached?' · Risultato in cache':'')));
-    display.replaceChildren(...items);
-   }catch(e){if(token===generation&&back.isConnected)display.replaceChildren(paragraph('Verifica non riuscita. Riprova o consulta la compagnia.'))}
-   finally{running=false;if(back.isConnected)button.disabled=false}
+  const alive=()=>token===generation&&back.isConnected&&trip?.revision===revision;
+  function setBusy(v){running=v;buttons.forEach(x=>x.disabled=v)}
+  function show(display,r){
+   const items=[node('strong','',r.state||'Stato non disponibile')];
+   if(r.arrival_state)items.push(paragraph(r.arrival_state));
+   if(r.needs_identity)items.push(paragraph('Aggiungi le singole tratte tramite Gestisci tratte.'));
+   for(const [label,k] of [['Partenza','departure'],['Arrivo','arrival']]){
+    const x=r[k];if(!x)continue;
+    const fmt=v=>typeof v==='string'&&v.length>=16?v.slice(0,10).split('-').reverse().join('/')+' '+v.slice(11,16):'';
+    const times=[['Programmato',x.scheduled],['Stimato',x.estimated],['Effettivo',x.actual]].filter(([,v])=>v).map(([l,v])=>l+' '+fmt(v));
+    if(times.length)items.push(paragraph(label+' · '+times.join(' · ')));
+    if(x.terminal||x.gate)items.push(paragraph([x.terminal?'Terminal '+x.terminal:'',x.gate?'Gate '+x.gate:''].filter(Boolean).join(' · ')));
+   }
+   if(r.checked_at)items.push(paragraph('Consultato '+new Date(r.checked_at).toLocaleString('it-IT')+(r.cached?' · Risultato in cache':'')));
+   display.replaceChildren(...items);
   }
+  async function check(indices,force){
+   if(running||!alive())return;
+   setBusy(true);
+   try{
+    let nextAt=0;
+    for(const i of indices){
+     if(!alive())break;
+     if(Date.now()<nextAt)await new Promise(resolve=>setTimeout(resolve,nextAt-Date.now()));
+     if(!alive())break;
+     const display=rows[i];display.replaceChildren(paragraph('Consultazione Airportia in corso…'));
+     const payload={force};if(explicit)Object.assign(payload,{segment:i,revision});
+     const r=await api(base+'/flight-status',{method:'POST',body:JSON.stringify(payload)});
+     if(!alive())break;
+     show(display,r);
+     if(r.checked_at&&!r.cached)nextAt=Date.now()+10000;
+     if(r.state==='Servizio temporaneamente non disponibile'||r.state==='Attendere prima di un nuovo controllo')break;
+    }
+   }catch(e){if(alive())msg('Verifica non riuscita. Ricarica la prenotazione o consulta la compagnia.',true)}
+   finally{setBusy(false)}
+  }
+  function editSegments(){
+   if(running||!alive())return;
+   const editor=el('div'),entries=[];let saving=false;
+   const {box:eb,back:ex}=modal('Gestisci tratte aeree');ex.setAttribute('data-personal-modal','');
+   const add=(value={})=>{
+    if(entries.length>=8)return;
+    const fields={};const row=el('div',{class:'travel-card'});
+    for(const [k,l] of [['number','Numero volo'],['date','Data locale di partenza'],['from','Partenza (IATA)'],['to','Arrivo (IATA)']]){
+     const c=input(k,'',value[k]||'');if(k==='date')c.type='date';fields[k]=c;row.append(field(l,c));
+    }
+    const entry={row,fields};entries.push(entry);
+    row.append(btn('Elimina tratta',()=>{if(!saving){entries.splice(entries.indexOf(entry),1);row.remove()}},'small'));editor.append(row);
+   };
+   if(explicit)b.flight_segments.forEach(add);else add();
+   const addBtn=btn('+ Aggiungi tratta',()=>{if(!saving)add()},'small');
+   const submit=btn('Salva tratte',async()=>{
+    if(saving||!alive())return;
+    if(!entries.length&&!confirm('Rimuovere tutte le tratte di Flight Status? I documenti restano invariati.'))return;
+    saving=true;submit.disabled=true;
+    try{
+     const segments=entries.map(e=>Object.fromEntries(Object.entries(e.fields).map(([k,c])=>[k,c.value.trim()])));
+     const result=await api(base+'/flight-segments',{method:'POST',body:JSON.stringify({revision,segments})});
+     if(!alive()||!ex.isConnected)return;
+     trip={...trip,...result};ex.remove();back.remove();render(main);msg('Tratte salvate. Riapri la prenotazione.');
+    }catch(e){if(ex.isConnected)report(e)}
+    finally{saving=false;submit.disabled=false}
+   },'primary');
+   eb.append(paragraph('Inserisci i dati di ogni singolo volo come riportati nella conferma. La data è quella locale dell’aeroporto di partenza. I PDF originali non cambiano.'),editor,addBtn,submit);
+  }
+  for(const [i,f] of segments.entries()){
+   const display=el('div',{class:'travel-card'},[paragraph('Stato non ancora consultato')]);rows.push(display);
+   const button=btn('Controlla volo',()=>check([i],true),'small');buttons.push(button);
+   cards.append(card(f?f.number+' · '+f.from+' → '+f.to:'Stato volo',f?paragraph(dayFmt(f.date)):null,display,button));
+  }
+  const all=btn('Controlla tutti i voli',()=>check(segments.map((_,i)=>i),true),'primary');buttons.push(all);
+  const manage=btn('Gestisci tratte',editSegments,'primary');buttons.push(manage);
   box.append(paragraph([b.type,b.date,b.place].filter(Boolean).join(' · ')),lines(b.lines),lines(b.fields),
    toolbar(...bookingDocs(b).map(a=>doc(a.file,a.label)),safeLink(b.source,'Fonte prenotazione')),
-   paragraph('Stato del volo · Sperimentale'),display,button,safeLink('https://www.airportia.com/','Fonte: Airportia'),
-   paragraph('Dati indicativi; conferma sempre con la compagnia o l’aeroporto. Nessun controllo in background. La consultazione invia solo numero del volo, data e, se necessario, aeroporto.'));
-  check(false);
+   paragraph('Stato dei voli · Sperimentale'),manage,cards,segments.length>1?all:null,safeLink('https://www.airportia.com/','Fonte: Airportia'),
+   paragraph('Dati indicativi. Verifica con la compagnia. Nessun controllo in background; le tratte vengono consultate in sequenza soltanto mentre il dettaglio è aperto.'));
+  if(segments.length)check(segments.map((_,i)=>i),false);
  }
  function bookingEdit(b,index){
   const {box,back}=modal('Prenotazione');back.setAttribute('data-personal-modal','');

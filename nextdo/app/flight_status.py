@@ -173,9 +173,48 @@ class Lookup:
    self.cache[key]=(time.monotonic(),result)
   return result
 
-def register(app,db,load,read_archive,web_owner,mobile_owner):
+def is_flight(b):
+ kind=b.get("kind")
+ return kind=="flight" or not kind and bool(re.fullmatch(r"volo|voli|flight|volo aereo",str(b.get("type","")).strip(),re.I))
+
+def segment_cases(rows):
+ if not isinstance(rows,list) or len(rows)>8:raise HTTPException(400,"Massimo 8 tratte per prenotazione")
+ normalized=[];seen=set()
+ for row in rows:
+  if not isinstance(row,dict) or set(row)!={"number","date","from","to"} or not all(isinstance(v,str) for v in row.values()):raise HTTPException(400,"Tratta non valida")
+  n,d,o,a=code(row["number"]),local_day(row["date"]),code(row["from"]),code(row["to"])
+  if not re.fullmatch(r"[A-Z0-9]{2}[0-9]{1,4}[A-Z]?",n) or not d or not re.fullmatch(r"[A-Z]{3}",o) or not re.fullmatch(r"[A-Z]{3}",a) or o==a:raise HTTPException(400,"Indicare numero, data locale e codici IATA validi e distinti")
+  case=(n,d,o,a)
+  if case in seen:raise HTTPException(400,"Tratta duplicata")
+  seen.add(case);normalized.append(dict(zip(("number","date","from","to"),case)))
+ return normalized
+
+def select_case(booking,index):
+ if "flight_segments" not in booking:
+  if index is not None:raise HTTPException(409,"Ricaricare le tratte")
+  return identity(booking)
+ rows=segment_cases(booking["flight_segments"])
+ if type(index) is not int or index<0 or index>=len(rows):raise HTTPException(409,"Selezionare una tratta valida")
+ return tuple(rows[index][k] for k in ("number","date","from","to"))
+
+def register(app,db,load,read_archive,save,template_catalog,web_owner,mobile_owner):
  lookup=Lookup()
  def attach(prefix,authorize):
+  @app.post(prefix+"/trips/{tid}/bookings/{bid}/flight-segments")
+  def edit_segments(tid:str,bid:str,req:APIRequest,b:dict):
+   owner=authorize(req)
+   if set(b)!={"revision","segments"} or type(b["revision"]) is not int:raise HTTPException(400,"Richiesta non valida")
+   rows=segment_cases(b["segments"])
+   with db() as c:
+    row=load(c,owner,tid)
+    if row["revision"]!=b["revision"]:raise HTTPException(409,"Il viaggio è stato modificato: ricaricare")
+    m,state,files=read_archive(row["archive"])
+    booking=next((x for x in m.get("bookings",[]) if x.get("id")==bid),None)
+    if booking is None:raise HTTPException(404,"Prenotazione non trovata")
+    if not is_flight(booking):raise HTTPException(400,"Prenotazione non aerea")
+    booking["flight_segments"]=rows
+    revision=save(c,owner,m,state,files,b["revision"])
+    return {"revision":revision,"manifest":m,"state":state,"templates":template_catalog(c,owner)}
   @app.post(prefix+"/trips/{tid}/bookings/{bid}/flight-status")
   def check(tid:str,bid:str,req:APIRequest,b:dict):
    owner=authorize(req)
@@ -183,9 +222,11 @@ def register(app,db,load,read_archive,web_owner,mobile_owner):
     row=load(c,owner,tid);m,_,_=read_archive(row["archive"])
     booking=next((x for x in m.get("bookings",[]) if x.get("id")==bid),None)
    if booking is None:raise HTTPException(404,"Prenotazione non trovata")
-   case=identity(booking)
+   if set(b)-{"force","segment","revision"} or type(b.get("force",False)) is not bool:raise HTTPException(400,"Richiesta non valida")
+   if not is_flight(booking):raise HTTPException(400,"Prenotazione non aerea")
+   if "flight_segments" in booking and (type(b.get("revision")) is not int or b["revision"]!=row["revision"]):raise HTTPException(409,"Ricaricare le tratte")
+   case=select_case(booking,b.get("segment"))
    if not case:return {"state":"Dati volo da completare","source":None,"needs_identity":True}
-   if set(b)-{"force"} or type(b.get("force",False)) is not bool:raise HTTPException(400,"Richiesta non valida")
    # Avoid remote requests well outside the advertised -7 days / tomorrow window.
    offset=(date.fromisoformat(case[1])-datetime.now(UTC).date()).days
    if offset>2 or offset< -8:return {"state":"Stato non disponibile per questa data","source":None}

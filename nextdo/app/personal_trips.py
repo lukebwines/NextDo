@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 from argon2.exceptions import VerificationError
 from . import personal_travel_tools as tools
-from . import travel_mobile, travel_timeline, personal_appearance
+from . import travel_mobile, travel_timeline, personal_appearance, flight_status
 
 LIMIT=32*1024*1024
 MAX_EXPANDED=120*1024*1024
@@ -90,6 +90,9 @@ def validate_manifest(m,available):
  bookings=rows("bookings",160);bids=ids(bookings)
  for b in bookings:
   doc(b.get("doc"));pairs(b.get("lines",[]))
+  if "flight_segments" in b:
+   if not flight_status.is_flight(b):fail("Tratte associate a prenotazione non aerea")
+   b["flight_segments"]=flight_status.segment_cases(b["flight_segments"])
   attached=b.get("attachments",[])
   if not isinstance(attached,list) or len(attached)>30:fail("Allegati non validi")
   label=b.get("doc_label")
